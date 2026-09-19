@@ -80,6 +80,7 @@ export const ACTIONS = {
 	applyPatch: 'Apply Patch at Proper Base',
 	findBase: 'Show Candidate Bases',
 	openLog: 'Show Details',
+	checkout: 'Check Out',
 	enableGraphMenu: 'How to Enable the Graph Menu',
 } as const;
 

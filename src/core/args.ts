@@ -71,8 +71,16 @@ export function resolveMenuArgs(args: readonly unknown[]): ResolvedMenuArgs {
 			return;
 		}
 		if (typeof value === 'string') {
+			const text = value.trim();
 			if (isShaLike(value)) {
 				addCommit(value);
+			} else if (text.startsWith('refs/heads/')) {
+				// A bare full branch ref is unambiguous - a bare short name is not
+				// (it could be a commit-ish, a path, a label), so it is ignored.
+				const branch = branchFromValue(text);
+				if (branch && !branchCandidates.includes(branch)) {
+					branchCandidates.push(branch);
+				}
 			}
 			return;
 		}
@@ -137,16 +145,24 @@ export function resolveMenuArgs(args: readonly unknown[]): ResolvedMenuArgs {
 
 		if (!branchCandidates.length) {
 			for (const key of BRANCH_KEYS) {
-				const candidate = record[key];
-				if (looksLikeBranch(candidate) && !isShaLike(candidate)) {
+				const candidate = branchFromValue(record[key]);
+				if (candidate) {
 					branchCandidates.push(candidate);
 					break;
 				}
 			}
 		}
+		if (!branchCandidates.length) {
+			// `id` is ambiguous: a provider id ('git'), a commit sha, or - in the
+			// Source Control Graph - the ref name of a branch row.
+			const fromId = branchFromId(record);
+			if (fromId) {
+				branchCandidates.push(fromId);
+			}
+		}
 
 		// Nested objects worth a look (historyItem, commit, repository, ...).
-		for (const key of ['historyItem', 'commit', 'item', 'repository', 'provider', 'sourceControl', 'node']) {
+		for (const key of ['historyItem', 'historyItemRef', 'commit', 'item', 'repository', 'provider', 'sourceControl', 'node']) {
 			if (record[key] && typeof record[key] === 'object') {
 				visit(record[key], depth + 1);
 			}
@@ -158,6 +174,47 @@ export function resolveMenuArgs(args: readonly unknown[]): ResolvedMenuArgs {
 	}
 
 	return { commitRefs, repoPath, branchRef: branchCandidates[0] };
+}
+
+/**
+ * A branch name from a menu argument. The Source Control Graph hands a ref row
+ * over as `{id: 'refs/heads/main'}`, other callers use plain names - and a
+ * commit row uses `id` for a sha, which must not be mistaken for a branch.
+ */
+export function branchFromValue(value: unknown): string | undefined {
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+	let name = value.trim();
+	if (!name || name.includes('://')) {
+		return undefined;
+	}
+	if (name.startsWith('refs/heads/')) {
+		name = name.slice('refs/heads/'.length);
+	} else if (name.startsWith('refs/')) {
+		// Remote-tracking refs, tags and recovery refs are not local branches.
+		return undefined;
+	}
+	if (isShaLike(name) || !looksLikeBranch(name)) {
+		return undefined;
+	}
+	return name;
+}
+
+function branchFromId(record: Record<string, unknown>): string | undefined {
+	const raw = record.id;
+	if (typeof raw !== 'string') {
+		return undefined;
+	}
+	const value = raw.trim();
+	if (value.startsWith('refs/heads/')) {
+		return branchFromValue(value);
+	}
+	// A plain name is only trusted when the object says it is a branch row.
+	if (record.kind === 'branch' || record.type === 'branch' || record.refType === 'branch') {
+		return branchFromValue(value);
+	}
+	return undefined;
 }
 
 /** Shape of this extension's own tree nodes (see `src/vscode/treeView.ts`). */

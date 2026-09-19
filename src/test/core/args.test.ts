@@ -5,7 +5,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { isGecoTreeNode, isShaLike, looksLikeBranch, resolveMenuArgs } from '../../core/args';
+import { branchFromValue, isGecoTreeNode, isShaLike, looksLikeBranch, resolveMenuArgs } from '../../core/args';
 
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
@@ -138,6 +138,48 @@ describe('args - resolveMenuArgs', () => {
 		const resolved = resolveMenuArgs([provider, { id: SHA, label: 'v0.2' }, { id: 'f'.repeat(40) }]);
 		assert.equal(resolved.repoPath, '/work/repo');
 		assert.equal(resolved.commitRefs.length, 2);
-		assert.equal(resolved.branchRef, undefined);
+		assert.equal(resolved.branchRef, undefined, 'the provider id "git" is not a branch name');
+	});
+
+	it('reads a branch row of the Source Control Graph', () => {
+		const provider = { id: 'git', rootUri: { scheme: 'file', fsPath: '/work/repo', path: '/work/repo' } };
+		assert.equal(resolveMenuArgs([{ id: 'refs/heads/main', name: 'main', kind: 'branch' }]).branchRef, 'main');
+		assert.equal(resolveMenuArgs([{ id: 'refs/heads/feature/new-button' }]).branchRef, 'feature/new-button');
+		assert.equal(resolveMenuArgs([provider, { id: 'refs/heads/main', name: 'main' }]).branchRef, 'main');
+		assert.equal(resolveMenuArgs([{ id: 'main', kind: 'branch' }]).branchRef, 'main');
+		assert.equal(resolveMenuArgs([{ name: 'main', kind: 1 }]).branchRef, 'main');
+	});
+
+	it('accepts a bare full branch ref, but not a bare name', () => {
+		assert.equal(resolveMenuArgs(['refs/heads/main']).branchRef, 'main');
+		assert.equal(resolveMenuArgs(['main']).branchRef, undefined, 'a bare name could be anything');
+		assert.equal(resolveMenuArgs(['refs/tags/v1']).branchRef, undefined);
+	});
+
+	it('does not read a branch out of anything else', () => {
+		assert.equal(resolveMenuArgs([{ id: SHA }]).branchRef, undefined, 'a commit row is not a branch');
+		assert.equal(resolveMenuArgs([{ id: 'refs/remotes/origin/main' }]).branchRef, undefined);
+		assert.equal(resolveMenuArgs([{ id: 'refs/tags/v1.0' }]).branchRef, undefined);
+		assert.equal(resolveMenuArgs([{ id: 'refs/geco/backup/main' }]).branchRef, undefined);
+		assert.equal(resolveMenuArgs([{ id: 'main' }]).branchRef, undefined, 'a bare id is ambiguous');
+		assert.equal(resolveMenuArgs([{ id: 'file:///work/repo' }]).branchRef, undefined);
+		// A tag row still carries a plain `name`; callers check it against the
+		// branch list before using it (see the branch flows).
+		assert.equal(resolveMenuArgs([{ id: 'refs/tags/v1.0', name: 'v1.0' }]).branchRef, 'v1.0');
+	});
+});
+
+describe('args - branchFromValue', () => {
+	it('accepts branch names and full branch refs', () => {
+		assert.equal(branchFromValue('main'), 'main');
+		assert.equal(branchFromValue('feature/new-button'), 'feature/new-button');
+		assert.equal(branchFromValue('refs/heads/main'), 'main');
+		assert.equal(branchFromValue('  refs/heads/topic  '), 'topic');
+	});
+
+	it('rejects everything that is not a local branch', () => {
+		for (const value of [undefined, null, 42, {}, [], '', '   ', SHA, 'refs/tags/v1', 'refs/remotes/origin/main', 'file:///x', 'a b', '-bad', 'a..b']) {
+			assert.equal(branchFromValue(value), undefined, `${JSON.stringify(value)} should not look like a branch`);
+		}
 	});
 });

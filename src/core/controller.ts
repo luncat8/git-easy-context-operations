@@ -21,6 +21,15 @@ import {
 	type RewordResult,
 } from './reword';
 import { fastForwardBranch, resolveBranch, type FastForwardResult } from './fastForward';
+import {
+	createBranch as createBranchCore,
+	checkoutBranch as checkoutBranchCore,
+	deleteBranch as deleteBranchCore,
+	inspectBranchDeletion,
+	renameBranch as renameBranchCore,
+	suggestBranchName,
+	type RenameBranchOptions,
+} from './branch';
 import { forcePush, planForcePush, type ForcePushResult } from './forcePush';
 import {
 	applyPatch,
@@ -731,6 +740,311 @@ export class Controller {
 		});
 	}
 
+	// ------------------------------------------------------- branch operations
+
+	/**
+	 * "Create Branch" - from a commit row in the Source Control Graph the branch
+	 * starts at that commit, from a branch row at that branch's tip, and from the
+	 * palette at HEAD.
+	 */
+	async createBranch(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Create branch', async () => {
+			const ctx = this.contextFor(cwd);
+			const start = await this.resolveBranchStartPoint(ctx, args);
+			const info = start ? await ctx.git.commitInfo(start) : undefined;
+			const name = await this.ui.input({
+				title: 'Create branch',
+				prompt: info ? `New branch at ${info.shortSha} - "${info.subject}"` : 'New branch at HEAD',
+				value: info ? suggestBranchName(info.subject) : 'new-branch',
+				placeholder: 'feature/new-button',
+			});
+			if (name === undefined) {
+				return;
+			}
+			const trimmed = name.trim();
+			if (!trimmed) {
+				await this.ui.message('warn', 'Create branch: a branch name is required.');
+				return;
+			}
+			const result = await this.ui.withProgress(`Creating branch ${trimmed}`, () =>
+				createBranchCore(ctx, { name: trimmed, startPoint: start }),
+			);
+			this.ui.log([`Created branch ${result.name} at ${shorten(result.sha)}`, ...result.notes.map((note) => `  ${note}`)].join('\n'));
+			const chosen = await this.ui.ask(
+				`Branch "${result.name}" now points at ${shorten(result.sha)}.`,
+				{ actions: [ACTIONS.checkout, ACTIONS.undo], detail: result.notes.join('\n') || undefined },
+			);
+			if (chosen === ACTIONS.checkout) {
+				// An object, not a bare string: the resolver reads branch names out of
+				// menu arguments, and a plain string would be taken for a commit.
+				await this.checkoutBranch(cwd, [{ branch: result.name }]);
+			} else if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	/** "Check Out Branch" - also offered as a follow-up action after creating one. */
+	async checkoutBranch(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Check out branch', async () => {
+			const ctx = this.contextFor(cwd);
+			const branch = await this.resolveBranchArg(ctx, args, 'Check out which branch?');
+			if (!branch) {
+				return;
+			}
+			const result = await this.ui.withProgress(`Checking out ${branch}`, () => checkoutBranchCore(ctx, branch));
+			this.ui.log(`Checked out ${result.to}${result.from ? ` (was ${result.from})` : ''}`);
+			const chosen = await this.ui.ask(`"${result.to}" is checked out.`, { actions: [ACTIONS.undo] });
+			if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	/**
+	 * "Rename Branch" - the local rename is free of charge; when the branch
+	 * tracks a remote branch the user decides what happens to it.
+	 */
+	async renameBranch(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Rename branch', async () => {
+			const ctx = this.contextFor(cwd);
+			const branch = await this.resolveBranchArg(ctx, args, 'Rename which branch?');
+			if (!branch) {
+				return;
+			}
+			const typed = await this.ui.input({
+				title: `Rename branch ${branch}`,
+				prompt: `New name for "${branch}"`,
+				value: branch,
+				placeholder: 'feature/new-name',
+			});
+			if (typed === undefined) {
+				return;
+			}
+			const to = typed.trim();
+			if (!to) {
+				await this.ui.message('warn', 'Rename branch: a new name is required.');
+				return;
+			}
+			if (to === branch) {
+				await this.ui.message('info', `"${branch}" is already called that.`);
+				return;
+			}
+			if (await ctx.git.refExists(`refs/heads/${to}`)) {
+				const overwrite = await this.ui.confirm(`A branch called "${to}" already exists. Overwrite it?`, {
+					confirmLabel: 'Overwrite',
+					cancelLabel: 'Cancel',
+					destructive: true,
+					detail: `The commits it points at stay reachable through the journal and the reflog.`,
+				});
+				if (!overwrite) {
+					this.ui.log(`Rename branch cancelled: "${to}" already exists.`);
+					return;
+				}
+			}
+
+			const upstreamInfo = await ctx.git.upstream(branch);
+			const upstream = upstreamInfo ? `${upstreamInfo.remote}/${upstreamInfo.branch}` : undefined;
+			let remote: RenameBranchOptions['remote'] = 'keep';
+			if (upstreamInfo) {
+				const choice = await this.ui.pick<RenameBranchOptions['remote']>(
+					[
+						{ label: `Leave ${upstream} alone`, description: `"${to}" keeps tracking it`, value: 'keep' },
+						{ label: `Rename it on ${upstreamInfo.remote} too`, description: `push "${to}", delete ${upstream}`, value: 'rename' },
+						{ label: `Push "${to}", keep ${upstream}`, description: 'both names exist on the remote', value: 'push' },
+					],
+					{ title: `${branch} tracks ${upstream}`, placeholder: 'What should happen on the remote?' },
+				);
+				if (choice === undefined) {
+					return;
+				}
+				remote = choice;
+				if (remote !== 'keep' && this.settings.confirmDestructiveOperations) {
+					const confirmed = await this.ui.confirm(`Push the rename to ${upstreamInfo.remote}?`, {
+						confirmLabel: remote === 'rename' ? 'Rename on the Remote' : 'Push New Name',
+						cancelLabel: 'Local Only',
+						destructive: remote === 'rename',
+						detail: [
+							remote === 'rename'
+								? `Creates ${upstreamInfo.remote}/${to} and deletes ${upstream}.`
+								: `Creates ${upstreamInfo.remote}/${to}; ${upstream} stays where it is.`,
+							'Anyone else working from the old remote branch has to fetch and re-point their local copy.',
+						].join('\n'),
+					});
+					if (!confirmed) {
+						remote = 'keep';
+						this.ui.log(`Renaming "${branch}" locally only - the remote branch was left alone.`);
+					}
+				}
+			}
+
+			const result = await this.ui.withProgress(`Renaming ${branch}`, () => renameBranchCore(ctx, { from: branch, to, remote, force: true }));
+			this.ui.log(
+				[
+					`Renamed branch ${result.from} -> ${result.to} (${shorten(result.sha)})`,
+					result.upstreamAfter ? `  tracking ${result.upstreamAfter}` : '',
+					...result.notes.map((note) => `  ${note}`),
+				]
+					.filter(Boolean)
+					.join('\n'),
+			);
+			const chosen = await this.ui.ask(`"${result.from}" is now called "${result.to}".`, {
+				actions: [ACTIONS.undo],
+				detail: result.notes.join('\n') || undefined,
+			});
+			if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	/** "Delete Branch" - refuses the checked-out branch and unmerged work. */
+	async deleteBranch(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Delete branch', async () => {
+			const ctx = this.contextFor(cwd);
+			const branch = await this.resolveBranchArg(ctx, args, 'Delete which branch?');
+			if (!branch) {
+				return;
+			}
+			const inspection = await inspectBranchDeletion(ctx, branch);
+			if (inspection.isCurrent) {
+				await this.ui.message('error', `"${branch}" is checked out, so it cannot be deleted.`, 'Check out another branch first.');
+				return;
+			}
+
+			let deleteRemote = false;
+			if (inspection.upstream) {
+				const scope = await this.ui.pick<boolean>(
+					[
+						{ label: 'Delete the local branch only', description: `${inspection.upstream} stays on the remote`, value: false },
+						{ label: 'Delete the local and the remote branch', description: `${inspection.upstream} is deleted as well`, value: true },
+					],
+					{ title: `Delete ${branch}`, placeholder: `${branch} tracks ${inspection.upstream}` },
+				);
+				if (scope === undefined) {
+					return;
+				}
+				deleteRemote = scope;
+			}
+
+			if (this.settings.confirmDestructiveOperations) {
+				const confirmed = await this.ui.confirm(
+					deleteRemote && inspection.upstream ? `Delete "${branch}" locally and ${inspection.upstream} on the remote?` : `Delete branch "${branch}"?`,
+					{
+						confirmLabel: deleteRemote ? 'Delete Everywhere' : 'Delete Branch',
+						cancelLabel: 'Keep It',
+						destructive: true,
+						detail: [
+							`"${branch}" points at ${shorten(inspection.sha)}.`,
+							inspection.upstream ? `It tracks ${inspection.upstream}.` : 'It has no remote branch.',
+							inspection.unmergedCommits > 0
+								? `${inspection.unmergedCommits} commit(s) exist only here: ${inspection.unmerged.map((c) => `${shorten(c.sha)} ${c.subject}`).join('; ')}`
+								: 'Every commit on it is reachable from elsewhere.',
+							'Undo recreates the branch (and pushes it back if the remote copy was deleted).',
+						].join('\n'),
+					},
+				);
+				if (!confirmed) {
+					this.ui.log(`Delete branch cancelled: "${branch}" was kept.`);
+					return;
+				}
+			}
+
+			const result = await this.deleteBranchWithForcePrompt(ctx, branch, deleteRemote);
+			if (!result) {
+				return;
+			}
+			this.ui.log(
+				[
+					`Deleted branch ${result.name} (${shorten(result.sha)})${result.forced ? ' with force' : ''}`,
+					result.deletedRemoteBranch ? `  also deleted ${result.deletedRemoteBranch}` : '',
+					...result.notes.map((note) => `  ${note}`),
+				]
+					.filter(Boolean)
+					.join('\n'),
+			);
+			const chosen = await this.ui.ask(
+				`Deleted branch "${result.name}"${result.deletedRemoteBranch ? ` and ${result.deletedRemoteBranch}` : ''}.`,
+				{ actions: [ACTIONS.undo], detail: result.notes.join('\n') || undefined },
+			);
+			if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	/**
+	 * Git refuses to delete a branch with unmerged commits; ask explicitly before
+	 * forcing, because that is the one case where commits really go away.
+	 */
+	private async deleteBranchWithForcePrompt(
+		ctx: RepoContext,
+		branch: string,
+		deleteRemote: boolean,
+	): Promise<import('./branch').DeleteBranchResult | undefined> {
+		try {
+			return await this.ui.withProgress(`Deleting ${branch}`, () => deleteBranchCore(ctx, { name: branch, deleteRemote }));
+		} catch (error) {
+			if (!isGecoError(error) || error.code !== 'unmerged-branch') {
+				throw error;
+			}
+			const insist = await this.ui.confirm(`${error.message} Delete it anyway?`, {
+				confirmLabel: 'Delete Anyway',
+				cancelLabel: 'Keep It',
+				destructive: true,
+				detail: [error.detail ?? '', 'The commits stay in the journal and the reflog for a while - Undo brings the branch back.'].filter(Boolean).join('\n'),
+			});
+			if (!insist) {
+				this.ui.log(`Kept "${branch}": it has unmerged commits.`);
+				await this.ui.message('info', `"${branch}" was kept.`);
+				return undefined;
+			}
+			return this.ui.withProgress(`Deleting ${branch}`, () => deleteBranchCore(ctx, { name: branch, deleteRemote, force: true }));
+		}
+	}
+
+	/** The branch a menu argument points at, or a picker when there is none. */
+	private async resolveBranchArg(ctx: RepoContext, args: readonly unknown[], title: string): Promise<string | undefined> {
+		const resolved = resolveMenuArgs(args);
+		const fromArgs = resolved.branchRef;
+		if (fromArgs && (await ctx.git.branchExists(fromArgs))) {
+			return fromArgs;
+		}
+		if (fromArgs) {
+			this.ui.log(`Ignoring "${fromArgs}" from the menu arguments: no such branch in this repository.`);
+		}
+		const branches = await ctx.git.branches();
+		if (branches.length === 0) {
+			throw new GecoError('nothing-to-do', 'This repository has no branches yet.');
+		}
+		const current = await ctx.git.headBranch();
+		const items = branches
+			.map((branch) => ({
+				label: branch.name,
+				description: branch.isHead ? 'checked out' : branch.upstream ?? undefined,
+				detail: shorten(branch.sha),
+				value: branch.name,
+			}))
+			.sort((a, b) => Number(b.label === current) - Number(a.label === current) || a.label.localeCompare(b.label));
+		return this.ui.pick(items, { title, placeholder: current ? `Current branch: ${current}` : 'Pick a branch' });
+	}
+
+	/** Where a new branch should start: the row the menu was opened on, else HEAD. */
+	private async resolveBranchStartPoint(ctx: RepoContext, args: readonly unknown[]): Promise<string | undefined> {
+		const resolved = resolveMenuArgs(args);
+		if (resolved.branchRef && (await ctx.git.branchExists(resolved.branchRef))) {
+			return resolved.branchRef;
+		}
+		for (const candidate of resolved.commitRefs) {
+			const sha = await ctx.git.tryRun(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`]);
+			if (sha) {
+				return sha;
+			}
+			this.ui.log(`Ignoring "${candidate}" from the menu arguments: not a commit in this repository.`);
+		}
+		return (await ctx.git.headBranch()) ?? 'HEAD';
+	}
+
 	async undoLastOperation(cwd: string): Promise<void> {
 		await this.guard('Undo', async () => {
 			const ctx = this.contextFor(cwd);
@@ -842,9 +1156,10 @@ export class Controller {
 			'  - Timeline view: right-click a commit of the selected file.',
 			'  - Command Palette: "Git Easy Ops: ..." (asks for the commit when nothing is selected).',
 			'',
-			'The commit context menu of the built-in *Source Control Graph* is different:',
-			'VS Code only renders "scm/historyItem/context" for extensions it was told to',
-			'grant the proposed API contribSourceControlHistoryItemMenu to, and the',
+			'The commit and branch context menus of the built-in *Source Control Graph*',
+			'are different: VS Code only renders "scm/historyItem/context" (commit rows)',
+			'and "scm/historyItemRef/context" (branch/ref rows) for extensions it was told',
+			'to grant the proposed API contribSourceControlHistoryItemMenu to, and the',
 			'Marketplace refuses manifests that ask for it. So it ships as a second build:',
 			'',
 			'  1. npm run package:graph              # builds <name>-<version>+graph.vsix',
@@ -857,9 +1172,12 @@ export class Controller {
 			'',
 			'Step 3 is what "Git Easy Ops: Enable Source Control Graph Menu..." does for',
 			'you - it also reports which of the two halves is still missing.',
+			'',
+			'In the graph, commit rows then offer reword / fast-forward / patch / create',
+			'branch, and the branch rows offer create / rename / check out / delete branch.',
 		].join('\n');
 		this.ui.log(body);
-		await this.ui.message('info', 'Git Easy Ops menus: the sidebar view, Timeline, SCM title and palette work everywhere. The Source Control Graph commit menu needs the graph build - see the output log.');
+		await this.ui.message('info', 'Git Easy Ops menus: the sidebar view, Timeline, SCM title and palette work everywhere. The Source Control Graph commit and branch menus need the graph build - see the output log.');
 	}
 
 	/**
@@ -1053,6 +1371,13 @@ function describeUndo(entry: JournalEntry): string {
 			const parts = entry.undo.refs.map((r) => `${r.ref} -> ${shorten(r.restoreTo)}`);
 			if (entry.undo.deleteBranches?.length) {
 				parts.push(`delete branch(es) ${entry.undo.deleteBranches.join(', ')}`);
+			}
+			for (const remoteRef of entry.undo.remoteRefs ?? []) {
+				parts.push(
+					remoteRef.action === 'delete'
+						? `delete ${remoteRef.remote}/${remoteRef.branch}`
+						: `${remoteRef.remote}/${remoteRef.branch} -> ${shorten(remoteRef.restoreTo ?? '')}`,
+				);
 			}
 			if (entry.undo.worktrees?.length) {
 				parts.push(`remove worktree(s) ${entry.undo.worktrees.map((w) => w.path).join(', ')}`);

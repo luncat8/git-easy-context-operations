@@ -27,6 +27,16 @@ First release.
   match > clean apply > 3-way merge > 3-way with conflicts) and applies the patch
   where it belongs: on a new branch, in a separate worktree, or on the current
   branch. Mailbox patches go through `git am -3` so the message is kept.
+- **Branch operations** - **Create Branch...** (starts at the commit or branch the
+  menu was opened on, with a name suggested from the commit subject),
+  **Rename Branch...** (and, when the branch tracks a remote one, a choice: leave
+  it alone, rename it on the remote too, or just push the new name),
+  **Delete Branch...** (refuses the checked-out branch, refuses commits that exist
+  nowhere else until you say "Delete anyway", and can delete the remote branch as
+  well) and **Check Out Branch...**. Each is a single journal entry, so **Undo**
+  restores the name, the tip, the tracking configuration and a deleted remote
+  branch in one click - and a remote branch we pushed is only removed again while
+  it still points at the sha we left behind (`--force-with-lease`).
 - **Safety net** - hidden recovery refs under `refs/geco/`, backup branches, and
   a journal in `.git/geco/journal.json`. **Undo Last Operation** rolls operations
   back newest-first (refs, branches, worktrees, checked-out branch, remote
@@ -38,10 +48,12 @@ First release.
   Menus?** helpers.
 - 13 `geco.*` settings and an output channel that logs every operation with the
   git commands it ran.
-- **Source Control Graph commit menu** as a separate build: `npm run package:graph`
+- **Source Control Graph commit *and branch* menus** as a separate build: `npm run package:graph`
   produces `<name>-<version>+graph.vsix` with `enabledApiProposals` and the
   `scm/historyItem/context`, `scm/historyItemRef/context` and `scm/history/title`
-  contributions (VS Code still gates that menu behind the proposed API
+  contributions - commit rows get reword / fast-forward / patch / create branch,
+  ref (branch) rows get create / rename / check out / delete branch, fast-forward,
+  backup and force push (VS Code still gates those menus behind the proposed API
   `contribSourceControlHistoryItemMenu`). **Git Easy Ops: Enable Source Control
   Graph Menu...** writes the required `"enable-proposed-api"` entry into VS Code's
   `argv.json` - comments and other settings preserved, backup alongside - and
@@ -49,6 +61,6 @@ First release.
 - Stable per-commit menus without any flag: the "Git Easy Ops" view, Timeline
   commit rows (`timelineItem == git:file:commit`), `scm/title`,
   `scm/sourceControl`, `scm/repository` and the Command Palette.
-- Test suite: 306 headless tests that build throw-away git repositories (including
+- Test suite: 377 headless tests that build throw-away git repositories (including
   bare remotes and linked worktrees) and drive the interactive flows through a
   scripted fake UI, plus a VS Code integration smoke test.

@@ -102,6 +102,30 @@
         "icon": "$(save)"
       },
       {
+        "command": "geco.createBranch",
+        "title": "Create Branch...",
+        "category": "Git Easy Ops",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "geco.renameBranch",
+        "title": "Rename Branch...",
+        "category": "Git Easy Ops",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "geco.deleteBranch",
+        "title": "Delete Branch...",
+        "category": "Git Easy Ops",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "geco.checkoutBranch",
+        "title": "Check Out Branch...",
+        "category": "Git Easy Ops",
+        "icon": "$(check)"
+      },
+      {
         "command": "geco.undoLastOperation",
         "title": "Undo Last Operation",
         "category": "Git Easy Ops",
@@ -233,6 +257,10 @@
           "group": "2_branch@3"
         },
         {
+          "command": "geco.createBranch",
+          "group": "2_branch@4"
+        },
+        {
           "command": "geco.forcePush",
           "group": "3_remote@1"
         },
@@ -259,16 +287,36 @@
       ],
       "geco.branchSubmenu": [
         {
+          "command": "geco.createBranch",
+          "group": "1_branch@1"
+        },
+        {
+          "command": "geco.renameBranch",
+          "group": "1_branch@2"
+        },
+        {
+          "command": "geco.checkoutBranch",
+          "group": "1_branch@3"
+        },
+        {
+          "command": "geco.deleteBranch",
+          "group": "1_branch@4"
+        },
+        {
+          "command": "geco.fastForwardBranch",
+          "group": "2_move@1"
+        },
+        {
           "command": "geco.createBackupBranch",
-          "group": "1_geco@1"
+          "group": "2_move@2"
         },
         {
           "command": "geco.forcePush",
-          "group": "2_geco@1"
+          "group": "3_remote@1"
         },
         {
           "command": "geco.forcePushHard",
-          "group": "2_geco@2"
+          "group": "3_remote@2"
         }
       ],
       "scm/title": [
