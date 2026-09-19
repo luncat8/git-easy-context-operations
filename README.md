@@ -76,12 +76,41 @@ grants the proposals listed in `enabledApiProposals`.
 
 ## Install
 
+The built artifacts are **committed to this repository**, so a clone is enough -
+no toolchain needed:
+
+```bash
+# the graph flavour: commit AND branch context menus in the built-in Source Control Graph
+code   --install-extension git-easy-context-operations-0.1.0+graph.vsix
+codium --install-extension git-easy-context-operations-0.1.0+graph.vsix
+```
+
+Then allow the proposal (once) - inside the editor run **Git Easy Ops: Enable
+Source Control Graph Menu...**, or add this to `~/.vscode/argv.json`
+(`~/.vscode-oss/argv.json` for VSCodium) and restart:
+
+```json
+{ "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
+```
+
+`git-easy-context-operations-0.1.0.vsix` (no `+graph`) is the Marketplace-safe
+build: same commands, but they appear in the sidebar view, Timeline, the Source
+Control title/repository menus and the palette instead of the graph rows.
+**Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
+
+Building them yourself:
+
 ```bash
 npm install
 npm run package         # publishable build: sidebar view, Timeline, SCM menus, palette
-npm run package:graph   # + the Source Control Graph commit context menu
-code --install-extension git-easy-context-operations-0.1.0+graph.vsix
+npm run package:graph   # + the Source Control Graph commit/branch context menus
 ```
+
+`dist/extension.js` (the bundle both `.vsix` files carry) is tracked as well, so
+you can also drop the repository folder straight into your extensions directory.
+For the graph menus to render in that case, flip the manifest first:
+`npm run graph-menu:on && npm run compile` (`npm run graph-menu:off` reverts it -
+do that before publishing).
 
 ## Safety
 

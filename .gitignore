@@ -1,7 +1,9 @@
 node_modules/
 out/
-dist/
-*.vsix
 .geco-worktrees/
 .vscode-test/
 .DS_Store
+
+# dist/ and the built .vsix files are tracked on purpose: the Source Control
+# Graph menu only exists in the +graph build, so the artifact ships with the
+# repository (see README -> Install).
