@@ -11,7 +11,7 @@ import { GecoError } from './errors';
 import type { Git } from './git';
 import type { Settings } from './config';
 
-export type OperationKind = 'reword' | 'fastForward' | 'forcePush' | 'applyPatch' | 'backup';
+export type OperationKind = 'reword' | 'fastForward' | 'forcePush' | 'applyPatch' | 'backup' | 'branch';
 
 export interface RefRestore {
 	ref: string;
@@ -23,6 +23,29 @@ export interface RefRestore {
 	 * checked out branch and the undo must not leave a bogus "modified" state).
 	 */
 	resetHard?: boolean;
+	/**
+	 * Tracking configuration to restore with the branch (`branch.<name>.merge`
+	 * and `branch.<name>.remote` are dropped when a branch is deleted or renamed).
+	 */
+	upstream?: string;
+}
+
+/**
+ * A remote branch that has to be put back (or removed) when an operation is
+ * undone - e.g. renaming a branch also renamed it on the remote.
+ */
+export interface RemoteRefRestore {
+	remote: string;
+	branch: string;
+	/** Sha the remote branch should point at again (`action: 'restore'`). */
+	restoreTo?: string;
+	/**
+	 * 'restore' (default) pushes `restoreTo` back; 'delete' removes the branch,
+	 * but only while it still points at `expectedSha` (so a colleague's push is
+	 * never clobbered by our undo).
+	 */
+	action?: 'restore' | 'delete';
+	expectedSha?: string;
 }
 
 export type UndoSpec =
@@ -36,6 +59,8 @@ export type UndoSpec =
 		worktrees?: { path: string; branch?: string }[];
 		/** Branch to check out before deleting branches (patch on a new branch). */
 		checkoutRef?: string;
+		/** Remote branches to put back / remove as part of the same undo. */
+		remoteRefs?: RemoteRefRestore[];
 	}
 	| { type: 'remoteRef'; remote: string; branch: string; restoreTo: string }
 	| { type: 'none'; hint: string };
@@ -136,15 +161,25 @@ export class SafetyNet {
 						messages.push(`Deleted branch ${worktree.branch}`);
 					}
 				}
+				// Remote first: restoring `branch.x.remote`/`merge` below needs the
+				// remote-tracking ref to exist again.
+				for (const remoteRef of entry.undo.remoteRefs ?? []) {
+					await this.applyRemoteRef(remoteRef, restored, messages);
+				}
+				// Refs before `checkoutRef`: the checkout may point at a branch this
+				// very entry has to recreate (renaming a branch back, for example).
+				for (const restore of entry.undo.refs) {
+					await this.restoreRef(restore);
+					restored.push(`${restore.ref} -> ${shorten(restore.restoreTo)}`);
+					if (restore.upstream) {
+						messages.push(`Tracking ${restore.upstream} restored for ${restore.ref}`);
+					}
+				}
 				if (entry.undo.checkoutRef && (await this.git.headBranch()) !== entry.undo.checkoutRef) {
 					const checkout = await this.git.run(['checkout', entry.undo.checkoutRef]);
 					messages.push(checkout.exitCode === 0
 						? `Checked out ${entry.undo.checkoutRef} again`
 						: `Could not check out ${entry.undo.checkoutRef}: ${checkout.stderr.trim()}`);
-				}
-				for (const restore of entry.undo.refs) {
-					await this.restoreRef(restore);
-					restored.push(`${restore.ref} -> ${shorten(restore.restoreTo)}`);
 				}
 				for (const ref of entry.undo.deleteRefs ?? []) {
 					await this.deleteRefQuietly(ref, messages);
@@ -289,11 +324,48 @@ export class SafetyNet {
 	 * `resetHard` is set, the index and working tree are resynchronised too -
 	 * otherwise the undo would leave the repository showing a bogus diff.
 	 */
+	/**
+	 * Undo the remote half of an operation. Failures are reported, not thrown:
+	 * the local repository has already been put back, and a refused push should
+	 * not leave the user with a half-undone state and an error dialog.
+	 */
+	private async applyRemoteRef(restore: RemoteRefRestore, restored: string[], messages: string[]): Promise<void> {
+		const target = `${restore.remote}/${restore.branch}`;
+		if (restore.action === 'delete') {
+			const lease = restore.expectedSha ? [`--force-with-lease=refs/heads/${restore.branch}:${restore.expectedSha}`] : [];
+			const result = await this.git.push([...lease, restore.remote, '--delete', restore.branch]);
+			if (result.exitCode === 0) {
+				restored.push(`deleted ${target}`);
+			} else {
+				messages.push(`Could not delete ${target}: ${result.stderr.trim().split('\n')[0] ?? 'push refused'}`);
+			}
+			return;
+		}
+		if (!restore.restoreTo) {
+			messages.push(`Cannot restore ${target}: no sha was recorded.`);
+			return;
+		}
+		const result = await this.git.push(['--force', restore.remote, `${restore.restoreTo}:refs/heads/${restore.branch}`]);
+		if (result.exitCode === 0) {
+			restored.push(`${target} -> ${shorten(restore.restoreTo)}`);
+		} else {
+			messages.push(`Could not restore ${target}: ${result.stderr.trim().split('\n')[0] ?? 'push refused'}`);
+		}
+	}
+
 	private async restoreRef(restore: RefRestore): Promise<void> {
 		await this.git.updateRef(restore.ref, restore.restoreTo, {
 			oldValue: restore.expected,
 			message: 'geco undo',
 		});
+		if (restore.upstream && restore.ref.startsWith('refs/heads/')) {
+			const branch = restore.ref.slice('refs/heads/'.length);
+			const setUpstream = await this.git.run(['branch', `--set-upstream-to=${restore.upstream}`, branch]);
+			if (setUpstream.exitCode !== 0) {
+				// The remote-tracking ref may be gone; the branch itself is restored.
+				await this.git.run(['config', '--unset', `branch.${branch}.merge`]);
+			}
+		}
 		if (!restore.resetHard) {
 			return;
 		}

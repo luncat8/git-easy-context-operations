@@ -1,9 +1,10 @@
 # Git Easy Ops
 
-Right-click a commit and do the git surgery that is awkward on the command line -
-**reword an old commit**, **fast-forward `main` onto it** (keeping the old tip as a
-backup branch), **force-push safely**, or **apply a patch at the base it actually
-belongs to**. Every operation writes a recovery point first and can be undone.
+Right-click a commit or a branch and do the git surgery that is awkward on the
+command line - **reword an old commit**, **fast-forward `main` onto it** (keeping
+the old tip as a backup branch), **create / rename / delete a branch**,
+**force-push safely**, or **apply a patch at the base it actually belongs to**.
+Every operation writes a recovery point first and can be undone.
 
 Works in VS Code and VSCodium. No proposed APIs required for the default install.
 
@@ -17,6 +18,8 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 | 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. |
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. Undo rolls operations back, newest first. |
 
+| 6 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
+
 Plus: **Copy Commit SHA**.
 
 ## Where the menus are
@@ -24,15 +27,22 @@ Plus: **Copy Commit SHA**.
 **Always available, no flags, VS Code and VSCodium:**
 
 - **Source Control sidebar → "Git Easy Ops" view** - recent commits, branches and
-  recovery points, each with a full context menu. This is the main entry point.
+  recovery points, each with a full context menu (commit rows: reword, fast-forward,
+  patch, **create branch**; branch rows: **create / rename / check out / delete**).
+  This is the main entry point.
 - **Timeline view** - right-click a commit row of the selected file
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
 - **Command Palette** → `Git Easy Ops: ...` (asks for the commit when nothing is selected).
 
-### Right-clicking a commit in the built-in **Source Control Graph**
+### Right-clicking a commit or branch in the built-in **Source Control Graph**
 
-That menu is a **proposed** VS Code API (`scm/historyItem/context`, proposal
+Commit rows (`scm/historyItem/context`) get the commit menu - reword, fast-forward,
+patch, **Create Branch...** - and the branch/ref rows (`scm/historyItemRef/context`)
+get the branch menu: **Create / Rename / Check Out / Delete Branch**, fast-forward,
+backup, force push.
+
+Those two menu keys are a **proposed** VS Code API (proposal
 `contribSourceControlHistoryItemMenu` - still proposed as of VS Code 1.10x), and
 the Marketplace refuses manifests that declare `enabledApiProposals`. So it ships
 as a second build, and VS Code needs *both* halves:
@@ -82,6 +92,12 @@ code --install-extension git-easy-context-operations-0.1.0+graph.vsix
   `geco.confirmDestructiveOperations`.
 - Ref updates are **atomic** (`update-ref <ref> <new> <expected>`): if something
   else moved the branch in the meantime, the operation fails instead of clobbering.
+- **Deleting a branch** refuses the one you have checked out, and refuses a branch
+  with commits that exist nowhere else until you explicitly say "Delete anyway" -
+  the confirmation lists those commits.
+- **Undo of a remote change** never clobbers a colleague: a remote branch we pushed
+  is only deleted again while it still points at the sha we left behind
+  (`--force-with-lease`).
 - Patch probing never touches your index or working tree; a failed apply removes
   the worktree and branch it created.
 - git runs with `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `LC_ALL=C`, no
@@ -110,7 +126,7 @@ code --install-extension git-easy-context-operations-0.1.0+graph.vsix
 ```bash
 npm install
 npm run compile        # type-check + bundle to dist/extension.js
-npm test               # 306 headless tests (real git repositories, no editor)
+npm test               # 377 headless tests (real git repositories, no editor)
 npm run test:vscode    # integration smoke test inside a real VS Code
 npm run package        # build the .vsix
 ```
@@ -132,6 +148,11 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
   the target does not, you are shown them and asked before anything is forced.
 - Undo restores refs, branches, worktrees and (for pushes) the remote branch. It
   cannot un-send an e-mail or undo what a colleague already fetched.
+- A remote refuses to delete the branch its `HEAD` points at (usually the default
+  branch). Renaming such a branch *on the remote* therefore pushes the new name and
+  reports that the old one stayed - change the default branch on the host first.
+- Renaming a branch does not rewrite anything: the commits keep their shas, so no
+  force-push is needed for the local rename itself.
 
 ## License
 

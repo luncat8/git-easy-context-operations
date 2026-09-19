@@ -349,6 +349,8 @@ describe('controller - enableGraphMenu', () => {
 			assert.match(logs, /code --enable-proposed-api luncat8\.git-easy-context-operations/);
 			assert.match(logs, /Enable Source Control Graph Menu/);
 			assert.match(logs, /Timeline view: right-click a commit/);
+			assert.match(logs, /scm\/historyItemRef\/context/, 'the branch rows of the graph are explained too');
+			assert.match(logs, /rename \/ check out \/ delete branch/);
 			assert.equal(ui.messages[0]!.kind, 'info');
 		} finally {
 			repo.cleanup();

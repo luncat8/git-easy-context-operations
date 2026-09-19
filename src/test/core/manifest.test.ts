@@ -100,6 +100,10 @@ describe('manifest - commands', () => {
 			'geco.undoLastOperation',
 			'geco.createBackupBranch',
 			'geco.showBackups',
+			'geco.createBranch',
+			'geco.renameBranch',
+			'geco.deleteBranch',
+			'geco.checkoutBranch',
 		]) {
 			const hidden = (manifest.contributes.menus.commandPalette ?? []).some((e) => e.command === id && e.when === 'false');
 			assert.equal(hidden, false, `${id} is hidden from the command palette`);
@@ -175,6 +179,23 @@ describe('manifest - menus', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
 			assert.equal(entry.when, 'view == geco.history');
 		}
+	});
+
+	it('offers create / rename / delete / check out in the branch submenu', () => {
+		// The branch submenu is what the Source Control Graph shows on a *ref* row
+		// (scm/historyItemRef/context) and what our own view shows on a branch node.
+		const commands = (manifest.contributes.menus['geco.branchSubmenu'] ?? []).map((e) => e.command);
+		for (const id of ['geco.createBranch', 'geco.renameBranch', 'geco.checkoutBranch', 'geco.deleteBranch']) {
+			assert.ok(commands.includes(id), `${id} is missing from geco.branchSubmenu`);
+		}
+		assert.ok(commands.indexOf('geco.renameBranch') > commands.indexOf('geco.createBranch'), 'rename comes after create');
+		assert.ok(commands.indexOf('geco.deleteBranch') > commands.indexOf('geco.renameBranch'), 'the destructive item comes last');
+		assert.ok(commands.includes('geco.forcePush'), 'the existing branch operations are still there');
+	});
+
+	it('lets a commit row create a branch at that commit', () => {
+		const commands = (manifest.contributes.menus['geco.commitSubmenu'] ?? []).map((e) => e.command);
+		assert.ok(commands.includes('geco.createBranch'), 'geco.commitSubmenu has no create-branch item');
 	});
 
 	it('offers the operations in the Source Control title and repository menus', () => {
