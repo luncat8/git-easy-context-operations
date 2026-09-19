@@ -890,6 +890,46 @@ describe('controller - backups, undo and information', () => {
 		}
 	});
 
+	it('builds the graph rows of our own panel: lanes, ref badges and HEAD', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'side', shas.v03]);
+			const sideSha = await repo.commit('side change', { 'side.txt': 's\n' });
+			await repo.checkout('main');
+			await repo.mergeNoFastForward('side', 'Merge side');
+			const mergesha = await repo.sha('main');
+
+			const rows = await controllerFor(new FakeUI(), repo).graphRows(repo.dir);
+			const bySide = rows.findIndex((row) => row.sha === sideSha);
+			const byMerge = rows.findIndex((row) => row.sha === mergesha);
+
+			assert.equal(rows[0]!.sha, mergesha, 'the merge is the tip');
+			assert.equal(rows[0]!.art, '●╮', 'the merge opens the lane of its second parent');
+			assert.equal(rows[0]!.lane, 0);
+			assert.match(rows[0]!.refsLabel, /main \(HEAD\)/, 'the badge of the checked out branch');
+			assert.deepEqual(rows[0]!.refs.map((entry) => entry.name), ['main'], 'only branches get child nodes');
+			assert.ok(bySide > byMerge, 'parents come after their children, so the lanes line up');
+			assert.equal(rows[bySide]!.refs[0]!.name, 'side');
+			assert.equal(rows[bySide]!.lane, 1, 'the side branch is drawn in its own lane');
+			assert.match(rows[bySide]!.tooltip, /side change/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('turns the lane art off when the user asks for it', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			const controller = controllerFor(new FakeUI(), repo, { ...DEFAULT_SETTINGS, showGraphLanes: false });
+			const rows = await controller.graphRows(repo.dir);
+
+			assert.equal(rows.length, 4);
+			assert.deepEqual(rows.map((row) => row.art), ['', '', '', '']);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
 	it('never lets an error escape: a broken repository becomes an error message', async () => {
 		const { repo } = await createLinearRepo();
 		try {
@@ -935,6 +975,166 @@ describe('controller - backups, undo and information', () => {
 			const controller = controllerFor(new FakeUI(), repo, settings);
 			const points = await controller.listRecoveryPoints(repo.dir);
 			assert.ok(points.length === 0 || points.every((p) => p.name.startsWith('refs/geco-test/') || p.kind === 'branch'));
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
+
+describe('controller - squash flows', () => {
+	it('squashes every selected commit row into one (multi-select passes them all)', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['v0.2-v0.4 squashed'], confirms: [true], asks: [undefined] });
+			// This is what VS Code sends for a multi-selection: the clicked node
+			// first, then the whole selection as a second argument.
+			const clicked = { gecoKind: 'commit', sha: shas.v04, repoPath: repo.dir };
+			const selected = [clicked, { gecoKind: 'commit', sha: shas.v03, repoPath: repo.dir }, { gecoKind: 'commit', sha: shas.v02, repoPath: repo.dir }];
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [clicked, selected]);
+
+			assert.equal(ui.inputCalls[0]!.title, 'Squash 3 commits into one');
+			assert.equal(ui.inputCalls[0]!.value, 'v0.4', 'pre-filled with the newest commit message');
+			assert.match(ui.confirmCalls[0]!.message, /Squash 3 commits into one on main\?/);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /v0\.2[\s\S]*v0\.3[\s\S]*v0\.4/);
+			assert.match(ui.askCalls[0]!.message, /Squashed 3 commits into [0-9a-f]{10} on main: "v0\.2-v0\.4 squashed"/);
+
+			const log = await repo.log('main');
+			assert.deepEqual(log.map((line) => line.subject), ['v0.2-v0.4 squashed', 'v0.1']);
+			assert.equal((await repo.ctx.safety.readJournal()).at(-1)!.kind, 'squash');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('offers undo after a squash and rolls the history back', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['combined'], asks: [ACTIONS.undo] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+
+			assert.equal(await repo.branchSha('main'), shas.v04, 'undo restored the original tip');
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.3', 'v0.2', 'v0.1']);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('explains how to select commits when only one row was passed', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }]);
+
+			assert.equal(ui.messages[0]!.kind, 'warn');
+			assert.match(ui.messages[0]!.message, /Only one commit is selected/);
+			assert.match(ui.messages[0]!.detail!, /Ctrl\/Shift-click/);
+			assert.equal(await repo.branchSha('main'), shas.v04, 'nothing was rewritten');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('tells a palette user where to select commits', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, []);
+
+			assert.equal(ui.messages[0]!.kind, 'info');
+			assert.match(ui.messages[0]!.message, /needs a selection in the Graph group/);
+			assert.match(ui.messages[0]!.detail!, /Squash with Previous Commits/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('does not guess when the selection spans two branches', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'side', shas.v02]);
+			const side = await repo.commit('side work', { 'side.txt': 's\n' });
+			await repo.checkout('main');
+
+			const ui = new FakeUI({ inputs: ['combined'], confirms: [true] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v03 }, { gecoKind: 'commit', sha: side }]);
+
+			assert.equal(ui.messages[0]!.kind, 'error');
+			assert.match(ui.messages[0]!.message, /not on the same line of history/);
+			assert.equal(ui.confirmCalls.length, 0, 'no confirmation for a selection that cannot be squashed');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('squashes a commit with N previous commits, asking for N', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['2', 'v0.3 and v0.4 together'], confirms: [true] });
+			await controllerFor(ui, repo).squashWithPreviousCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }]);
+
+			assert.equal(ui.inputCalls[0]!.title, `Squash into ${shas.v04!.slice(0, 7)}`);
+			assert.match(ui.inputCalls[0]!.prompt, /How many commits before "v0\.4"/);
+			assert.equal(ui.inputCalls[0]!.value, '3', 'defaults to the three commits people usually mean');
+			assert.equal(ui.inputCalls[1]!.value, 'v0.4', 'the message input is pre-filled with the newest message');
+			assert.match(ui.confirmCalls[0]!.message, /Squash 3 commits into one on main\?/);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.3 and v0.4 together', 'v0.1']);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('refuses to walk past the first commit of the repository', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).squashWithPreviousCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v01 }]);
+
+			assert.equal(ui.messages[0]!.kind, 'info');
+			assert.match(ui.messages[0]!.message, /first commit of this repository/);
+			assert.equal(ui.inputCalls.length, 0, 'no question when there is nothing to squash');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('reports how many commits are too many to walk back and rewrites nothing', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['3'] });
+			await controllerFor(ui, repo).squashWithPreviousCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v02 }]);
+
+			assert.equal(ui.messages[0]!.kind, 'warn');
+			assert.match(ui.messages[0]!.message, /has only 1 commit\(s\) before it/);
+			assert.equal(await repo.branchSha('main'), shas.v04);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('leaves the history it replaced out of the graph (recovery refs are hidden)', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['combined'], confirms: [true] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+
+			const rows = await controllerFor(new FakeUI(), repo).graphRows(repo.dir);
+			assert.deepEqual(rows.map((row) => row.subject), ['combined', 'v0.2', 'v0.1'], 'the squashed-away commits are gone');
+			assert.equal(await repo.hasRef((await repo.ctx.safety.listRecoveryPoints())[0]!.name), true, 'the recovery point is still there');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('flags a force push after squashing a pushed branch', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			await repo.addBareRemote('origin', ['main']);
+			const ui = new FakeUI({ inputs: ['combined'], confirms: [true] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /main tracks origin\/main: a force push is needed afterwards/);
+			assert.match(ui.askCalls[0]!.message, /origin\/main now needs a force push/);
+			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.forcePush));
 		} finally {
 			repo.cleanup();
 		}

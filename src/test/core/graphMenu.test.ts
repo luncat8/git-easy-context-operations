@@ -14,7 +14,15 @@ import {
 	readsProposedApi,
 	removeProposedApi,
 } from '../../core/argvJson';
-import { assessGraphMenu, GRAPH_MENU_KEYS, type ArgvStore, type GraphMenuBuild } from '../../core/graphMenu';
+import {
+	assessGraphMenu,
+	GRAPH_MENU_KEYS,
+	GRAPH_MENU_PROPOSALS,
+	graphMenuFixOptions,
+	type ArgvStore,
+	type GraphMenuBuild,
+} from '../../core/graphMenu';
+import { addProductProposals, readProductProposals } from '../../core/productJson';
 import { Controller } from '../../core/controller';
 import { ACTIONS } from '../../core/ui';
 import { DEFAULT_SETTINGS } from '../../core/config';
@@ -168,8 +176,9 @@ describe('graph menu - diagnosis', () => {
 		hasProposals: true,
 		menuKeys: [...GRAPH_MENU_KEYS],
 		argvPath: '/home/user/.vscode/argv.json',
+		productPath: '/opt/vscode/resources/app/product.json',
 		cliCommand: 'code',
-		graphVsixName: 'git-easy-context-operations-0.1.0+graph.vsix',
+		graphVsixName: 'git-easy-context-operations-0.2.0+graph.vsix',
 		...overrides,
 	});
 
@@ -177,22 +186,45 @@ describe('graph menu - diagnosis', () => {
 		const status = assessGraphMenu(build(), `{\n\t"enable-proposed-api": ["${ID}"]\n}`);
 		assert.equal(status.ready, true);
 		assert.equal(status.allowedInArgv, true);
+		assert.equal(status.allowedInProduct, false);
 		assert.equal(status.argvExists, true);
 		assert.deepEqual(status.steps, []);
 		assert.match(status.report, /status:\s+READY/);
 	});
 
-	it('says argv.json is the missing half, with copy-pasteable steps', () => {
+	it('accepts the product.json route - the one without a command line', () => {
+		const product = JSON.stringify({ nameShort: 'Code', [ 'extensionEnabledApiProposals' ]: { [ID]: [...GRAPH_MENU_PROPOSALS] } }, null, '\t');
+		const status = assessGraphMenu(build(), '{\n\t"log-level": "info"\n}', product);
+		assert.equal(status.allowedInArgv, false, 'argv.json still has nothing');
+		assert.equal(status.allowedInProduct, true);
+		assert.equal(status.productExists, true);
+		assert.equal(status.ready, true);
+		assert.deepEqual(status.steps, []);
+		assert.match(status.report, /proposal allowed there: YES/);
+	});
+
+	it('needs *all* the proposals the graph build declares', () => {
+		const product = JSON.stringify({ extensionEnabledApiProposals: { [ID]: ['contribSourceControlHistoryItemMenu'] } });
+		const status = assessGraphMenu(build(), undefined, product);
+		assert.equal(status.allowedInProduct, false, 'the title menu proposal is missing');
+		assert.equal(status.ready, false);
+	});
+
+	it('says what is missing, with copy-pasteable steps for both files', () => {
 		const status = assessGraphMenu(build(), '{\n\t"log-level": "info"\n}');
 		assert.equal(status.ready, false);
 		assert.equal(status.argvExists, true);
-		assert.equal(status.allowedInArgv, false);
-		assert.ok(status.steps.some((s) => s.includes('"enable-proposed-api"')), status.steps.join('\n'));
-		assert.ok(status.steps.some((s) => s.includes(`/home/user/.vscode/argv.json`)));
-		assert.ok(status.steps.some((s) => s.includes('Configure Runtime Arguments')));
+		assert.equal(status.productExists, false);
+		const steps = status.steps.join('\n');
+		assert.ok(status.steps.some((s) => s.includes('"enable-proposed-api"')), steps);
+		assert.ok(status.steps.some((s) => s.includes('/home/user/.vscode/argv.json')));
+		assert.ok(status.steps.some((s) => s.includes('Command Palette: "Preferences: Configure Runtime Arguments"')), steps);
+		assert.ok(status.steps.some((s) => s.includes('/opt/vscode/resources/app/product.json')), steps);
+		assert.ok(status.steps.some((s) => s.includes('"extensionEnabledApiProposals"')), steps);
 		assert.ok(status.steps.some((s) => s.includes(`code --enable-proposed-api ${ID}`)));
 		assert.equal(status.steps[status.steps.length - 1], 'Then restart VS Code.');
 		assert.doesNotMatch(status.report, /package:graph/, 'the build is fine, so do not tell them to rebuild');
+		assert.match(status.report, /\(does not exist yet\)/);
 	});
 
 	it('says the installed build is the wrong one when it lacks the proposal', () => {
@@ -200,7 +232,7 @@ describe('graph menu - diagnosis', () => {
 		assert.equal(status.ready, false);
 		assert.equal(status.allowedInArgv, true);
 		assert.match(status.steps.join('\n'), /npm run package:graph/);
-		assert.match(status.steps.join('\n'), /code --install-extension git-easy-context-operations-0\.1\.0\+graph\.vsix/);
+		assert.match(status.steps.join('\n'), /code --install-extension git-easy-context-operations-0\.2\.0\+graph\.vsix/);
 		assert.doesNotMatch(status.steps.join('\n'), /enable-proposed-api"\]: /, 'argv.json is already fine');
 	});
 
@@ -210,15 +242,72 @@ describe('graph menu - diagnosis', () => {
 		assert.equal(status.ready, false);
 		const joined = status.steps.join('\n');
 		assert.ok(joined.indexOf('package:graph') < joined.indexOf('enable-proposed-api'), joined);
-		assert.match(status.report, /\(does not exist yet\)/);
 	});
 
-	it('explains that the sidebar view, Timeline and palette always work', () => {
+	it('explains the sidebar graph, the Timeline and the palette', () => {
 		const status = assessGraphMenu(build({ hasProposals: false, menuKeys: [] }), undefined);
 		assert.match(status.report, /Git Easy Ops" view/);
 		assert.match(status.report, /Timeline/);
 		assert.match(status.report, /Command Palette/);
 		assert.match(status.report, /contribSourceControlHistoryItemMenu/);
+		assert.match(status.report, /"Rename Branch\.\.\. > main"/, 'explains how ref menus show up in the graph');
+		assert.match(status.report, /not nested under an extension name/, 'says the items are flat, not in a submenu');
+		assert.match(status.report, /next to Cherry Pick/, 'says which built-in group they land in');
+	});
+});
+
+describe('graph menu - the fixes offered', () => {
+	const build: GraphMenuBuild = {
+		extensionId: ID,
+		hasProposals: true,
+		menuKeys: [...GRAPH_MENU_KEYS],
+		argvPath: '/home/user/.vscode/argv.json',
+		productPath: '/opt/vscode/resources/app/product.json',
+		cliCommand: 'code',
+	};
+
+	it('offers product.json first, then argv.json, then "just explain"', () => {
+		const options = graphMenuFixOptions(build);
+		assert.deepEqual(options.map((option) => option.value), ['product', 'argv', 'none']);
+		assert.match(options[0]!.detail, /extensionEnabledApiProposals/);
+		assert.match(options[0]!.detail, new RegExp(ID.replace(/\./g, '\\.')));
+		assert.match(options[1]!.detail, /"enable-proposed-api"/);
+		assert.match(options[2]!.detail, /copy-pasteable/i);
+	});
+});
+
+describe('product.json - allowing the proposal', () => {
+	it('adds the entry, keeps the other keys and the indentation', () => {
+		const original = JSON.stringify({ nameShort: 'Code', darwinBundleIdentifier: 'com.microsoft.VSCode' }, null, '\t') + '\n';
+		const updated = addProductProposals(original, ID, GRAPH_MENU_PROPOSALS);
+
+		assert.equal(updated.endsWith('\n'), true);
+		assert.match(updated, /\n\t"/, 'the tab indentation survives');
+		const parsed = JSON.parse(updated) as Record<string, unknown>;
+		assert.equal(parsed['nameShort'], 'Code');
+		assert.equal(parsed['darwinBundleIdentifier'], 'com.microsoft.VSCode');
+		assert.deepEqual(readProductProposals(updated)[ID], [...GRAPH_MENU_PROPOSALS]);
+	});
+
+	it('merges with an existing entry instead of dropping proposals', () => {
+		const original = JSON.stringify({ extensionEnabledApiProposals: { 'github.copilot': ['chatParticipant'], [ID]: ['contribSourceControlHistoryItemMenu'] } }, null, 2);
+		const updated = addProductProposals(original, ID, GRAPH_MENU_PROPOSALS);
+		const proposals = readProductProposals(updated);
+
+		assert.deepEqual(proposals['github.copilot'], ['chatParticipant']);
+		assert.deepEqual(proposals[ID], [...GRAPH_MENU_PROPOSALS], 'the existing entry is completed, not replaced');
+	});
+
+	it('is idempotent', () => {
+		const once = addProductProposals('{\n  "nameShort": "Code"\n}\n', ID, GRAPH_MENU_PROPOSALS);
+		assert.equal(addProductProposals(once, ID, GRAPH_MENU_PROPOSALS), once);
+	});
+
+	it('refuses to touch something that is not a product.json', () => {
+		assert.throws(() => addProductProposals('not json', ID, GRAPH_MENU_PROPOSALS), /not valid JSON/);
+		assert.throws(() => addProductProposals('[1, 2]', ID, GRAPH_MENU_PROPOSALS), /does not contain a JSON object/);
+		assert.throws(() => addProductProposals('{"extensionEnabledApiProposals": []}', ID, GRAPH_MENU_PROPOSALS), /is not an object/);
+		assert.throws(() => addProductProposals('{}', '  ', GRAPH_MENU_PROPOSALS), /extension id is required/);
 	});
 });
 
@@ -228,8 +317,9 @@ describe('controller - enableGraphMenu', () => {
 		hasProposals: true,
 		menuKeys: [...GRAPH_MENU_KEYS],
 		argvPath: '/home/user/.vscode/argv.json',
+		productPath: '/opt/vscode/resources/app/product.json',
 		cliCommand: 'code',
-		graphVsixName: 'git-easy-context-operations-0.1.0+graph.vsix',
+		graphVsixName: 'git-easy-context-operations-0.2.0+graph.vsix',
 	};
 
 	async function controllerWith(ui: FakeUI) {
@@ -242,10 +332,11 @@ describe('controller - enableGraphMenu', () => {
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const store = new MemoryArgvStore(`{\n\t"enable-proposed-api": ["${ID}"]\n}`);
-			await controller.enableGraphMenu(build, store);
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{}'));
 
 			assert.deepEqual(store.writes, []);
 			assert.equal(store.backups, 0);
+			assert.equal(ui.pickCalls.length, 0, 'nothing to choose');
 			assert.equal(ui.confirmCalls.length, 0);
 			assert.match(ui.allMessages(), /already enabled|is enabled for Git Easy Ops/);
 		} finally {
@@ -253,20 +344,21 @@ describe('controller - enableGraphMenu', () => {
 		}
 	});
 
-	it('writes the line (with a backup) after the user agrees, and keeps their comments', async () => {
-		const ui = new FakeUI({ confirms: [true], asks: [ACTIONS.openLog] });
+	it('writes the argv.json line (with a backup) after the user agrees, and keeps their comments', async () => {
+		const ui = new FakeUI({ picks: ['argv.json'], confirms: [true], asks: [ACTIONS.openLog] });
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const original = '// my notes\n{\n\t"disable-hardware-acceleration": true\n}\n';
 			const store = new MemoryArgvStore(original);
-			await controller.enableGraphMenu(build, store);
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{"nameShort":"Code"}'));
 
 			assert.equal(store.backups, 1);
 			assert.equal(store.writes.length, 1);
 			assert.match(store.writes[0]!, /my notes/, 'comments survive');
 			assert.match(store.writes[0]!, /"disable-hardware-acceleration": true/);
 			assert.deepEqual(readsProposedApi(store.writes[0]!), [ID]);
-			assert.match(ui.confirmCalls[0]!.message, new RegExp(`Allow proposed APIs for ${ID.replace(/\./g, '\\.')}\\?`));
+			assert.match(ui.pickCalls[0]!.options!.title!, new RegExp(`Allow proposed APIs for ${ID.replace(/\./g, '\\.')}\\?`));
+			assert.match(ui.confirmCalls[0]!.message, /in argv\.json\?/);
 			assert.match(ui.confirmCalls[0]!.options!.detail!, /"enable-proposed-api"/);
 			assert.match(ui.confirmCalls[0]!.options!.detail!, /backup is written/);
 			assert.match(ui.allLogs(), /Updated \/home\/user\/\.vscode\/argv\.json \(backup: /);
@@ -277,12 +369,45 @@ describe('controller - enableGraphMenu', () => {
 		}
 	});
 
-	it('creates the file when the user has none', async () => {
-		const ui = new FakeUI({ confirms: [true] });
+	it('writes product.json when that is the chosen route - no command line involved', async () => {
+		const ui = new FakeUI({ picks: ['product.json'], confirms: [true], asks: [ACTIONS.openLog] });
+		const { repo, controller } = await controllerWith(ui);
+		try {
+			const argv = new MemoryArgvStore('{}');
+			const product = new MemoryArgvStore(JSON.stringify({ nameShort: 'Code' }, null, '\t') + '\n');
+			await controller.enableGraphMenu(build, argv, product);
+
+			assert.deepEqual(argv.writes, [], 'argv.json stays untouched');
+			assert.equal(product.backups, 1);
+			assert.equal(product.writes.length, 1);
+			assert.deepEqual(readProductProposals(product.writes[0]!)[ID], [...GRAPH_MENU_PROPOSALS]);
+			assert.match(ui.confirmCalls[0]!.message, /in the editor's product\.json\?/);
+			assert.match(ui.allLogs(), /Updated \/opt\/vscode\/resources\/app\/product\.json \(backup: /);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('does not offer product.json when the extension cannot find the file', async () => {
+		const ui = new FakeUI({ picks: ['argv.json'], confirms: [true] });
+		const { repo, controller } = await controllerWith(ui);
+		try {
+			await controller.enableGraphMenu(build, new MemoryArgvStore('{}'));
+
+			const offered = ui.pickCalls[0]!.items.map((item) => item.label);
+			assert.equal(offered.some((label) => label.includes('product.json')), false, `only argv.json is offered: ${offered.join(' | ')}`);
+			assert.equal(ui.pickCalls[0]!.items[0]!.label.includes('argv.json'), true);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('creates argv.json when the user has none', async () => {
+		const ui = new FakeUI({ picks: ['argv.json'], confirms: [true] });
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const store = new MemoryArgvStore(undefined);
-			await controller.enableGraphMenu(build, store);
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{}'));
 
 			assert.equal(store.backups, 1, 'asked for a backup even though there was nothing to back up');
 			assert.deepEqual(readsProposedApi(store.writes[0]!), [ID]);
@@ -292,16 +417,31 @@ describe('controller - enableGraphMenu', () => {
 		}
 	});
 
-	it('leaves the file alone when the user declines', async () => {
-		const ui = new FakeUI({ confirms: [false] });
+	it('leaves the file alone when the user declines the write', async () => {
+		const ui = new FakeUI({ picks: ['argv.json'], confirms: [false] });
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const store = new MemoryArgvStore('{}');
-			await controller.enableGraphMenu(build, store);
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{}'));
 
 			assert.deepEqual(store.writes, []);
 			assert.match(ui.allLogs(), /argv\.json was not modified/);
 			assert.match(ui.allMessages(), /still not available/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('changes nothing when the picker is dismissed', async () => {
+		const ui = new FakeUI({ picks: ['nope'], confirms: [true] });
+		const { repo, controller } = await controllerWith(ui);
+		try {
+			const store = new MemoryArgvStore('{}');
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{}'));
+
+			assert.deepEqual(store.writes, []);
+			assert.equal(ui.confirmCalls.length, 0, 'nothing to confirm');
+			assert.match(ui.allLogs(), /Nothing was changed/);
 		} finally {
 			repo.cleanup();
 		}
@@ -312,9 +452,10 @@ describe('controller - enableGraphMenu', () => {
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const store = new MemoryArgvStore('{}');
-			await controller.enableGraphMenu({ ...build, hasProposals: false, menuKeys: [] }, store);
+			await controller.enableGraphMenu({ ...build, hasProposals: false, menuKeys: [] }, store, new MemoryArgvStore('{}'));
 
-			assert.deepEqual(readsProposedApi(store.writes[0]!), [ID], 'the half we can fix is fixed');
+			assert.deepEqual(store.writes, [], 'no point allowing the proposal for a build without the menus');
+			assert.equal(ui.pickCalls.length, 0);
 			assert.match(ui.askCalls[0]!.message, /Install the graph build with "npm run package:graph"/);
 			assert.match(ui.askCalls[0]!.options.detail!, /code --install-extension/);
 		} finally {
@@ -323,11 +464,11 @@ describe('controller - enableGraphMenu', () => {
 	});
 
 	it('reports an unwritable argv.json as an error instead of throwing', async () => {
-		const ui = new FakeUI({ confirms: [true] });
+		const ui = new FakeUI({ picks: ['argv.json'], confirms: [true] });
 		const { repo, controller } = await controllerWith(ui);
 		try {
 			const store = new MemoryArgvStore('{}', true);
-			await controller.enableGraphMenu(build, store);
+			await controller.enableGraphMenu(build, store, new MemoryArgvStore('{}'));
 
 			assert.equal(ui.messages[0]!.kind, 'error');
 			assert.match(ui.messages[0]!.message, /^Graph menu: /);
@@ -337,7 +478,7 @@ describe('controller - enableGraphMenu', () => {
 		}
 	});
 
-	it('explains the two builds and every entry point', async () => {
+	it('explains the two builds, both routes and every entry point', async () => {
 		const ui = new FakeUI();
 		const { repo, controller } = await controllerWith(ui);
 		try {
@@ -346,11 +487,13 @@ describe('controller - enableGraphMenu', () => {
 			const logs = ui.allLogs();
 			assert.match(logs, /npm run package:graph/);
 			assert.match(logs, /Preferences: Configure Runtime Arguments/);
+			assert.match(logs, /extensionEnabledApiProposals/);
 			assert.match(logs, /code --enable-proposed-api luncat8\.git-easy-context-operations/);
 			assert.match(logs, /Enable Source Control Graph Menu/);
 			assert.match(logs, /Timeline view: right-click a commit/);
 			assert.match(logs, /scm\/historyItemRef\/context/, 'the branch rows of the graph are explained too');
-			assert.match(logs, /rename \/ check out \/ delete branch/);
+			assert.match(logs, /Rename Branch\.\.\. > main/);
+			assert.match(logs, /"Graph" group/, 'the always-available graph panel is pointed out');
 			assert.equal(ui.messages[0]!.kind, 'info');
 		} finally {
 			repo.cleanup();

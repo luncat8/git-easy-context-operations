@@ -213,6 +213,29 @@ export class Git {
 		return Number.isFinite(count) ? count : 0;
 	}
 
+	/**
+	 * `sha -> parents` for every commit `git rev-list --parents <rev>` reports,
+	 * in one call. Used to walk a history in memory (`--first-parent` walks the
+	 * run of commits a squash is allowed to cover).
+	 */
+	async parentMap(rev: string, options: { firstParent?: boolean } = {}): Promise<Map<string, string[]>> {
+		const args = ['rev-list', '--parents'];
+		if (options.firstParent) {
+			args.push('--first-parent');
+		}
+		args.push(rev);
+		const out = await this.tryRun(args);
+		const map = new Map<string, string[]>();
+		for (const line of out ? out.split('\n') : []) {
+			const parts = line.trim().split(' ').filter(Boolean);
+			if (parts.length === 0) {
+				continue;
+			}
+			map.set(parts[0]!, parts.slice(1));
+		}
+		return map;
+	}
+
 	/** Commits after `from` that lead to `to`, oldest first, merges included. */
 	async ancestryPathOldestFirst(from: string, to: string): Promise<string[]> {
 		return this.revList(['--reverse', '--ancestry-path', '--topo-order', `${from}..${to}`]);
@@ -230,16 +253,35 @@ export class Git {
 		return parsed[0];
 	}
 
-	async commits(options: { ref?: string; limit?: number; all?: boolean; firstParent?: boolean } = {}): Promise<CommitInfo[]> {
+	async commits(options: {
+		ref?: string;
+		limit?: number;
+		/** Every ref, *including* this extension's recovery refs. */
+		all?: boolean;
+		/** Explicit `rev-list`-style rev args, e.g. `['--branches', '--remotes', '--tags']`. */
+		refs?: readonly string[];
+		firstParent?: boolean;
+		topoOrder?: boolean;
+	} = {}): Promise<CommitInfo[]> {
 		const args = ['log', `--format=${COMMIT_LOG_FORMAT}`, '--no-show-signature'];
 		if (options.limit && options.limit > 0) {
 			args.push(`--max-count=${options.limit}`);
 		}
-		if (options.all) {
+		if (options.refs && options.refs.length > 0) {
+			// `--branches --remotes --tags` is what a commit graph should show:
+			// unlike `--all` it leaves the hidden recovery refs out, so an undone
+			// or squashed-away commit does not reappear as a second history.
+			args.push(...options.refs);
+		} else if (options.all) {
 			args.push('--all');
 		}
 		if (options.firstParent) {
 			args.push('--first-parent');
+		}
+		// Lane rendering needs every parent after its children, which only
+		// --topo-order guarantees (the default walks by commit date).
+		if (options.topoOrder) {
+			args.push('--topo-order');
 		}
 		if (options.ref) {
 			args.push(options.ref);

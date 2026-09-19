@@ -14,7 +14,7 @@ import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
 import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
-import { describeInstalledBuild, FsArgvStore } from './vscode/graphMenu';
+import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 
 const VIEW_ID = 'geco.history';
 const GRAPH_HINT_KEY = 'geco.graphMenuHintShown';
@@ -45,7 +45,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		onError: (message) => output.appendLine(message),
 	});
 	context.subscriptions.push(tree);
-	const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree, showCollapseAll: true });
+	// `canSelectMany` is what makes multi-select (Ctrl/Shift-click) work in the
+	// Graph group: VS Code then hands a context-menu command the clicked node
+	// plus every selected node, which is how "Squash Selected Commits..." sees
+	// the whole selection.
+	const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true });
 	context.subscriptions.push(treeView);
 
 	const setRepoContext = () => {
@@ -86,6 +90,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.rewordCommit', reword('replace')],
 		['geco.rewordCommitAppend', reword('append')],
 		['geco.rewordCommitRename', reword('findReplace')],
+		['geco.squashSelectedCommits', async (cwd, args) => runtime.controller.squashSelectedCommits(cwd, args)],
+		['geco.squashWithPreviousCommits', async (cwd, args) => runtime.controller.squashWithPreviousCommits(cwd, args)],
 		['geco.fastForwardDefaultBranch', async (cwd, args) => runtime.controller.fastForward(cwd, args, { askBranch: false })],
 		['geco.fastForwardBranch', async (cwd, args) => runtime.controller.fastForward(cwd, args, { askBranch: true })],
 		['geco.forcePush', async (cwd, args) => runtime.controller.forcePush(cwd, args)],
@@ -119,7 +125,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand('geco.enableGraphMenu', async () => {
 			const build = describeInstalledBuild(context);
-			await runtime.controller.enableGraphMenu(build, new FsArgvStore(build.argvPath));
+			// Two ways to allow the proposed API: the editor's product.json (no
+			// command line at all) and the per-user argv.json.
+			await runtime.controller.enableGraphMenu(build, new FsFileStore(build.argvPath), new FsFileStore(build.productPath));
 			output.show(true);
 		}),
 	);
@@ -194,7 +202,7 @@ function maybeShowEntryPointHint(context: vscode.ExtensionContext, settings: Set
 	void context.globalState.update(GRAPH_HINT_KEY, true);
 	void vscode.window
 		.showInformationMessage(
-			'Git Easy Ops: right-click a commit in the "Git Easy Ops" view of the Source Control sidebar, in the Timeline, or use the Command Palette.',
+			'Git Easy Ops: right-click a commit in the "Git Easy Ops" view - its Graph group is the commit graph - or in the Timeline, or use the Command Palette.',
 			'Where are the menus?',
 		)
 		.then((choice) => {

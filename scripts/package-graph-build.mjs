@@ -70,24 +70,35 @@ console.log(`
 Graph build ready: ${path.relative(ROOT, outFile)}
 
 Two things are needed for the commit context menu to appear in the Source
-Control Graph - VS Code only renders that menu for extensions it was explicitly
-told to grant the proposed API to:
+Control Graph - VS Code only renders those menus for extensions it was
+explicitly told to grant the proposed API to:
 
 1) Install this build (not the publishable one):
      ${cli} --install-extension ${path.relative(ROOT, outFile)}
 
-2) Allow the proposal, either persistently - Command Palette:
-   "Preferences: Configure Runtime Arguments", then add to ${argvDir}/argv.json:
-     {
-       "enable-proposed-api": ["${extensionId}"]
-     }
-   or per launch:
-     ${cli} --enable-proposed-api ${extensionId}
+2) Allow the proposal for ${extensionId} - either route works:
 
-   Tip: "Git Easy Ops: Enable Source Control Graph Menu..." writes that line for
-   you (with a backup of argv.json).
+   a) product.json of the editor installation (no command line, no launch flag):
+        "extensionEnabledApiProposals": {
+          "${extensionId}": ["contribSourceControlHistoryItemMenu", "contribSourceControlHistoryTitleMenu"]
+        }
+      Inside the editor, run "Git Easy Ops: Enable Source Control Graph Menu..."
+      and pick this option - it writes the entry (with a backup) for you.
+      An update of VS Code may replace product.json.
 
-Then restart VS Code and right-click a commit in Source Control > Graph.
+   b) the runtime arguments file (per user, survives updates):
+        ${argvDir}/argv.json
+          { "enable-proposed-api": ["${extensionId}"] }
+      Command Palette: "Preferences: Configure Runtime Arguments", or per launch:
+        ${cli} --enable-proposed-api ${extensionId}
+
+Then restart VS Code and right-click a commit in Source Control > Graph: the
+items sit in the same groups as the built-in ones (squash/reword next to Cherry
+Pick, patch and fast-forward/force-push after Compare), and "Rename Branch... >
+main" is on the branch badge next to checkout and delete - git has no rename.
+
+Without the grant, "Git Easy Ops" in the Source Control sidebar always works -
+its Graph group shows the same commits, refs and operations.
 
 To go back to the publishable build:
      ${cli} --install-extension ${manifest.name}-${manifest.version}.vsix

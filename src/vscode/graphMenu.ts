@@ -5,7 +5,8 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { argvJsonDirFor } from '../core/argvJson';
-import { GRAPH_MENU_KEYS, type ArgvStore, type GraphMenuBuild } from '../core/graphMenu';
+import { productJsonPath } from '../core/productJson';
+import { GRAPH_MENU_KEYS, GRAPH_MENU_PROPOSALS, type ArgvStore, type GraphMenuBuild } from '../core/graphMenu';
 
 /**
  * Where VS Code keeps its runtime arguments: `<portable>/argv.json` in portable
@@ -21,7 +22,8 @@ export function argvJsonPath(appName: string, env: NodeJS.ProcessEnv = process.e
 	return path.join(env.HOME ?? os.homedir(), argvJsonDirFor(appName), 'argv.json');
 }
 
-export class FsArgvStore implements ArgvStore {
+/** A text file the extension may write, with a backup next to it. */
+export class FsFileStore implements ArgvStore {
 	constructor(private readonly file: string) {}
 
 	get path(): string {
@@ -54,7 +56,11 @@ export class FsArgvStore implements ArgvStore {
 }
 
 /** What the *installed* build declares, read from its own manifest. */
-export function describeInstalledBuild(context: vscode.ExtensionContext, appName: string = vscode.env.appName): GraphMenuBuild {
+export function describeInstalledBuild(
+	context: vscode.ExtensionContext,
+	appName: string = vscode.env.appName,
+	appRoot: string = vscode.env.appRoot,
+): GraphMenuBuild {
 	const manifest = (context.extension?.packageJSON ?? {}) as {
 		publisher?: string;
 		name?: string;
@@ -63,12 +69,16 @@ export function describeInstalledBuild(context: vscode.ExtensionContext, appName
 		contributes?: { menus?: Record<string, unknown> };
 	};
 	const menuKeys = Object.keys(manifest.contributes?.menus ?? {}).filter((key) => (GRAPH_MENU_KEYS as readonly string[]).includes(key));
+	const proposals = manifest.enabledApiProposals ?? [];
 
 	return {
 		extensionId: `${manifest.publisher ?? 'luncat8'}.${manifest.name ?? 'git-easy-context-operations'}`,
-		hasProposals: (manifest.enabledApiProposals ?? []).includes('contribSourceControlHistoryItemMenu'),
+		hasProposals: (GRAPH_MENU_PROPOSALS as readonly string[]).some((proposal) => proposals.includes(proposal)),
 		menuKeys,
 		argvPath: argvJsonPath(appName),
+		// `vscode.env.appRoot` is the `resources/app` folder, which is where VS
+		// Code reads its own product.json from.
+		productPath: productJsonPath(appRoot),
 		cliCommand: cliCommandFor(appName),
 		graphVsixName: `${manifest.name ?? 'git-easy-context-operations'}-${manifest.version ?? '0.0.0'}+graph.vsix`,
 	};

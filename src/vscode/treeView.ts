@@ -1,14 +1,22 @@
 /**
  * The "Git Easy Ops" view in the Source Control sidebar.
  *
- * It is the stable, always-available entry point: recent commits, branches and
- * the recovery points/journal this extension created. Its context menu carries
- * the same commands as the palette, and clicking a node hands the command a
+ * It is the stable, always-available entry point: the commit graph itself
+ * (lane art plus the ref badges that point at each commit), the branches and the
+ * recovery points/journal this extension created. Its context menu carries the
+ * same commands as the palette, and clicking a node hands the command a
  * {@link GecoTreeItem} whose fields `resolveMenuArgs` understands.
+ *
+ * The built-in Source Control Graph paints its lanes with a canvas and opens
+ * proposed-API menus, neither of which an extension may do - so this view does
+ * the next best thing: one text row per commit in `●│╮…` form, with a child node
+ * per branch so "Rename Branch..." / "Delete Branch..." are one right-click
+ * away, exactly like in the graph.
  */
 import * as vscode from 'vscode';
 import type { Controller } from '../core/controller';
 import type { Settings } from '../core/config';
+import type { GraphCommitRow, GraphRefRow } from '../core/graphRows';
 import { shorten } from '../core/safety';
 
 export type GecoNodeKind = 'group' | 'commit' | 'branch' | 'backup' | 'journal';
@@ -19,6 +27,8 @@ export class GecoTreeItem extends vscode.TreeItem {
 	readonly sha?: string;
 	readonly name?: string;
 	readonly repoPath: string;
+	/** Refs that point at this commit - rendered as child nodes (graph badges). */
+	readonly graphRefs?: readonly GraphRefRow[];
 
 	constructor(
 		repoPath: string,
@@ -30,19 +40,28 @@ export class GecoTreeItem extends vscode.TreeItem {
 			icon?: string;
 			sha?: string;
 			name?: string;
-			collapsible?: boolean;
+			collapsible?: boolean | 'expanded';
 			contextValue?: string;
+			/** Overrides the default `<kind>:<sha|name|label>` tree id. */
+			id?: string;
+			graphRefs?: readonly GraphRefRow[];
 		} = {},
 	) {
-		super(label, options.collapsible ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+		const state = options.collapsible === 'expanded'
+			? vscode.TreeItemCollapsibleState.Expanded
+			: options.collapsible
+				? vscode.TreeItemCollapsibleState.Collapsed
+				: vscode.TreeItemCollapsibleState.None;
+		super(label, state);
 		this.gecoKind = kind;
 		this.sha = options.sha;
 		this.name = options.name;
 		this.repoPath = repoPath;
+		this.graphRefs = options.graphRefs;
 		this.description = options.description;
 		this.tooltip = options.tooltip;
 		this.contextValue = options.contextValue;
-		this.id = `${kind}:${options.sha ?? options.name ?? label}`;
+		this.id = options.id ?? `${kind}:${options.sha ?? options.name ?? label}`;
 		if (options.icon) {
 			this.iconPath = new vscode.ThemeIcon(options.icon);
 		}
@@ -84,11 +103,15 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 			if (!element) {
 				return this.rootNodes(repoPath);
 			}
-			// Only the three root groups are collapsible; anything else is a leaf.
+			// A commit row expands into the refs that point at it.
+			if (element.gecoKind === 'commit') {
+				return this.refNodes(repoPath, element);
+			}
+			// Only the root groups are collapsible otherwise.
 			const label = typeof element.label === 'string' ? element.label : element.label?.label;
 			switch (label) {
-				case GROUP_COMMITS:
-					return this.commitNodes(repoPath);
+				case GROUP_GRAPH:
+					return this.graphNodes(repoPath);
 				case GROUP_BRANCHES:
 					return this.branchNodes(repoPath);
 				case GROUP_SAFETY:
@@ -104,24 +127,65 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 
 	private rootNodes(repoPath: string): GecoTreeItem[] {
 		return [
-			new GecoTreeItem(repoPath, 'group', GROUP_COMMITS, { icon: 'git-commit', collapsible: true, contextValue: 'geco.group', tooltip: 'Recent commits - right-click for the operations' }),
+			new GecoTreeItem(repoPath, 'group', GROUP_GRAPH, {
+				icon: 'git-commit',
+				collapsible: 'expanded',
+				contextValue: 'geco.group',
+				tooltip: 'The commit graph - right-click a commit for the operations, or expand it to right-click one of its branches',
+			}),
 			new GecoTreeItem(repoPath, 'group', GROUP_BRANCHES, { icon: 'git-branch', collapsible: true, contextValue: 'geco.group', tooltip: 'Local branches' }),
 			new GecoTreeItem(repoPath, 'group', GROUP_SAFETY, { icon: 'history', collapsible: true, contextValue: 'geco.group', tooltip: 'Recovery points and journaled operations' }),
 		];
 	}
 
-	private async commitNodes(repoPath: string): Promise<GecoTreeItem[]> {
-		const commits = await this.deps.controller().listCommits(repoPath, this.deps.settings().commitPickerLimit);
-		if (commits.length === 0) {
+	/**
+	 * The graph rows: `● fix typo` with the lane art in front and the ref badges
+	 * (branch names) after the subject, exactly like the built-in graph - only
+	 * as text, because a tree row cannot be painted.
+	 */
+	private async graphNodes(repoPath: string): Promise<GecoTreeItem[]> {
+		const rows = await this.deps.controller().graphRows(repoPath);
+		if (rows.length === 0) {
 			return [new GecoTreeItem(repoPath, 'commit', 'No commits yet', { icon: 'circle-slash', contextValue: 'geco.empty' })];
 		}
-		return commits.map((commit) =>
-			new GecoTreeItem(repoPath, 'commit', `${commit.label}  ${commit.description}`, {
-				description: commit.detail,
-				tooltip: `${commit.label}\n${commit.description}${commit.detail ? `\n${commit.detail}` : ''}`,
-				icon: 'git-commit',
-				sha: commit.sha,
-				contextValue: 'geco.commit',
+		return rows.map((row) => this.commitNode(repoPath, row));
+	}
+
+	private commitNode(repoPath: string, row: GraphCommitRow): GecoTreeItem {
+		const label = row.art ? `${row.art} ${row.subject}` : row.subject;
+		const description = [row.refsLabel, row.shortSha].filter(Boolean).join('  ');
+		const item = new GecoTreeItem(repoPath, 'commit', label, {
+			description,
+			tooltip: row.tooltip,
+			sha: row.sha,
+			contextValue: 'geco.commit',
+			id: `commit:${row.sha}`,
+			collapsible: row.refs.length > 0,
+			graphRefs: row.refs,
+		});
+		return item;
+	}
+
+	/** The ref badges of a commit row - the branch menu lives here. */
+	private refNodes(repoPath: string, commit: GecoTreeItem): GecoTreeItem[] {
+		const refs = commit.graphRefs ?? [];
+		return refs.map((ref) =>
+			new GecoTreeItem(repoPath, 'branch', ref.name, {
+				description: ref.isHead ? 'checked out' : ref.upstream,
+				tooltip: [
+					`${ref.name} -> ${shorten(ref.sha)}`,
+					ref.isHead ? 'HEAD points here.' : '',
+					ref.upstream ? `tracks ${ref.upstream}` : '',
+					'Right-click to create, rename, check out or delete this branch.',
+				]
+					.filter(Boolean)
+					.join('\n'),
+				icon: ref.isHead ? 'pass-filled' : 'git-branch',
+				name: ref.name,
+				contextValue: 'geco.branch',
+				// The same branch also appears under "Branches"; tree ids have to
+				// stay unique, so the badge is qualified by its commit.
+				id: `ref:${shorten(ref.sha)}:${ref.name}`,
 			}),
 		);
 	}
@@ -181,6 +245,6 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 	}
 }
 
-export const GROUP_COMMITS = 'Commits';
+export const GROUP_GRAPH = 'Graph';
 export const GROUP_BRANCHES = 'Branches';
 export const GROUP_SAFETY = 'Backups & Undo';

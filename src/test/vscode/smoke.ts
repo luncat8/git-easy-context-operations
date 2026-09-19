@@ -21,6 +21,8 @@ const EXPECTED_COMMANDS = [
 	'geco.rewordCommit',
 	'geco.rewordCommitAppend',
 	'geco.rewordCommitRename',
+	'geco.squashSelectedCommits',
+	'geco.squashWithPreviousCommits',
 	'geco.fastForwardDefaultBranch',
 	'geco.fastForwardBranch',
 	'geco.forcePush',
