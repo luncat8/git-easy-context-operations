@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist/
+*.vsix
+.geco-worktrees/
+.vscode-test/
+.DS_Store

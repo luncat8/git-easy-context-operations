@@ -1,0 +1,18 @@
+# Only the bundle, the manifest and the docs belong in the .vsix.
+.vscode/**
+.vscode-test/**
+.github/**
+out/**
+src/**
+scripts/**
+node_modules/**
+dist/**/*.map
+esbuild.js
+tsconfig.json
+**/tsconfig.json
+*.vsix
+*.log
+.gitignore
+.editorconfig
+arena.json
+.claude/**

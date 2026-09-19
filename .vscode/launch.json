@@ -1,0 +1,34 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+			"outFiles": ["${workspaceFolder}/dist/**/*.js"],
+			"preLaunchTask": "npm: watch"
+		},
+		{
+			"name": "Extension Tests (VS Code)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"--extensionTestsPath=${workspaceFolder}/out/src/test/vscode/index"
+			],
+			"outFiles": ["${workspaceFolder}/out/**/*.js"],
+			"preLaunchTask": "npm: compile-tests"
+		},
+		{
+			"name": "Core Tests (node --test)",
+			"type": "node",
+			"request": "launch",
+			"runtimeArgs": ["--test", "out/src/test/**/*.test.js"],
+			"cwd": "${workspaceFolder}",
+			"outFiles": ["${workspaceFolder}/out/**/*.js"],
+			"preLaunchTask": "npm: compile-tests",
+			"console": "integratedTerminal"
+		}
+	]
+}
