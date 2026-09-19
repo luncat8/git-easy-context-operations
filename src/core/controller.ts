@@ -22,6 +22,14 @@ import {
 } from './reword';
 import { fastForwardBranch, resolveBranch, type FastForwardResult } from './fastForward';
 import {
+	collectPreviousCommits,
+	composeSquashMessage,
+	orderSquashSelection,
+	parseSquashCount,
+	squashCommits,
+	type SquashResult,
+} from './squash';
+import {
 	createBranch as createBranchCore,
 	checkoutBranch as checkoutBranchCore,
 	deleteBranch as deleteBranchCore,
@@ -40,8 +48,10 @@ import {
 	type PatchSource,
 } from './patch';
 import { GecoError, isGecoError, toErrorMessage } from './errors';
-import { assessGraphMenu, type ArgvStore, type GraphMenuBuild } from './graphMenu';
+import { assessGraphMenu, graphMenuFixOptions, GRAPH_MENU_PROPOSALS, type ArgvStore, type GraphMenuBuild, type GraphMenuFix } from './graphMenu';
 import { addProposedApi } from './argvJson';
+import { addProductProposals } from './productJson';
+import { buildGraphRows, type GraphCommitRow } from './graphRows';
 import { shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
 import type { CommitInfo, RefInfo } from './git';
 import type { ForcePushMode, PatchDestination } from './config';
@@ -192,13 +202,13 @@ export class Controller {
 		return { edit: { mode: 'findReplace', find, text: replaceWith } };
 	}
 
-	private async pickRewriteBranch(ctx: RepoContext, target: string, info: CommitInfo): Promise<string | undefined> {
+	private async pickRewriteBranch(ctx: RepoContext, target: string, info: CommitInfo, verb = 'Reword'): Promise<string | undefined> {
 		const rewrite = await findRewriteBranch(ctx, target);
 		if (rewrite.branch) {
 			return rewrite.branch;
 		}
 		if (rewrite.candidates.length === 0) {
-			await this.ui.message('error', `${info.shortSha} is not reachable from any local branch, so its message cannot be rewritten.`, rewrite.currentBranch ? `HEAD is ${rewrite.currentBranch}.` : 'HEAD is detached.');
+			await this.ui.message('error', `${info.shortSha} is not reachable from any local branch, so its history cannot be rewritten.`, rewrite.currentBranch ? `HEAD is ${rewrite.currentBranch}.` : 'HEAD is detached.');
 			return undefined;
 		}
 		return this.ui.pick(
@@ -207,7 +217,7 @@ export class Controller {
 				description: name === rewrite.currentBranch ? 'current branch' : undefined,
 				value: name,
 			})),
-			{ title: `Reword ${info.shortSha} on which branch?`, placeholder: 'The commit is on more than one branch' },
+			{ title: `${verb} ${info.shortSha} on which branch?`, placeholder: 'The commit is on more than one branch' },
 		);
 	}
 
@@ -242,6 +252,191 @@ export class Controller {
 
 		const message = `Reworded ${shorten(result.newTargetSha)} on ${where}: "${messageSubject(result.newMessage)}"`
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
+			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
+
+		const chosen = await this.ui.ask(message, { actions });
+		if (chosen === ACTIONS.forcePush) {
+			await this.forcePush(cwd, [], 'lease');
+		} else if (chosen === ACTIONS.forcePushHard) {
+			await this.forcePush(cwd, [], 'force');
+		} else if (chosen === ACTIONS.undo) {
+			await this.undoLast(ctx, true);
+		}
+	}
+
+	// ------------------------------------------------------------- squash
+
+	/**
+	 * "Squash Selected Commits..." - combines every commit row that is selected
+	 * in our own Graph group into one commit.
+	 *
+	 * VS Code only enables multi-selection in a tree view whose extension asked
+	 * for it (`canSelectMany`), and it then hands the command the clicked item
+	 * plus the whole selection as separate arguments - so the selection arrives
+	 * here like any other menu argument.
+	 */
+	async squashSelectedCommits(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Squash', async () => {
+			const ctx = this.contextFor(cwd);
+			const selection: string[] = [];
+			for (const ref of resolveMenuArgs(args).commitRefs) {
+				const sha = await ctx.git.tryRun(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+				if (sha) {
+					if (!selection.includes(sha)) {
+						selection.push(sha);
+					}
+				} else {
+					this.ui.log(`Ignoring "${ref}" from the menu arguments: not a commit in this repository.`);
+				}
+			}
+
+			if (selection.length === 0) {
+				await this.ui.message(
+					'info',
+					'Squash Selected Commits needs a selection in the Graph group.',
+					'Open the Source Control sidebar, Ctrl/Shift-click two or more commit rows of "Git Easy Ops" > "Graph", then right-click inside the selection. To combine one commit with its ancestors, use "Squash with Previous Commits...".',
+				);
+				return;
+			}
+			if (selection.length < 2) {
+				await this.ui.message(
+					'warn',
+					'Only one commit is selected - a squash needs at least two.',
+					'Ctrl/Shift-click the rows of the commits that should become one commit, then right-click inside the selection. "Squash with Previous Commits..." combines a single commit with its ancestors.',
+				);
+				return;
+			}
+
+			await this.runSquash(ctx, cwd, await orderSquashSelection(ctx.git, selection));
+		});
+	}
+
+	/**
+	 * "Squash with Previous Commits..." - asks for N and combines the commit the
+	 * menu was opened on with the N commits before it. This is the variant that
+	 * works from *any* entry point (built-in Source Control Graph, Timeline,
+	 * palette), because it only needs that one commit.
+	 */
+	async squashWithPreviousCommits(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Squash', async () => {
+			const ctx = this.contextFor(cwd);
+			const target = await this.resolveCommit(ctx, args, 'Squash which commit?');
+			if (!target) {
+				return;
+			}
+			const info = await ctx.git.commitInfo(target);
+			const depth = Math.max(0, (await ctx.git.countCommits(target)) - 1);
+			if (depth === 0) {
+				await this.ui.message('info', `${info.shortSha} is the first commit of this repository - there is nothing before it to squash.`);
+				return;
+			}
+
+			const typed = await this.ui.input({
+				title: `Squash into ${info.shortSha}`,
+				prompt: `How many commits before "${info.subject}" should be squashed into it?`,
+				value: String(Math.min(3, depth)),
+				placeholder: `1 - ${Math.min(50, depth)}`,
+				validate: (value) => (parseSquashCount(value) === undefined ? 'Enter a whole number between 1 and 50.' : undefined),
+			});
+			if (typed === undefined) {
+				return;
+			}
+			const count = parseSquashCount(typed);
+			if (count === undefined) {
+				await this.ui.message('warn', 'Enter a whole number between 1 and 50.');
+				return;
+			}
+
+			const selection = await collectPreviousCommits(ctx.git, target, count);
+			if (selection.length < count + 1) {
+				await this.ui.message('warn', `${info.shortSha} has only ${selection.length - 1} commit(s) before it - not enough for ${count}.`, 'Nothing was rewritten.');
+				return;
+			}
+			await this.runSquash(ctx, cwd, selection);
+		});
+	}
+
+	/** The shared half of both squash entry points: message, plan, confirmation, report. */
+	private async runSquash(ctx: RepoContext, cwd: string, selection: readonly string[]): Promise<void> {
+		const infos = await Promise.all(selection.map((sha) => ctx.git.commitInfo(sha)));
+		const oldest = infos[0]!;
+		const newest = infos[infos.length - 1]!;
+
+		const branch = await this.pickRewriteBranch(ctx, newest.sha, newest, 'Squash');
+		if (!branch) {
+			return;
+		}
+
+		const typed = await this.ui.input({
+			title: `Squash ${infos.length} commits into one`,
+			prompt: `Message of the combined commit (default: the message of ${newest.shortSha})`,
+			value: composeSquashMessage(infos.map((info) => info.message)),
+		});
+		if (typed === undefined) {
+			return;
+		}
+		const message = normalizeMessage(typed);
+		if (!message) {
+			await this.ui.message('warn', 'A commit message cannot be empty.');
+			return;
+		}
+
+		const descendants = await ctx.git.countCommits(`${newest.sha}..refs/heads/${branch}`);
+		const upstream = await ctx.git.upstream(branch);
+		if (this.settings.confirmDestructiveOperations) {
+			const confirmed = await this.ui.confirm(`Squash ${infos.length} commits into one on ${branch}?`, {
+				confirmLabel: 'Squash',
+				destructive: true,
+				detail: [
+					...infos.map((info) => `${info.shortSha}  ${info.subject}`),
+					`   -> one commit: "${messageSubject(message)}"`,
+					'',
+					`${infos.length} commits become 1${descendants > 0 ? `; the ${descendants} commit${descendants === 1 ? '' : 's'} after them are replayed with new SHAs` : ''}. The combined commit keeps the tree of ${newest.shortSha}, so the working tree does not change.`,
+					oldest.parents.length > 1 ? `${oldest.shortSha} is a merge commit: only its first parent is kept.` : '',
+					`Recovery point: ${this.settings.backupRefPrefix}... , restore it with "Git Easy Ops: Undo Last Operation".`,
+					upstream?.sha ? `${branch} tracks ${upstream.remote}/${upstream.branch}: a force push is needed afterwards.` : '',
+				].filter(Boolean).join('\n'),
+			});
+			if (!confirmed) {
+				this.ui.log(`Squash of ${infos.length} commits cancelled by the user.`);
+				return;
+			}
+		}
+
+		const result = await this.ui.withProgress(`Squashing ${infos.length} commits`, async (report) => {
+			report(`combining ${infos.length} commits into one on ${branch}`);
+			return squashCommits(ctx, { commits: infos.map((info) => info.sha), branch, message });
+		});
+
+		await this.reportSquash(ctx, result, cwd);
+	}
+
+	private async reportSquash(ctx: RepoContext, result: SquashResult, cwd: string): Promise<void> {
+		this.ui.log(
+			[
+				`Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}`,
+				`  squashed: ${result.squashed.map((commit) => `${commit.shortSha} ${commit.subject}`).join(' | ')}`,
+				`  message:  ${JSON.stringify(messageSubject(result.message))}`,
+				`  tip:      ${shorten(result.oldTip)} -> ${shorten(result.newTip)}`,
+				`  replayed commits after the squash: ${result.rewritten.length - 1}`,
+				result.base ? `  parent of the combined commit: ${shorten(result.base)}` : '  the combined commit is a root commit',
+				result.backupRef ? `  recovery point: ${result.backupRef}` : '',
+				result.needsForcePush ? `  a force push to ${result.upstreamRef ?? 'the remote'} is needed` : '',
+				result.otherRefsOnOldHistory.length > 0 ? `  still on the old history: ${result.otherRefsOnOldHistory.join(', ')}` : '',
+				result.signatureDropped ? '  one of the squashed commits was signed; the signature does not survive a rewrite' : '',
+			].filter(Boolean).join('\n'),
+		);
+
+		const actions: string[] = [];
+		if (result.needsForcePush) {
+			actions.push(ACTIONS.forcePush);
+			if (this.settings.forcePushMode !== 'force') {
+				actions.push(ACTIONS.forcePushHard);
+			}
+		}
+		actions.push(ACTIONS.undo);
+
+		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${messageSubject(result.message)}"`
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
 		const chosen = await this.ui.ask(message, { actions });
@@ -1151,7 +1346,11 @@ export class Controller {
 	async explainMenus(): Promise<void> {
 		const body = [
 			'Git Easy Ops shows up in these places - all of them need no special build:',
-			'  - Source Control sidebar: the "Git Easy Ops" view (commits, branches, backups) with a full context menu.',
+			'  - Source Control sidebar: the "Git Easy Ops" view. Its "Graph" group *is* the',
+			'    commit graph (lane art plus ref badges), and its context menus carry every',
+			'    operation - right-click a commit, or expand it and right-click a branch.',
+			'    Ctrl/Shift-click selects several commit rows, so "Squash Selected Commits..."',
+			'    can turn a run of commits into one.',
 			'  - Source Control title / repository menu ("..."): "Git Easy Ops" submenu.',
 			'  - Timeline view: right-click a commit of the selected file.',
 			'  - Command Palette: "Git Easy Ops: ..." (asks for the commit when nothing is selected).',
@@ -1164,30 +1363,45 @@ export class Controller {
 			'',
 			'  1. npm run package:graph              # builds <name>-<version>+graph.vsix',
 			'  2. code --install-extension <that file>',
-			'  3. allow the proposal, either persistently in argv.json',
+			'  3. allow the proposal for the extension id - either in product.json',
+			'       "extensionEnabledApiProposals": { "luncat8.git-easy-context-operations":',
+			'         ["contribSourceControlHistoryItemMenu", "contribSourceControlHistoryTitleMenu"] }',
+			'     which needs no command line at all, or in argv.json',
 			'       "enable-proposed-api": ["luncat8.git-easy-context-operations"]',
-			'     (Command Palette: "Preferences: Configure Runtime Arguments")',
-			'     or per launch: code --enable-proposed-api luncat8.git-easy-context-operations',
+			'     (Command Palette: "Preferences: Configure Runtime Arguments"), or per launch',
+			'       code --enable-proposed-api luncat8.git-easy-context-operations',
 			'  4. restart VS Code',
 			'',
 			'Step 3 is what "Git Easy Ops: Enable Source Control Graph Menu..." does for',
-			'you - it also reports which of the two halves is still missing.',
+			'you - it offers both files, writes the entry, and reports which half is still',
+			'missing.',
 			'',
-			'In the graph, commit rows then offer reword / fast-forward / patch / create',
-			'branch, and the branch rows offer create / rename / check out / delete branch.',
+			'In the graph the items are not hidden in a "Git Easy Ops" submenu: they sit',
+			'inside the groups the built-in items already use - squash/reword next to',
+			'Cherry Pick, patch / fast-forward / force push right after Compare - so',
+			'everything is one click away. On a branch badge, "Rename Branch... > main"',
+			'lands next to checkout and delete (that per-ref submenu is how VS Code renders',
+			'scm/historyItemRef/context - git has no rename in the graph at all).',
+			'',
+			'The built-in graph cannot select several rows (VS Code turns multi-selection',
+			'off for its own history list), so use "Squash with Previous Commits..." there:',
+			'it asks how many commits before the one you clicked should become one. Our own',
+			'Graph group above *is* multi-select - Ctrl/Shift-click the rows and use',
+			'"Squash Selected Commits...".',
 		].join('\n');
 		this.ui.log(body);
-		await this.ui.message('info', 'Git Easy Ops menus: the sidebar view, Timeline, SCM title and palette work everywhere. The Source Control Graph commit and branch menus need the graph build - see the output log.');
+		await this.ui.message('info', 'Git Easy Ops menus: the sidebar view (graph included), Timeline, SCM title and palette work everywhere. The built-in Source Control Graph menus need the graph build - see the output log.');
 	}
 
 	/**
-	 * Diagnoses (and, with permission, fixes) the one thing that keeps the Source
+	 * Diagnoses (and, with permission, fixes) the thing that keeps the Source
 	 * Control Graph commit menu from appearing: the proposal is not allowed for
-	 * this extension in VS Code's runtime arguments file.
+	 * this extension. There are two ways to allow it - `product.json` (no command
+	 * line at all) and `argv.json` (per user) - and this offers both.
 	 */
-	async enableGraphMenu(build: GraphMenuBuild, store: ArgvStore): Promise<void> {
+	async enableGraphMenu(build: GraphMenuBuild, argv: ArgvStore, product?: ArgvStore): Promise<void> {
 		await this.guard('Graph menu', async () => {
-			let status = assessGraphMenu(build, await store.read());
+			let status = assessGraphMenu(build, await argv.read(), product ? await product.read() : undefined);
 			this.ui.log(status.report);
 
 			if (status.ready) {
@@ -1195,44 +1409,69 @@ export class Controller {
 				return;
 			}
 
-			if (!status.allowedInArgv) {
-				const confirmed = await this.ui.confirm(`Allow proposed APIs for ${build.extensionId}?`, {
-					confirmLabel: 'Update argv.json',
-					detail: [
-						`Adds one line to ${build.argvPath}:`,
-						'',
-						`  "enable-proposed-api": ["${build.extensionId}"]`,
-						'',
-						'A backup is written next to the file, comments are kept, and VS Code must be restarted.',
-						build.hasProposals ? '' : 'Note: the installed build also has to be the graph build (see the output log).',
-					].filter((line) => line !== undefined).join('\n'),
-				});
-				if (!confirmed) {
-					this.ui.log('argv.json was not modified.');
-				} else {
-					const backup = await store.backup();
-					const updated = addProposedApi((await store.read()) ?? '', build.extensionId);
-					await store.write(updated);
-					this.ui.log(`Updated ${build.argvPath}${backup ? ` (backup: ${backup})` : ''}`);
-					status = assessGraphMenu(build, updated);
-				}
-			}
-
-			if (status.ready) {
-				const chosen = await this.ui.ask('Graph commit menu enabled. Restart VS Code, then right-click a commit in Source Control > Graph.', {
-					actions: [ACTIONS.openLog],
-				});
+			if (!build.hasProposals) {
+				// Half one is a build problem: the manifest has to declare the
+				// proposal and contribute the menus.
+				const chosen = await this.ui.ask(
+					'The installed build cannot show the graph commit menu: it does not declare the proposed API. Install the graph build with "npm run package:graph".',
+					{ detail: status.steps.join('\n'), actions: [ACTIONS.openLog] },
+				);
 				if (chosen === ACTIONS.openLog) {
 					await this.ui.showOutput?.();
 				}
 				return;
 			}
 
-			if (!build.hasProposals) {
-				const chosen = await this.ui.ask(
-					'The installed build cannot show the graph commit menu: it does not declare the proposed API. Install the graph build with "npm run package:graph".',
-					{ detail: status.steps.join('\n'), actions: [ACTIONS.openLog] },
-				);
+			// Half two: allow the proposal. Ask *how*, then confirm the edit.
+			const options = graphMenuFixOptions(build).filter((option) => option.value !== 'product' || Boolean(product));
+			const fix = await this.ui.pick<GraphMenuFix>(options, {
+				title: `Allow proposed APIs for ${build.extensionId}?`,
+				placeholder: 'Pick the file to update (nothing is written before you confirm)',
+			});
+			if (fix === undefined) {
+				this.ui.log('Nothing was changed.');
+				await this.ui.message('warn', 'The graph commit menu is still not available.', status.steps.join('\n'));
+				return;
+			}
+			if (fix === 'none') {
+				this.ui.log('No file was modified.');
+				await this.ui.message('warn', 'The graph commit menu is still not available.', status.steps.join('\n'));
+				return;
+			}
+
+			const option = options.find((candidate) => candidate.value === fix)!;
+			const confirmed = await this.ui.confirm(
+				fix === 'product'
+					? `Allow proposed APIs for ${build.extensionId} in the editor's product.json?`
+					: `Allow proposed APIs for ${build.extensionId} in argv.json?`,
+				{
+					confirmLabel: fix === 'product' ? 'Update product.json' : 'Update argv.json',
+					detail: option.detail,
+				},
+			);
+			if (!confirmed) {
+				this.ui.log(`${fix === 'product' ? 'product.json' : 'argv.json'} was not modified.`);
+				await this.ui.message('warn', 'The graph commit menu is still not available.', status.steps.join('\n'));
+				return;
+			}
+
+			if (fix === 'product') {
+				const backup = await product!.backup();
+				const updated = addProductProposals((await product!.read()) ?? '{}', build.extensionId, GRAPH_MENU_PROPOSALS);
+				await product!.write(updated);
+				this.ui.log(`Updated ${build.productPath}${backup ? ` (backup: ${backup})` : ''}`);
+			} else {
+				const backup = await argv.backup();
+				const updated = addProposedApi((await argv.read()) ?? '', build.extensionId);
+				await argv.write(updated);
+				this.ui.log(`Updated ${build.argvPath}${backup ? ` (backup: ${backup})` : ''}`);
+			}
+
+			status = assessGraphMenu(build, await argv.read(), product ? await product.read() : undefined);
+			if (status.ready) {
+				const chosen = await this.ui.ask('Graph commit menu enabled. Restart VS Code, then right-click a commit in Source Control > Graph.', {
+					actions: [ACTIONS.openLog],
+				});
 				if (chosen === ACTIONS.openLog) {
 					await this.ui.showOutput?.();
 				}
@@ -1267,6 +1506,23 @@ export class Controller {
 
 	async listBranches(cwd: string): Promise<RefInfo[]> {
 		return this.contextFor(cwd).git.branches();
+	}
+
+	/**
+	 * Everything the "Graph" group of our own Source Control panel shows: the
+	 * commits across all refs in topological order, each with its lane art and
+	 * the refs that point at it. This is the stand-in for the built-in Source
+	 * Control Graph, whose rows cannot be extended without a proposed API.
+	 */
+	async graphRows(cwd: string): Promise<GraphCommitRow[]> {
+		const ctx = this.contextFor(cwd);
+		const [commits, refs] = await Promise.all([
+			// Real history only: the recovery refs under `refs/geco/` would
+			// otherwise show the commits an operation just replaced.
+			ctx.git.commits({ refs: ['--branches', '--remotes', '--tags'], limit: this.settings.graphCommitLimit, topoOrder: true }),
+			ctx.git.listRefs(['refs/heads', 'refs/remotes', 'refs/tags']),
+		]);
+		return buildGraphRows(commits, refs, { lanes: this.settings.showGraphLanes });
 	}
 
 	async listRecoveryPoints(cwd: string): Promise<RecoveryPoint[]> {

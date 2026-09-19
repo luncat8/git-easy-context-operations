@@ -4,6 +4,70 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.2.0
+
+The Source Control sidebar view becomes the graph, the built-in Source Control
+Graph menus start working - without a command line - and commits can be squashed
+into one.
+
+### Added
+
+- **The "Git Easy Ops" view now shows the commit graph**: lane art (`●│╮`) drawn
+  from the real parent structure, the refs that point at each commit, relative
+  dates and tooltips. Every commit expands into its branches as child nodes, so
+  **Create / Rename / Check Out / Delete Branch**, fast-forward, backup and
+  force push are one right-click away - in VS Code and VSCodium alike, since a
+  tree view is a stable API.
+- **Two settings for that graph**: `geco.showGraphLanes` (default `true`) turns
+  the lane art off for a plain list, `geco.graphCommitLimit` (default `200`) sets
+  how much history the group lists.
+- **Multi-select in the graph group** (Ctrl/Shift-click): VS Code hands a command
+  every selected row, which is what makes the next item possible.
+- **Squash Selected Commits...** combines the selected rows into one commit that
+  keeps the tree of the newest one, the parents of the oldest one and a message
+  you can edit (pre-filled with the newest commit's message). Commits after the
+  run are replayed, a recovery point is created, and one **Undo** brings every
+  squashed commit back.
+- **Squash with Previous Commits...** does the same from any single commit row -
+  the built-in Source Control Graph, the Timeline, the palette - by asking for the
+  number of previous commits (1-50) to combine it with. This is the variant that
+  works where multi-select does not exist.
+- A selection that is not an unbroken run fails with an explanation: the gap is
+  named ("v0.3 is not selected") and a selection spanning two branches is refused
+  instead of guessed.
+
+### Fixed
+
+- **The graph build's branch menu never appeared.** VS Code builds the ref menu
+  of the Source Control Graph per reference and only picks up plain *commands*
+  from `scm/historyItemRef/context` - a contributed submenu is silently dropped.
+  The graph build now contributes **Rename Branch...** there (the one branch
+  operation git has no equivalent for), so it shows up as a per-ref submenu of
+  the commit row menu - `Rename Branch... > main`, right next to *Checkout > main*
+  and *Delete Branch > main*.
+- **The graph no longer lists the history an operation replaced.** The rows were
+  read with `git log --all`, which includes the hidden recovery refs under
+  `refs/geco/`; a reword or squash therefore showed the old commits as a second
+  history. The rows now come from `--branches --remotes --tags`.
+
+### Changed
+
+- **The graph menus are flat instead of a "Git Easy Ops" submenu.** Every item
+  now sits in the groups the built-in entries already use (squash/reword next to
+  *Cherry Pick*, patch and fast-forward/force-push in their own sections after
+  *Compare*), so nothing has to be looked up under an extension name. Duplicates
+  with the built-in items (checkout, create branch, create tag, cherry pick, copy
+  commit id, delete branch) were dropped from the graph build - the extension
+  only adds what the built-in graph does not have.
+- The sidebar view's menus are flat too - its rows are ours alone, and the items
+  are grouped the same way instead of nesting a submenu one level deep.
+- **"Enable Source Control Graph Menu..." offers two routes** and explains what
+  each one costs: `product.json` (no command line, no launch flag - an editor
+  update may replace it) and `argv.json` (per user, survives updates). The
+  diagnosis now reports both files and says when a grant is already in place.
+- "Why Don't I See the Menus?" explains the per-ref submenu behaviour and points
+  at the sidebar graph first.
+
 ## 0.1.0
 
 First release.

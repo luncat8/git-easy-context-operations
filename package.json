@@ -1,8 +1,8 @@
 {
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
-  "description": "Right-click a commit to reword its message, fast-forward main (keeping the old tip as a backup branch), force-push safely, and apply a patch at its proper base.",
-  "version": "0.1.0",
+  "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
+  "version": "0.2.0",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -57,6 +57,20 @@
         "title": "Rename Text in Commit Message...",
         "category": "Git Easy Ops",
         "icon": "$(replace-all)"
+      },
+      {
+        "command": "geco.squashSelectedCommits",
+        "title": "Squash Selected Commits...",
+        "shortTitle": "Squash Selected",
+        "category": "Git Easy Ops",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "geco.squashWithPreviousCommits",
+        "title": "Squash with Previous Commits...",
+        "shortTitle": "Squash with Previous...",
+        "category": "Git Easy Ops",
+        "icon": "$(git-merge)"
       },
       {
         "command": "geco.fastForwardDefaultBranch",
@@ -211,9 +225,74 @@
       ],
       "view/item/context": [
         {
-          "submenu": "geco.commitSubmenu",
+          "command": "geco.rewordCommit",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
-          "group": "1_geco@1"
+          "group": "1_message@1"
+        },
+        {
+          "command": "geco.rewordCommitAppend",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "1_message@2"
+        },
+        {
+          "command": "geco.rewordCommitRename",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "1_message@3"
+        },
+        {
+          "command": "geco.squashSelectedCommits",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "2_commit@1"
+        },
+        {
+          "command": "geco.squashWithPreviousCommits",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "2_commit@2"
+        },
+        {
+          "command": "geco.createBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "3_branch@1"
+        },
+        {
+          "command": "geco.fastForwardDefaultBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "4_move@1"
+        },
+        {
+          "command": "geco.fastForwardBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "4_move@2"
+        },
+        {
+          "command": "geco.createBackupBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "4_move@3"
+        },
+        {
+          "command": "geco.forcePush",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "5_remote@1"
+        },
+        {
+          "command": "geco.forcePushHard",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "5_remote@2"
+        },
+        {
+          "command": "geco.applyPatchAtProperBase",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "6_patch@1"
+        },
+        {
+          "command": "geco.findProperBase",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "6_patch@2"
+        },
+        {
+          "command": "geco.enableGraphMenu",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "9_misc@1"
         },
         {
           "command": "geco.copyCommitSha",
@@ -221,9 +300,44 @@
           "group": "inline@1"
         },
         {
-          "submenu": "geco.branchSubmenu",
+          "command": "geco.createBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
-          "group": "1_geco@1"
+          "group": "1_branch@1"
+        },
+        {
+          "command": "geco.renameBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "1_branch@2"
+        },
+        {
+          "command": "geco.checkoutBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "1_branch@3"
+        },
+        {
+          "command": "geco.deleteBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "1_branch@4"
+        },
+        {
+          "command": "geco.fastForwardBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "2_move@1"
+        },
+        {
+          "command": "geco.createBackupBranch",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "2_move@2"
+        },
+        {
+          "command": "geco.forcePush",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "3_remote@1"
+        },
+        {
+          "command": "geco.forcePushHard",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "3_remote@2"
         },
         {
           "command": "geco.undoLastOperation",
@@ -243,6 +357,10 @@
         {
           "command": "geco.rewordCommitRename",
           "group": "1_message@3"
+        },
+        {
+          "command": "geco.squashWithPreviousCommits",
+          "group": "2_commit@1"
         },
         {
           "command": "geco.fastForwardDefaultBranch",
@@ -456,6 +574,16 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show a one-time hint explaining how to enable the Source Control Graph context menu (it needs a proposed VS Code API)."
+        },
+        "geco.graphCommitLimit": {
+          "type": "number",
+          "default": 200,
+          "markdownDescription": "How many commits the **Graph** group of the \"Git Easy Ops\" view lists (ordered topologically, across all refs)."
+        },
+        "geco.showGraphLanes": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Draw the `●│╮…` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits."
         }
       }
     }

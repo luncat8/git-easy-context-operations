@@ -4,9 +4,17 @@ Right-click a commit or a branch and do the git surgery that is awkward on the
 command line - **reword an old commit**, **fast-forward `main` onto it** (keeping
 the old tip as a backup branch), **create / rename / delete a branch**,
 **force-push safely**, or **apply a patch at the base it actually belongs to**.
-Every operation writes a recovery point first and can be undone.
+Every operation writes a recovery point first and (i hope) can be undone.
 
 Works in VS Code and VSCodium. No proposed APIs required for the default install.
+
+## Main Highlighted Features
+
+- **Squash N commits** - combine any contiguous run of commits into one
+- **Change commit message** - reword, append, or rename text in any commit's message
+- **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first
+
+# Next text is not for human (ask LLM if need)
 
 ## Features
 
@@ -18,58 +26,86 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 | 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. |
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. Undo rolls operations back, newest first. |
 
-| 6 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
+| 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
 
-Plus: **Copy Commit SHA**.
+| 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
+
+Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
+(lanes, ref badges, relative dates) with the same context menus on commits and
+branches, so the operations work the same in VS Code, VSCodium and Remote-SSH
+without any proposed API.
 
 ## Where the menus are
 
 **Always available, no flags, VS Code and VSCodium:**
 
-- **Source Control sidebar → "Git Easy Ops" view** - recent commits, branches and
-  recovery points, each with a full context menu (commit rows: reword, fast-forward,
-  patch, **create branch**; branch rows: **create / rename / check out / delete**).
-  This is the main entry point.
+- **Source Control sidebar → "Git Easy Ops" view → "Graph"** - the commit graph
+  itself: lane art (`●│╮…`), every ref that points at a commit, relative dates and
+  a full context menu on each row - no "Git Easy Ops" submenu to look for, the
+  items sit in plain groups (message / commit / branch / move / remote / patch).
+  Ctrl/Shift-click selects several commit rows, and **Squash Selected Commits...**
+  then combines the whole selection into one commit. Expand a commit to get its
+  branches as child nodes - right-clicking one of those gives **Create / Rename /
+  Check Out / Delete Branch**, fast-forward, backup and force push. This is the
+  stand-in for the built-in Source Control Graph, which cannot be extended without
+  a proposed API (see below).
+- **The same view** also lists all branches and the recovery points/journal.
 - **Timeline view** - right-click a commit row of the selected file
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
 - **Command Palette** → `Git Easy Ops: ...` (asks for the commit when nothing is selected).
 
-### Right-clicking a commit or branch in the built-in **Source Control Graph**
+### The built-in **Source Control Graph** (commit and branch rows)
 
-Commit rows (`scm/historyItem/context`) get the commit menu - reword, fast-forward,
-patch, **Create Branch...** - and the branch/ref rows (`scm/historyItemRef/context`)
-get the branch menu: **Create / Rename / Check Out / Delete Branch**, fast-forward,
-backup, force push.
+Adding entries to that graph needs a **proposed** VS Code API
+(`contribSourceControlHistoryItemMenu` - still proposed in VS Code 1.10x). A
+Marketplace-published extension cannot declare it, so the repo ships a second
+build, and VS Code additionally requires the proposal to be **allowed** for the
+extension id. Both halves are needed:
 
-Those two menu keys are a **proposed** VS Code API (proposal
-`contribSourceControlHistoryItemMenu` - still proposed as of VS Code 1.10x), and
-the Marketplace refuses manifests that declare `enabledApiProposals`. So it ships
-as a second build, and VS Code needs *both* halves:
+1. install the graph build (`git-easy-context-operations-0.2.0+graph.vsix`), and
+2. allow the proposal - easiest via `product.json` (no command line at all):
 
-```bash
-# 1. build the graph flavour and install it
-npm run package:graph                       # -> git-easy-context-operations-<version>+graph.vsix
-code --install-extension git-easy-context-operations-0.1.0+graph.vsix
-
-# 2. allow the proposal (persistent) - Command Palette:
-#    "Preferences: Configure Runtime Arguments", then add to ~/.vscode/argv.json:
-#      { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
-#    ...or per launch:
-code --enable-proposed-api luncat8.git-easy-context-operations
-
-# 3. restart VS Code
+```jsonc
+// <install>/resources/app/product.json
+"extensionEnabledApiProposals": {
+  "luncat8.git-easy-context-operations": [
+    "contribSourceControlHistoryItemMenu",
+    "contribSourceControlHistoryTitleMenu"
+  ]
+}
 ```
 
-Shortcuts:
+   ...or per user in `~/.vscode/argv.json` (`~/.vscode-oss/argv.json` for
+   VSCodium), or per launch with `code --enable-proposed-api <id>`.
 
-- `npm run package:graph -- --install` builds **and** installs it.
-- Inside VS Code, run **Git Easy Ops: Enable Source Control Graph Menu...** - it
-  writes that `argv.json` line for you (comments and other settings preserved,
-  backup written next to it) and tells you exactly which half is still missing:
-  the build, the runtime argument, or nothing at all.
-- `npm run graph-menu:on|off|status` patches `package.json` by hand; `off` is what
-  you want before publishing.
+   Inside the editor, **Git Easy Ops: Enable Source Control Graph Menu...** offers
+   both files, writes the entry (with a backup) and reports what is still missing.
+3. restart VS Code or ctrl-shift-p Developer: Reload Window
+
+In the graph, the items are **flattened into the groups the built-in entries
+already use** instead of hiding in a "Git Easy Ops" submenu:
+
+| Group (next to the built-in items) | What this build adds |
+|------------------------------------|----------------------|
+| *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reword Commit Message...**, **Append to...**, **Rename Text in...** |
+| after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
+| new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
+| new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
+
+Nothing is duplicated: the built-in graph already offers checkout, create branch,
+create tag, cherry pick, copy commit id and - on a branch badge - delete branch,
+so this build does not repeat them. The one thing git has no counterpart for is
+renaming a branch, which is why **Rename Branch... › main** appears on the ref
+badge itself (`scm/historyItemRef/context`: VS Code only accepts plain commands
+there and builds the per-ref entry itself, exactly like *Checkout › main* and
+*Delete Branch › main*).
+
+The built-in graph cannot select several rows, so use **Squash with Previous
+Commits...** there - it asks for the number of commits before the one you clicked.
+Our own **Graph** group above is multi-select, so *Squash Selected Commits...*
+works on any contiguous run you select (a gap or a selection spanning two branches
+is refused with an explanation instead of guessing).
 
 Running from source (`F5`) needs no flag at all: an Extension Development Host
 grants the proposals listed in `enabledApiProposals`.
@@ -80,21 +116,26 @@ The built artifacts are **committed to this repository**, so a clone is enough -
 no toolchain needed:
 
 ```bash
-# the graph flavour: commit AND branch context menus in the built-in Source Control Graph
-code   --install-extension git-easy-context-operations-0.1.0+graph.vsix
-codium --install-extension git-easy-context-operations-0.1.0+graph.vsix
+# the everyday build: sidebar graph, Timeline, SCM menus, palette
+code   --install-extension git-easy-context-operations-0.2.0.vsix
+codium --install-extension git-easy-context-operations-0.2.0.vsix
+
+# the graph flavour: the same plus context menus in the built-in Source Control Graph
+code   --install-extension git-easy-context-operations-0.2.0+graph.vsix
+codium --install-extension git-easy-context-operations-0.2.0+graph.vsix
 ```
 
-Then allow the proposal (once) - inside the editor run **Git Easy Ops: Enable
-Source Control Graph Menu...**, or add this to `~/.vscode/argv.json`
-(`~/.vscode-oss/argv.json` for VSCodium) and restart:
+For the graph flavour, allow the proposed API once - inside the editor run **Git
+Easy Ops: Enable Source Control Graph Menu...** and pick `product.json` (no
+command line) or `argv.json`, or edit the file yourself:
 
-```json
+```jsonc
+// ~/.vscode/argv.json (~/.vscode-oss/argv.json for VSCodium), then restart
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`git-easy-context-operations-0.1.0.vsix` (no `+graph`) is the Marketplace-safe
-build: same commands, but they appear in the sidebar view, Timeline, the Source
+`git-easy-context-operations-0.2.0.vsix` (no `+graph`) is the Marketplace-safe
+build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
 
@@ -102,7 +143,7 @@ Building them yourself:
 
 ```bash
 npm install
-npm run package         # publishable build: sidebar view, Timeline, SCM menus, palette
+npm run package         # publishable build: sidebar graph, Timeline, SCM menus, palette
 npm run package:graph   # + the Source Control Graph commit/branch context menus
 ```
 
@@ -149,13 +190,15 @@ do that before publishing).
 | `geco.threeWayApply` | `true` | Fall back to `git apply --3way` / `git am -3`. |
 | `geco.journalMaxEntries` | `100` | How many operations Undo remembers. |
 | `geco.showGraphMenuHint` | `true` | One-time hint about the entry points. |
+| `geco.graphCommitLimit` | `200` | Commits listed in the **Graph** group of the sidebar view. |
+| `geco.showGraphLanes` | `true` | Draw the `●│╮…` lane art in the Graph group (`false` = plain list). |
 
 ## Development
 
 ```bash
 npm install
 npm run compile        # type-check + bundle to dist/extension.js
-npm test               # 377 headless tests (real git repositories, no editor)
+npm test               # 441 headless tests (real git repositories, no editor)
 npm run test:vscode    # integration smoke test inside a real VS Code
 npm run package        # build the .vsix
 ```
@@ -172,7 +215,9 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
 
 - A signed commit loses its signature when it is rewritten (git cannot re-sign
   without your key); you are told when that happens.
-- Rewording needs the commit to be reachable from a local branch.
+- Rewording and squashing need the commit to be reachable from a local branch.
+- A squash covers an **unbroken run** of commits (no gaps, no selection across two
+  branches); merge commits inside the run are flattened to their first parent.
 - **Fast-Forward** moves a branch, it does not rebase: if the branch has commits
   the target does not, you are shown them and asked before anything is forced.
 - Undo restores refs, branches, worktrees and (for pushes) the remote branch. It

@@ -21,7 +21,7 @@
  */
 import type { RepoContext } from './context';
 import { GecoError } from './errors';
-import type { CommitInfo } from './git';
+import { discardRecoveryRef, isSignedCommit, rewriteCommit } from './rewrite';
 import { shorten } from './safety';
 
 export type MessageEditMode = 'replace' | 'append' | 'prepend' | 'findReplace';
@@ -234,7 +234,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 		newMessage,
 		needsForcePush: false,
 		otherRefsOnOldHistory: [],
-		signatureDropped: await isSigned(git, targetSha),
+		signatureDropped: await isSignedCommit(git, targetSha),
 	};
 
 	if (normalizeMessage(oldMessage) === newMessage) {
@@ -256,7 +256,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 		const backupRef = createBackup ? await safety.hiddenBackupRef('reword/detached-head', targetSha) : undefined;
 		try {
 			const map = new Map<string, string>();
-			const newTarget = await rewriteOne(git, targetSha, newMessage, map, preserveCommitterDate);
+			const newTarget = await rewriteCommit(git, targetSha, newMessage, map, preserveCommitterDate);
 			await git.updateRef('HEAD', newTarget, { oldValue: targetSha, message: `geco reword ${shorten(targetSha)}` });
 			await safety.record({
 				kind: 'reword',
@@ -276,7 +276,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 				rewritten: [{ from: targetSha, to: newTarget, subject: messageSubject(newMessage) }],
 			};
 		} catch (error) {
-			await discardBackup(git, backupRef);
+			await discardRecoveryRef(git, backupRef);
 			throw error;
 		}
 	}
@@ -301,7 +301,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 	const backupRef = createBackup ? await safety.hiddenBackupRef(`reword/${branchName}`, branchSha) : undefined;
 	try {
 		const map = new Map<string, string>();
-		const newTarget = await rewriteOne(git, targetSha, newMessage, map, preserveCommitterDate);
+		const newTarget = await rewriteCommit(git, targetSha, newMessage, map, preserveCommitterDate);
 		map.set(targetSha, newTarget);
 
 		const rewritten: RewrittenCommit[] = [
@@ -311,7 +311,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 		const descendants = await git.ancestryPathOldestFirst(targetSha, branchSha);
 		for (const sha of descendants) {
 			const preserved = await git.rawMessage(sha);
-			const rewrittenSha = await rewriteOne(git, sha, preserved, map, preserveCommitterDate);
+			const rewrittenSha = await rewriteCommit(git, sha, preserved, map, preserveCommitterDate);
 			map.set(sha, rewrittenSha);
 			rewritten.push({ from: sha, to: rewrittenSha, subject: messageSubject(preserved) });
 		}
@@ -353,41 +353,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 			otherRefsOnOldHistory: [...containingBranches, ...containingTags.map((t) => `tag:${t}`)],
 		};
 	} catch (error) {
-		await discardBackup(git, backupRef);
+		await discardRecoveryRef(git, backupRef);
 		throw error;
 	}
-}
-
-// --------------------------------------------------------------------- helpers
-
-async function rewriteOne(
-	git: RepoContext['git'],
-	sha: string,
-	message: string,
-	mapped: Map<string, string>,
-	preserveCommitterDate: boolean,
-): Promise<string> {
-	const info: CommitInfo = await git.commitInfo(sha);
-	const committer = preserveCommitterDate
-		? info.committer
-		: { ...info.committer, date: new Date().toISOString() };
-	return git.commitTree({
-		tree: info.tree,
-		parents: info.parents.map((parent) => mapped.get(parent) ?? parent),
-		message,
-		author: info.author,
-		committer,
-	});
-}
-
-async function isSigned(git: RepoContext['git'], sha: string): Promise<boolean> {
-	const status = await git.signatureStatus(sha);
-	return !!status && status !== 'N';
-}
-
-async function discardBackup(git: RepoContext['git'], backupRef: string | undefined): Promise<void> {
-	if (!backupRef) {
-		return;
-	}
-	await git.run(['update-ref', '-d', backupRef]);
 }

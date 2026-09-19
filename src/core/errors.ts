@@ -13,6 +13,7 @@ export type GecoErrorCode =
 	| 'ref-not-found'
 	| 'detached-head'
 	| 'commit-not-on-branch'
+	| 'not-a-chain'
 	| 'dirty-worktree'
 	| 'not-fast-forward'
 	| 'no-remote'

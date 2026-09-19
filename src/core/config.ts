@@ -25,6 +25,8 @@ export interface Settings {
 	threeWayApply: boolean;
 	journalMaxEntries: number;
 	showGraphMenuHint: boolean;
+	graphCommitLimit: number;
+	showGraphLanes: boolean;
 }
 
 /**
@@ -45,6 +47,8 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	threeWayApply: 'geco.threeWayApply',
 	journalMaxEntries: 'geco.journalMaxEntries',
 	showGraphMenuHint: 'geco.showGraphMenuHint',
+	graphCommitLimit: 'geco.graphCommitLimit',
+	showGraphLanes: 'geco.showGraphLanes',
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -61,6 +65,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	threeWayApply: true,
 	journalMaxEntries: 100,
 	showGraphMenuHint: true,
+	graphCommitLimit: 200,
+	showGraphLanes: true,
 };
 
 const FORCE_PUSH_MODES: readonly ForcePushMode[] = ['lease', 'force'];
@@ -106,6 +112,8 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		threeWayApply: asBoolean(source.threeWayApply, DEFAULT_SETTINGS.threeWayApply),
 		journalMaxEntries: asInt(source.journalMaxEntries, DEFAULT_SETTINGS.journalMaxEntries, 1, 1000),
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
+		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
+		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),
 	};
 }
 

@@ -162,6 +162,16 @@ describe('manifest - menus', () => {
 		}
 	});
 
+	it('makes our own view the graph: lanes first, expanded, with branch badges', () => {
+		const treeSource = sourceOf('src/vscode/treeView.ts');
+		assert.match(treeSource, /export const GROUP_GRAPH = 'Graph'/);
+		// The graph group comes first and opens itself, so the panel looks like
+		// the built-in graph instead of a collapsed list of groups.
+		assert.match(treeSource, /new GecoTreeItem\(repoPath, 'group', GROUP_GRAPH, \{[^}]*collapsible: 'expanded'/, 'the graph group is not expanded');
+		assert.match(treeSource, /GEcoTreeItem\(repoPath, 'branch', ref\.name|GecoTreeItem\(repoPath, 'branch', ref\.name/, 'ref badges are not rendered as branch nodes');
+		assert.match(treeSource, /controller\(\)\.graphRows\(repoPath\)/, 'the graph group does not ask for graph rows');
+	});
+
 	it('matches the contextValue strings the tree view actually produces', () => {
 		const treeSource = sourceOf('src/vscode/treeView.ts');
 		const produced = [...new Set([...treeSource.matchAll(/contextValue: '(geco\.[a-z]+)'/g)].map((m) => m[1]!))];
@@ -179,6 +189,48 @@ describe('manifest - menus', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
 			assert.equal(entry.when, 'view == geco.history');
 		}
+	});
+
+	it('puts our own view items straight into categories instead of a submenu', () => {
+		// A submenu one extension deep is a puzzle ("which extension owns this?")
+		// - in our own view every entry is a first-class citizen, grouped the way
+		// the built-in menus group theirs.
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		assert.equal(itemContext.some((entry) => entry.submenu), false, 'our own view still nests a submenu');
+		const commitGroups = itemContext
+			.filter((entry) => /viewItem =~ \/\^geco\\.commit/.test(entry.when ?? ''))
+			.map((entry) => entry.group ?? '');
+		assert.ok(commitGroups.some((group) => group.startsWith('1_message@')), 'messages are not grouped first');
+		assert.ok(commitGroups.some((group) => group.startsWith('2_commit@')), 'the squash items are not in their own group');
+		assert.ok(commitGroups.every((group) => group !== '1_geco@1'), 'an old catch-all group survived');
+	});
+
+	it('offers squash for one selection and for N previous commits', () => {
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		const commitItems = itemContext.filter((entry) => /viewItem =~ \/\^geco\\.commit/.test(entry.when ?? '')).map((entry) => entry.command);
+		assert.ok(commitItems.includes('geco.squashSelectedCommits'), 'no multi-select squash on a commit row');
+		assert.ok(commitItems.includes('geco.squashWithPreviousCommits'), 'no "squash with previous" on a commit row');
+
+		// The Source Control title / repository row / Timeline menus have no
+		// multi-select, so only the "N previous commits" variant is offered there.
+		const submenu = (manifest.contributes.menus['geco.commitSubmenu'] ?? []).map((entry) => entry.command);
+		assert.ok(submenu.includes('geco.squashWithPreviousCommits'), 'the submenu has no squash item');
+		assert.equal(submenu.includes('geco.squashSelectedCommits'), false, 'multi-select squash does not belong in a single-commit menu');
+	});
+
+	it('keeps the proposed graph build flat and free of duplicates', () => {
+		const script = sourceOf('scripts/apply-graph-menu.mjs');
+		const graphMenus = script.slice(script.indexOf('const GRAPH_MENUS'), script.indexOf('const action ='));
+		assert.equal(graphMenus.includes('submenu:'), false, 'the graph build still nests a submenu');
+		// Git's own graph menu already has checkout / create branch / create tag /
+		// cherry pick, and delete branch on a ref - repeating them would give the
+		// user two entries with the same title.
+		for (const duplicate of ['geco.checkoutBranch', 'geco.createBranch', 'geco.deleteBranch']) {
+			assert.equal(graphMenus.includes(duplicate), false, `${duplicate} duplicates a built-in graph item`);
+		}
+		assert.ok(graphMenus.includes('geco.renameBranch'), 'the graph build has no rename-branch item');
+		assert.ok(graphMenus.includes('geco.squashWithPreviousCommits'), 'the graph build has no squash item');
+		assert.match(graphMenus, /'scm\/historyItem\/context': \[/, 'the graph build is missing the commit menu');
 	});
 
 	it('offers create / rename / delete / check out in the branch submenu', () => {
