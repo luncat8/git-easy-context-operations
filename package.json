@@ -1,0 +1,440 @@
+{
+  "name": "git-easy-context-operations",
+  "displayName": "Git Easy Ops",
+  "description": "Right-click a commit to reword its message, fast-forward main (keeping the old tip as a backup branch), force-push safely, and apply a patch at its proper base.",
+  "version": "0.1.0",
+  "publisher": "luncat8",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luncat8/git-easy-context-operations.git"
+  },
+  "bugs": {
+    "url": "https://github.com/luncat8/git-easy-context-operations/issues"
+  },
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "scm",
+    "reword",
+    "commit message",
+    "fast-forward",
+    "force push",
+    "patch",
+    "rebase",
+    "backup"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "geco.rewordCommit",
+        "title": "Reword Commit Message...",
+        "category": "Git Easy Ops",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "geco.rewordCommitAppend",
+        "title": "Append to Commit Message...",
+        "category": "Git Easy Ops",
+        "icon": "$(add)"
+      },
+      {
+        "command": "geco.rewordCommitRename",
+        "title": "Rename Text in Commit Message...",
+        "category": "Git Easy Ops",
+        "icon": "$(replace-all)"
+      },
+      {
+        "command": "geco.fastForwardDefaultBranch",
+        "title": "Fast-Forward Default Branch to Commit...",
+        "shortTitle": "Fast-Forward main Here",
+        "category": "Git Easy Ops",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "geco.fastForwardBranch",
+        "title": "Fast-Forward Branch to Commit...",
+        "category": "Git Easy Ops",
+        "icon": "$(repo-push)"
+      },
+      {
+        "command": "geco.forcePush",
+        "title": "Force Push (with lease)...",
+        "category": "Git Easy Ops",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "geco.forcePushHard",
+        "title": "Force Push (--force)...",
+        "category": "Git Easy Ops",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "geco.applyPatchAtProperBase",
+        "title": "Apply Patch at Proper Base...",
+        "category": "Git Easy Ops",
+        "icon": "$(diff-added)"
+      },
+      {
+        "command": "geco.findProperBase",
+        "title": "Find Proper Base for Patch...",
+        "category": "Git Easy Ops",
+        "icon": "$(search)"
+      },
+      {
+        "command": "geco.createBackupBranch",
+        "title": "Create Backup Branch...",
+        "category": "Git Easy Ops",
+        "icon": "$(save)"
+      },
+      {
+        "command": "geco.undoLastOperation",
+        "title": "Undo Last Operation",
+        "category": "Git Easy Ops",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "geco.showBackups",
+        "title": "Show Backups and Recovery Points",
+        "category": "Git Easy Ops",
+        "icon": "$(history)"
+      },
+      {
+        "command": "geco.copyCommitSha",
+        "title": "Copy Commit SHA",
+        "category": "Git Easy Ops",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "geco.refresh",
+        "title": "Refresh",
+        "category": "Git Easy Ops",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "geco.enableGraphMenu",
+        "title": "Enable Source Control Graph Menu...",
+        "shortTitle": "Enable Graph Menu",
+        "category": "Git Easy Ops",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "geco.explainMenus",
+        "title": "Why Don't I See the Menus?",
+        "category": "Git Easy Ops",
+        "icon": "$(question)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "geco.commitSubmenu",
+        "label": "Git Easy Ops",
+        "icon": "$(tools)"
+      },
+      {
+        "id": "geco.branchSubmenu",
+        "label": "Git Easy Ops",
+        "icon": "$(tools)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "geco.refresh",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "geco.refresh",
+          "when": "view == geco.history",
+          "group": "navigation@1"
+        },
+        {
+          "command": "geco.showBackups",
+          "when": "view == geco.history",
+          "group": "1_geco@1"
+        },
+        {
+          "command": "geco.undoLastOperation",
+          "when": "view == geco.history",
+          "group": "1_geco@2"
+        },
+        {
+          "command": "geco.explainMenus",
+          "when": "view == geco.history",
+          "group": "9_geco@1"
+        },
+        {
+          "command": "geco.enableGraphMenu",
+          "when": "view == geco.history",
+          "group": "9_geco@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "submenu": "geco.commitSubmenu",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "1_geco@1"
+        },
+        {
+          "command": "geco.copyCommitSha",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "inline@1"
+        },
+        {
+          "submenu": "geco.branchSubmenu",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "1_geco@1"
+        },
+        {
+          "command": "geco.undoLastOperation",
+          "when": "view == geco.history && viewItem =~ /^geco\\.backup/",
+          "group": "1_geco@1"
+        }
+      ],
+      "geco.commitSubmenu": [
+        {
+          "command": "geco.rewordCommit",
+          "group": "1_message@1"
+        },
+        {
+          "command": "geco.rewordCommitAppend",
+          "group": "1_message@2"
+        },
+        {
+          "command": "geco.rewordCommitRename",
+          "group": "1_message@3"
+        },
+        {
+          "command": "geco.fastForwardDefaultBranch",
+          "group": "2_branch@1"
+        },
+        {
+          "command": "geco.fastForwardBranch",
+          "group": "2_branch@2"
+        },
+        {
+          "command": "geco.createBackupBranch",
+          "group": "2_branch@3"
+        },
+        {
+          "command": "geco.forcePush",
+          "group": "3_remote@1"
+        },
+        {
+          "command": "geco.forcePushHard",
+          "group": "3_remote@2"
+        },
+        {
+          "command": "geco.applyPatchAtProperBase",
+          "group": "4_patch@1"
+        },
+        {
+          "command": "geco.findProperBase",
+          "group": "4_patch@2"
+        },
+        {
+          "command": "geco.copyCommitSha",
+          "group": "9_misc@1"
+        },
+        {
+          "command": "geco.enableGraphMenu",
+          "group": "9_misc@2"
+        }
+      ],
+      "geco.branchSubmenu": [
+        {
+          "command": "geco.createBackupBranch",
+          "group": "1_geco@1"
+        },
+        {
+          "command": "geco.forcePush",
+          "group": "2_geco@1"
+        },
+        {
+          "command": "geco.forcePushHard",
+          "group": "2_geco@2"
+        }
+      ],
+      "scm/title": [
+        {
+          "submenu": "geco.commitSubmenu",
+          "when": "scmProvider == git",
+          "group": "9_geco@1"
+        }
+      ],
+      "scm/sourceControl": [
+        {
+          "submenu": "geco.commitSubmenu",
+          "when": "scmProvider == git",
+          "group": "9_geco@1"
+        }
+      ],
+      "timeline/item/context": [
+        {
+          "submenu": "geco.commitSubmenu",
+          "when": "timelineItem == git:file:commit",
+          "group": "9_geco@1"
+        }
+      ],
+      "scm/repository": [
+        {
+          "submenu": "geco.commitSubmenu",
+          "when": "scmProvider == git",
+          "group": "9_geco@1"
+        }
+      ]
+    },
+    "views": {
+      "scm": [
+        {
+          "id": "geco.history",
+          "name": "Git Easy Ops",
+          "icon": "$(git-commit)",
+          "contextualTitle": "Git Easy Ops",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "geco.history",
+        "contents": "No Git repository is open.\nOpen a folder containing a Git repository to use Git Easy Ops."
+      }
+    ],
+    "configuration": {
+      "title": "Git Easy Ops",
+      "properties": {
+        "geco.gitPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `git` executable. Empty = use the `git.path` setting, then `git` from `PATH`."
+        },
+        "geco.defaultBackupBranchName": {
+          "type": "string",
+          "default": "old",
+          "markdownDescription": "Branch name used to park the old tip before a fast-forward. A numeric suffix is added when the name is taken (`old-2`, `old-3`, ...)."
+        },
+        "geco.backupRefPrefix": {
+          "type": "string",
+          "default": "refs/geco/",
+          "markdownDescription": "Ref prefix for hidden recovery points created before history rewrites."
+        },
+        "geco.forcePushMode": {
+          "type": "string",
+          "enum": [
+            "lease",
+            "force"
+          ],
+          "enumDescriptions": [
+            "`git push --force-with-lease` - refuses to overwrite work someone else pushed since your last fetch.",
+            "`git push --force` - always overwrites the remote branch."
+          ],
+          "default": "lease",
+          "markdownDescription": "Default mode for **Git Easy Ops: Force Push**."
+        },
+        "geco.confirmDestructiveOperations": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask for confirmation before rewriting history, moving a branch or force-pushing."
+        },
+        "geco.preserveCommitterDateOnReword": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Keep the original committer date when rewording a commit. Turn off to behave like `git commit --amend` (committer date = now)."
+        },
+        "geco.commitPickerLimit": {
+          "type": "number",
+          "default": 50,
+          "minimum": 5,
+          "maximum": 1000,
+          "markdownDescription": "How many commits to list in the commit picker."
+        },
+        "geco.patchBaseCandidateLimit": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 500,
+          "markdownDescription": "How many candidate commits to probe when searching for the proper base of a patch."
+        },
+        "geco.applyPatchDestination": {
+          "type": "string",
+          "enum": [
+            "current",
+            "newBranch",
+            "worktree"
+          ],
+          "enumDescriptions": [
+            "Apply to the current branch (only possible when the proper base is HEAD).",
+            "Create a new branch at the proper base and check it out.",
+            "Create a separate worktree at the proper base - your current checkout is never touched."
+          ],
+          "default": "newBranch",
+          "markdownDescription": "Where **Apply Patch at Proper Base** puts the result."
+        },
+        "geco.worktreeFolder": {
+          "type": "string",
+          "default": ".geco-worktrees",
+          "markdownDescription": "Folder (relative to the repository's parent directory) that holds worktrees created by patch operations."
+        },
+        "geco.threeWayApply": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Fall back to a 3-way merge (`git apply --3way` / `git am -3`) when a patch does not apply cleanly."
+        },
+        "geco.journalMaxEntries": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000,
+          "markdownDescription": "How many operations to remember for **Undo Last Operation** (stored in `.git/geco/journal.json`)."
+        },
+        "geco.showGraphMenuHint": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a one-time hint explaining how to enable the Source Control Graph context menu (it needs a proposed VS Code API)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run check-types && npm run bundle",
+    "compile": "npm run check-types && node esbuild.js",
+    "bundle": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "check-types": "tsc --noEmit",
+    "package": "npm run vscode:prepublish && vsce package --no-dependencies --allow-missing-repository",
+    "package:graph": "node scripts/package-graph-build.mjs",
+    "package:graph:install": "node scripts/package-graph-build.mjs --install",
+    "compile-tests": "tsc -p tsconfig.json --outDir out",
+    "test": "npm run compile-tests && node --test \"out/src/test/**/*.test.js\"",
+    "test:only": "node --test \"out/src/test/**/*.test.js\"",
+    "test:vscode": "npm run compile && node scripts/run-vscode-tests.mjs",
+    "graph-menu": "node scripts/apply-graph-menu.mjs status",
+    "graph-menu:on": "node scripts/apply-graph-menu.mjs on",
+    "graph-menu:off": "node scripts/apply-graph-menu.mjs off"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.94.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.3",
+    "typescript": "^5.8.3"
+  }
+}
