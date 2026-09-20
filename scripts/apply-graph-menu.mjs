@@ -40,6 +40,10 @@ const GRAPH_MENUS = {
 		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)', group: '4_modify@5' },
 		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: '6_patch@1' },
 		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: '6_patch@2' },
+		// The branch group of the built-in graph: "Create Branch..." is git.branch
+		// at 2_branch@2, so the branch cleanup lands directly behind it - last in
+		// that group, exactly like on the extension's own commit rows.
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: '2_branch@3' },
 		{ command: 'geco.fastForwardDefaultBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.fastForwardDefaultBranch)', group: '7_move@1' },
 		{ command: 'geco.fastForwardBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)', group: '7_move@2' },
 		{ command: 'geco.createBackupBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)', group: '7_move@3' },
@@ -52,10 +56,19 @@ const GRAPH_MENUS = {
 	// VS Code builds this menu per *ref* and only looks at plain commands
 	// (`isIMenuItem`), turning each one into a "Title > <ref>" submenu of the
 	// commit row menu. A contributed `submenu` here would be silently dropped -
-	// which is why the branch operation is its own entry. Checkout and delete
-	// are already git's own items on that row, and fast-forwarding the ref to
-	// the very commit it points at would do nothing, so **rename** is what this
-	// build adds here (git has no rename in the graph at all).
+	// which is why the branch operations are their own entries. Checkout and
+	// delete are already git's own items on that row (`1_checkout@1`,
+	// `2_branch@2`), and fast-forwarding the ref to the very commit it points at
+	// would do nothing, so this build adds **rename** (git has no rename in the
+	// graph at all).
+	//
+	// The branch cleanup is deliberately NOT here: VS Code would expand it into
+	// one "Remove Redundant Branches... > <branch>" entry per ref badge, and a
+	// sub-item carrying the *selected* branch name reads as "this branch gets
+	// deleted" - the exact opposite of what the command does. It is a
+	// whole-graph sweep whose target list is only known after the scan, so it
+	// lives flat on the commit row menu and on the graph toolbar instead;
+	// clicking it opens the checkbox list of what actually goes.
 	'scm/historyItemRef/context': [
 		{ command: 'geco.renameBranch', when: `${BRANCH_WHEN} && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)`, group: '2_branch@3' },
 	],
@@ -64,6 +77,9 @@ const GRAPH_MENUS = {
 		// The whole-graph operation gets the toolbar of the built-in graph too:
 		// it is not about one commit, so it never joins the per-commit menu.
 		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@91' },
+		// Same idea, one level down: not about a commit either, it prunes the
+		// branch names the graph shows once their commits live elsewhere.
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@92' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };

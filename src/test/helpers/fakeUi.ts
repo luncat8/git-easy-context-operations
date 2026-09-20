@@ -3,7 +3,7 @@
  * VS Code: queues of answers per prompt type, plus a record of every prompt,
  * message, log line and progress step the controller produced.
  */
-import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, PickOptions, QuickPickChoice, UI } from '../../core/ui';
+import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../../core/ui';
 
 export type Answer<T> = T | undefined | (T | undefined)[] | ((callIndex: number) => T | undefined);
 
@@ -14,6 +14,12 @@ export interface UIScript {
 	confirms?: Answer<boolean>;
 	asks?: Answer<string>;
 	files?: Answer<string>;
+	/**
+	 * Answers for `pickMany()`: indices or label substrings to tick, `null` for
+	 * "dismiss the picker". The default (no script) accepts the pre-ticked
+	 * items, which is what a user pressing OK does.
+	 */
+	multiPicks?: Answer<(number | string)[] | null>;
 }
 
 export interface PickCall {
@@ -22,9 +28,17 @@ export interface PickCall {
 	chosenIndex: number;
 }
 
+export interface MultiPickCall {
+	items: readonly { label: string; description?: string; detail?: string; picked: boolean }[];
+	options?: PickOptions;
+	chosenIndices: number[];
+	cancelled: boolean;
+}
+
 export class FakeUI implements UI {
 	readonly inputCalls: InputOptions[] = [];
 	readonly pickCalls: PickCall[] = [];
+	readonly multiPickCalls: MultiPickCall[] = [];
 	readonly confirmCalls: { message: string; options?: ConfirmOptions }[] = [];
 	readonly askCalls: { message: string; options: AskOptions }[] = [];
 	readonly messages: { kind: MessageKind; message: string; detail?: string }[] = [];
@@ -34,7 +48,7 @@ export class FakeUI implements UI {
 	readonly copied: string[] = [];
 	readonly openedPaths: string[] = [];
 	readonly outputReveals: number[] = [];
-	private counts = { input: 0, pick: 0, confirm: 0, ask: 0, file: 0 };
+	private counts = { input: 0, pick: 0, multiPick: 0, confirm: 0, ask: 0, file: 0 };
 
 	constructor(private readonly script: UIScript = {}) {}
 
@@ -64,6 +78,41 @@ export class FakeUI implements UI {
 			return undefined;
 		}
 		return items[chosenIndex]!.value;
+	}
+
+	async pickMany<T>(items: readonly MultiPickChoice<T>[], options?: PickOptions): Promise<T[] | undefined> {
+		const index = this.counts.multiPick++;
+		const answer = resolveAnswer(this.script.multiPicks, index, undefined);
+		const record = (chosenIndices: number[], cancelled: boolean) => {
+			this.multiPickCalls.push({
+				items: items.map((item) => ({ label: item.label, description: item.description, detail: item.detail, picked: item.picked === true })),
+				options,
+				chosenIndices,
+				cancelled,
+			});
+		};
+
+		if (answer === null) {
+			record([], true);
+			return undefined;
+		}
+		if (answer === undefined) {
+			// No script: accept what is pre-ticked, like pressing OK.
+			const indices = items.map((item, i) => (item.picked === true ? i : -1)).filter((i) => i >= 0);
+			record(indices, false);
+			return indices.map((i) => items[i]!.value);
+		}
+		const indices: number[] = [];
+		for (const entry of answer) {
+			const found = typeof entry === 'number'
+				? entry
+				: items.findIndex((item) => item.label === entry || item.label.includes(entry));
+			if (found >= 0 && found < items.length && !indices.includes(found)) {
+				indices.push(found);
+			}
+		}
+		record(indices, false);
+		return indices.map((i) => items[i]!.value);
 	}
 
 	async confirm(message: string, options?: ConfirmOptions): Promise<boolean> {

@@ -35,7 +35,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(output);
 
 	const ui = new VsCodeUI(output);
-	let runtime = buildRuntime(readSettings(), ui);
+	// The tree exists further down, but the controller needs to be able to
+	// refresh it from the moment it runs its first operation - including the
+	// follow-up actions that outlive the command call. The indirection keeps
+	// that wiring a one-liner and survives every settings reload.
+	let refreshViews: () => void = () => undefined;
+	let runtime = buildRuntime(readSettings(), ui, () => refreshViews());
 	const gitApi: GitApiLike | undefined = loadGitApi();
 	if (!gitApi) {
 		output.appendLine('The vscode.git API is unavailable; falling back to workspace folders.');
@@ -50,6 +55,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		onError: (message) => output.appendLine(message),
 	});
 	context.subscriptions.push(tree);
+	// From here on every journaled operation (and every undo) repaints the view:
+	// the graph a squash just rewrote is current before the result notification
+	// is even dismissed, and so is the branch list after a cleanup.
+	refreshViews = () => tree.refresh();
 	// `canSelectMany` is what makes multi-select (Ctrl/Shift-click) work in the
 	// Graph group: VS Code then hands a context-menu command the clicked node
 	// plus every selected node, which is how "Squash Selected Commits..." sees
@@ -139,6 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.createBranch', async (cwd, args) => runtime.controller.createBranch(cwd, args)],
 		['geco.renameBranch', async (cwd, args) => runtime.controller.renameBranch(cwd, args)],
 		['geco.deleteBranch', async (cwd, args) => runtime.controller.deleteBranch(cwd, args)],
+		['geco.removeRedundantBranches', async (cwd) => runtime.controller.removeRedundantBranches(cwd)],
 		['geco.checkoutBranch', async (cwd, args) => runtime.controller.checkoutBranch(cwd, args)],
 		['geco.undoLastOperation', async (cwd) => runtime.controller.undoLastOperation(cwd)],
 		['geco.showBackups', async (cwd) => runtime.controller.showBackups(cwd)],
@@ -215,7 +225,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!affectsGeco(event)) {
 				return;
 			}
-			runtime = buildRuntime(readSettings(), ui);
+			runtime = buildRuntime(readSettings(), ui, () => refreshViews());
 			output.appendLine('Settings reloaded.');
 			tree.refresh();
 			// Hidden-menu items changed here or in another window: converge.
@@ -244,12 +254,12 @@ async function writeHiddenMenuItems(ids: readonly string[], output: vscode.Outpu
 	output.appendLine(`${HIDDEN_MENU_ITEMS_FULL_KEY} -> ${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'user'}: [${ids.join(', ')}]`);
 }
 
-function buildRuntime(settings: Settings, ui: VsCodeUI): Runtime {
+function buildRuntime(settings: Settings, ui: VsCodeUI, onRepositoryChanged: () => void): Runtime {
 	const exec = createGitExec({ gitPath: resolveGitPath(settings) });
 	// The process runner for everything that is not git itself: the
 	// git-filter-repo probe/rewrite of "Clean History" and its installers.
 	const processExec = createProcessExec({});
-	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec }) };
+	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec, onRepositoryChanged }) };
 }
 
 function contains(parent: string, child: string): boolean {

@@ -78,14 +78,30 @@ export interface HistoryProviderDeps {
 export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem> {
 	private readonly emitter = new vscode.EventEmitter<GecoTreeItem | undefined | void>();
 	readonly onDidChangeTreeData = this.emitter.event;
+	private pending: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(private readonly deps: HistoryProviderDeps) {}
 
+	/**
+	 * Reload the whole view. Operations report progress step by step (an undo
+	 * of several entries, a clean-history run), so a burst of changes is
+	 * coalesced into one repaint instead of re-running `git log` per step.
+	 */
 	refresh(): void {
-		this.emitter.fire();
+		if (this.pending) {
+			return;
+		}
+		this.pending = setTimeout(() => {
+			this.pending = undefined;
+			this.emitter.fire();
+		}, 50);
 	}
 
 	dispose(): void {
+		if (this.pending) {
+			clearTimeout(this.pending);
+			this.pending = undefined;
+		}
 		this.emitter.dispose();
 	}
 

@@ -323,7 +323,10 @@ describe('rewordCommitMessage - committer date policy', () => {
 			await rewordCommitMessage(custom.ctx, { commit: first, message: 'one edited' });
 			const after = (await custom.log('main'))[0];
 			assert.notEqual(after.committerDate, before.committerDate);
-			assert.equal(after.authorDate, '2020-01-01T00:00:00+00:00');
+			// `%aI` spells UTC as "+00:00" on older git and "Z" on newer git,
+			// so compare against the original commit instead of a hard-coded
+			// rendering - the instant is what must survive, not the spelling.
+			assert.equal(after.authorDate, before.authorDate, 'the author date never changes');
 		} finally {
 			custom.cleanup();
 		}

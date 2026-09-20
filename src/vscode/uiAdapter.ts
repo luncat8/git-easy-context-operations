@@ -1,7 +1,7 @@
 /** The real {@link UI}, implemented with the VS Code API. */
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
-import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, PickOptions, QuickPickChoice, UI } from '../core/ui';
+import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../core/ui';
 
 export class VsCodeUI implements UI {
 	constructor(private readonly output: vscode.OutputChannel) {}
@@ -39,6 +39,28 @@ export class VsCodeUI implements UI {
 			},
 		);
 		return picked?.value;
+	}
+
+	async pickMany<T>(items: readonly MultiPickChoice<T>[], options?: PickOptions): Promise<T[] | undefined> {
+		const picked = await vscode.window.showQuickPick(
+			items.map((item) => ({
+				label: item.label,
+				description: item.description,
+				detail: item.detail,
+				picked: item.picked === true,
+				value: item.value,
+			})),
+			{
+				title: options?.title,
+				placeHolder: options?.placeholder,
+				ignoreFocusOut: true,
+				canPickMany: true,
+				matchOnDescription: true,
+				matchOnDetail: true,
+			},
+		);
+		// Dismissing the picker yields `undefined`; unticking everything yields [].
+		return picked?.map((item) => item.value);
 	}
 
 	async confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
