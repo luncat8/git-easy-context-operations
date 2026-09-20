@@ -1,75 +1,261 @@
 # Best Workflow: Clean Git History of Deleted/Unused Files
 
-This combines the thorough scanning of a.txt with the simplicity of b.txt.
+Goal: find every path that exists somewhere in *history* but in no *current
+ref*, and rewrite the history so those files (and the objects behind them) are
+gone - then reclaim the space and publish the result.
 
-## Prerequisities
-- `git-filter-repo` installed
-- Backup created: `git bundle create backup.bundle --all`
+This is the reviewed version of the old notes. Every step below was re-run
+against git 2.39; the bugs the first version had are listed at the end.
 
-## Step 1: Analyze - Find Dead Paths Across ALL Refs
+The extension implements exactly this flow: **"Git Easy Ops: Clean History
+(Remove Dead Paths)..."** - the trash button on the *Graph* group row of the
+"Git Easy Ops" view (and the last item of a commit's context menu). It scans,
+shows the list with sizes, writes the backup bundle, runs `git filter-repo`,
+puts the remotes back, rescans to verify, journals where the bundle is, and
+offers the force push. This file is the manual version, for repositories the
+extension is not installed in (or when you want to see every command).
+
+## What counts as "dead"
+
+A path is dead when **no** ref contains it in its tree:
+
+- `refs/heads/*`   (every local branch, not just the checked-out one)
+- `refs/remotes/*` (stale remote-tracking branches keep files alive!)
+- `refs/tags/*`    (annotated tags count, they are refs like any other)
+- `HEAD`           (a *detached* HEAD is not covered by refs/heads)
+
+Deliberately **not** scanned: `refs/stash`, the reflogs, dangling objects, and
+any hidden refs an extension keeps as a safety net (Git Easy Ops writes its
+recovery points under `refs/geco/...`). Those keep objects alive but must not
+decide what is dead - see "Recovery refs" below.
+
+## Prerequisites
 
 ```bash
+# git-filter-repo (the tool git's own docs recommend; filter-branch is deprecated)
+pip install git-filter-repo          # or: brew install git-filter-repo
+git filter-repo --version
+
+git status --porcelain               # must be empty: commit or stash first
+git stash list                       # stashes pin old commits: git stash clear
+git worktree list                    # filter-repo refuses linked worktrees:
+                                     #   git worktree remove <path>
+```
+
+Best practice: do the rewrite in a **fresh clone** (`git clone --no-local
+<repo> rewrite && cd rewrite`). `git filter-repo` asks for exactly that, which
+is why it needs `--force` anywhere else.
+
+## Step 1: Analyze - find dead paths across all refs
+
+```bash
+set -euo pipefail
+export LC_ALL=C                      # both sides of `comm` need one collation
 TMPDIR=$(mktemp -d)
 ALL="$TMPDIR/all_paths.txt"
-HEADS="$TMPDIR/heads_paths.txt"
+ALIVE="$TMPDIR/alive_paths.txt"
 DEAD="$TMPDIR/dead_paths.txt"
 
-# All paths ever in history
-git log --all --name-only --pretty=format: | grep -v '^$' | sort -u > "$ALL"
+# Every path any commit ever touched (branches, remotes, tags).
+# --diff-merges=separate diffs every merge against each parent: a plain
+# --name-only relies on git's combined diff, which hides whatever matches one
+# parent, and only implies merge diffs at all since git 2.31.
+git -c core.quotePath=false log --branches --remotes --tags \
+    --diff-merges=separate --name-only --pretty=format: \
+  | grep -v '^$' | sort -u > "$ALL"
 
-# ALL paths in EVERY ref (branches, tags, remotes)
+# Every path a *current* ref contains. ls-tree takes exactly ONE tree-ish, so
+# this is a loop over the ref tips (plus HEAD, which may be detached).
 {
-  for r in $(git for-each-ref --format='%(refname)' refs/heads refs/tags refs/remotes); do
-    git ls-tree -r --name-only "$r" 2>/dev/null || true
+  git rev-parse --verify --quiet HEAD >/dev/null \
+    && git -c core.quotePath=false ls-tree -r --name-only --full-tree HEAD
+  for r in $(git for-each-ref --format='%(objectname)' refs/heads refs/remotes refs/tags); do
+    git -c core.quotePath=false ls-tree -r --name-only --full-tree "$r" || true
   done
-} | sort -u > "$HEADS"
+} | sort -u > "$ALIVE"
 
-# Paths only in history, not in any current ref
-comm -23 "$ALL" "$HEADS" > "$DEAD"
+# Paths only in history, not in any current ref.
+comm -23 "$ALL" "$ALIVE" > "$DEAD"
 
-COUNT=$(wc -l < "$DEAD")
-echo "Found $COUNT dead paths"
+printf 'Found %s dead path(s)\n' "$(wc -l < "$DEAD" | tr -d ' ')"
 cat "$DEAD"
 ```
 
-## Step 2: Targeted Removal (if you know specific files)
+`core.quotePath=false` matters: by default git prints non-ASCII names as
+`"caf\303\251.txt"`. If one side of the comparison is quoted and the other is
+not, every such file looks dead. (Names containing `"` or `\` are quoted even
+with the setting off - unquote them before feeding the list to filter-repo.)
+
+### Which of them are actually worth removing?
+
+Sizes, biggest first (this is what decides whether the rewrite is worth it):
 
 ```bash
-# For specific known files/folders:
-git filter-repo --path 'path/to/big-file.bin' --invert-paths --force
+git rev-list --objects --branches --remotes --tags \
+  | awk 'NF > 1 { sub(/^[^ ]+ /, ""); print }' | sort -u > "$TMPDIR/all-objects.txt"
+
+# The objects that belong to a dead path, with their sizes:
+git rev-list --objects --branches --remotes --tags | grep -F -f "$DEAD" \
+  | git cat-file --batch-check='%(objectsize) %(rest)' | sort -rn | head -30
+```
+
+Or let filter-repo do the bookkeeping - it writes a per-path size report:
+
+```bash
+git filter-repo --analyze
+cat .git/filter-repo/analysis/path-all-sizes.txt   # unpacked/packed per path
+git count-objects -vH                              # repository size before/after
+```
+
+## Step 2: Targeted removal (when you already know the files)
+
+```bash
+git filter-repo --path 'path/to/big-file.bin'        --invert-paths --force
 git filter-repo --path-glob 'experiments/logs/*.log' --invert-paths --force
-git filter-repo --path-regex '(^|/)target/.*' --invert-paths --force
+git filter-repo --path-regex '(^|/)target/.*'        --invert-paths --force
 ```
 
-## Step 3: Nuclear Purge (if dead_paths.txt is correct)
+## Step 3: Backup, then remove every dead path
 
 ```bash
-git filter-repo --invert-paths --paths-from-file "$DEAD" --force
+# Backup first - after the rewrite nothing in git can bring it back.
+# --all covers branches, tags and remotes but NOT hidden refs, so list the refs
+# explicitly when they matter (Git Easy Ops does: its recovery points under
+# refs/geco/ are the Undo of earlier operations).
+git bundle create ../repo-backup-$(date +%Y%m%d-%H%M%S).bundle \
+  $(git for-each-ref --format='%(refname)')
+git bundle verify ../repo-backup-*.bundle
+
+# Then the rewrite. --replace-refs update-no stops filter-repo from leaving
+# refs/replace/ behind (they would silently "fix" old SHAs for everyone).
+git filter-repo --invert-paths --paths-from-file "$DEAD" \
+  --replace-refs update-no --force
 ```
 
-## Step 4: Verify
+## Step 4: Put the remote back
+
+`git filter-repo` **removes every remote** on purpose, so a half-cleaned
+history cannot be pushed by accident:
 
 ```bash
-# Rescan
-comm -23 <(git log --all --name-only --pretty=format: | grep -v '^$' | sort -u) \
-         <({ for r in $(git for-each-ref --format='%(refname)' refs/heads refs/tags refs/remotes); do git ls-tree -r --name-only "$r" 2>/dev/null || true; done; } | sort -u)
-# Should output nothing
+git remote -v                                  # empty now
+git remote add origin git@github.com:you/repo.git
 ```
 
-## Step 5: Cleanup & Push
+## Step 5: Verify (rescan)
+
+```bash
+set -euo pipefail
+export LC_ALL=C
+ALL=$(mktemp); ALIVE=$(mktemp)
+git -c core.quotePath=false log --branches --remotes --tags \
+    --diff-merges=separate --name-only --pretty=format: \
+  | grep -v '^$' | sort -u > "$ALL"
+{
+  git rev-parse --verify --quiet HEAD >/dev/null \
+    && git -c core.quotePath=false ls-tree -r --name-only --full-tree HEAD
+  for r in $(git for-each-ref --format='%(objectname)' refs/heads refs/remotes refs/tags); do
+    git -c core.quotePath=false ls-tree -r --name-only --full-tree "$r" || true
+  done
+} | sort -u > "$ALIVE"
+comm -23 "$ALL" "$ALIVE"      # must print nothing
+rm -f "$ALL" "$ALIVE"
+```
+
+If it still prints paths, they are kept alive by something the scan does not
+cover: a stash, a reflog entry, a hidden ref (`git for-each-ref` with no
+pattern lists everything), or - inside a repository that uses Git Easy Ops - a
+recovery point under `refs/geco/` that was excluded from the rewrite on purpose.
+
+## Step 6: Reclaim the space
 
 ```bash
 git reflog expire --expire=now --all
-git gc --prune=now --aggressive
-git repack -A -d -f --depth=250 --window=250
-git prune --expire=now
-
-git push origin --all --force
-git push origin --tags --force
+git gc --prune=now
+git count-objects -vH
 ```
 
-## Key Lessons
-- Always scan ALL refs (heads, tags, remotes), not just HEAD
-- After first purge, rescan - other branches may still contain the files
-- The `--invert-paths --paths-from-file` method is safest when you trust the dead list
-- For specific known files, use targeted `--path`/`--path-glob`/`--path-regex`
+`--aggressive` and a second `git repack -A -d -f --depth=250 --window=250` are
+not needed: filter-repo already repacked, and aggressive spends hours for a few
+percent on a repository that was just rewritten.
+
+Nothing shrinks until the reflogs are expired - they still point at every old
+commit, so `gc` cannot prune a single object.
+
+## Step 7: Publish
+
+```bash
+# Branches: the lease refuses to overwrite a push you have not fetched.
+git push --force-with-lease origin --all
+# Tags have no lease (they do not move, they are replaced):
+git push --force origin --tags
+# Remote branches that no longer exist locally still hold the dead files:
+git remote prune origin --dry-run             # look first
+git push origin --delete <stale-branch>       # then delete them
+```
+
+Tell everyone to **re-clone** (or `git fetch && git reset --hard
+origin/<branch>` on a clean checkout). Anybody who pushes an old clone puts the
+dead files right back.
+
+## Recovery refs (Git Easy Ops)
+
+The extension parks the pre-operation state of every rewrite under
+`refs/geco/...` so "Undo Last Operation" works. For this cleanup that has two
+consequences, and the extension handles both:
+
+1. The scan ignores them (`--branches --remotes --tags`, never `--all`), so a
+   recovery point does not make a dead path look alive - and the rewrite is
+   limited with `--refs --branches --remotes --tags`, so those refs keep
+   pointing at the commits they recorded instead of at rewritten copies.
+2. Because they are excluded, they still *hold* the removed files. That is why
+   the flow ends with "Drop the N recovery points and reclaim the space?" -
+   only after they are gone (and the bundle is written, which includes them)
+   does `git gc` actually shrink the repository.
+
+## Key lessons
+
+- Scan ALL refs (heads, tags, remotes) *plus HEAD* - not `--all`, which also
+  drags in hidden refs, stashes and whatever else lives under `refs/`.
+- `git ls-tree` takes one tree-ish: the "alive" side has to loop over the ref
+  tips. Passing `--branches --tags HEAD` to it produces a usage error, and in a
+  `$( )` pipeline that error is easy to miss - the comparison then runs against
+  an empty list and declares *everything* dead.
+- Diff merges explicitly (`--diff-merges=separate`); the combined-diff default
+  hides paths, and `--name-only` only implies merge diffs since git 2.31.
+- Keep the collation identical (`LC_ALL=C`) and the quoting off
+  (`core.quotePath=false`) on both sides, or `comm`/set-difference lies.
+- Back up with `git bundle` **before** the rewrite, and list the refs explicitly
+  if hidden refs matter - `--all` skips them.
+- `git filter-repo` removes the remotes; re-add them before pushing.
+- After the purge, rescan: other branches, stale remote-tracking branches and
+  tags are where the leftovers hide.
+- Expire the reflogs before `gc`, or nothing is pruned.
+- `--invert-paths --paths-from-file` is the safest bulk method once you trust
+  the dead list; use targeted `--path` / `--path-glob` / `--path-regex` when you
+  know exactly which files should go.
+
+## What was wrong with the first version of these notes
+
+- `TMPDIR=$(mktemp -d)` was missing its closing paren (a syntax error), and
+  overwrote the variable `mktemp` itself honours.
+- The alive-side scan piped `--branches --remotes --tags HEAD` into `ls-tree`,
+  which rejects those options - the rescan in Step 5 therefore compared against
+  nothing and always "passed".
+- `--all` was used for the history side: that includes `refs/stash`,
+  `refs/replace`, and hidden refs such as `refs/geco/` - paths that should be
+  removed look alive, and a rewrite rewrites the safety net too.
+- Merges were not diffed, so files that only ever arrived through a merge were
+  never listed.
+- No `LC_ALL=C`: `sort -u` and `comm` disagree as soon as the locale collates
+  differently from git's byte order.
+- No `core.quotePath=false`: non-ASCII names were compared in quoted form on one
+  side and unquoted on the other.
+- The bundle backup used `--all`, which skips hidden refs.
+- `git push origin --all --force` (a blind force) instead of
+  `--force-with-lease`, and no mention of remote branches that no longer exist
+  locally - they keep the files alive on the server.
+- `gc --aggressive` plus a full `repack -f --depth=250 --window=250` after a
+  rewrite that already repacked: hours of work for almost nothing.
+- `git filter-repo` was invoked without `--replace-refs update-no`, and the
+  notes never mentioned that it deletes the remotes.

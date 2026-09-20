@@ -13,6 +13,7 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 - **Squash N commits** - combine any contiguous run of commits into one
 - **Change commit message** - reword, append, or rename text in any commit's message
 - **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first
+- **Clean the whole graph** - one trash button on the **Graph** row finds every file that exists only in old commits (no branch, tag or remote has it anymore), backs the repository up as a bundle and rewrites the history so those files are gone for good
 
 # Next text is not for human (ask LLM if need)
 
@@ -29,6 +30,8 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 | 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
+
+| 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it hands you the exact script instead of failing. |
 
 Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
 (lanes, ref badges, relative dates) with the same context menus on commits and
@@ -50,6 +53,12 @@ without any proposed API.
   stand-in for the built-in Source Control Graph, which cannot be extended without
   a proposed API (see below).
 - **The same view** also lists all branches and the recovery points/journal.
+- **Two buttons for the whole graph** (they are not about one commit, so they do
+  not sit in a commit row): the *trash* icon in the view toolbar next to
+  **Refresh**, and the inline *trash* icon on the **Graph** group row itself -
+  both run **Clean History (Remove Dead Paths)...**. The same command is the
+  **last** item of a commit row's context menu and of the *Git Easy Ops* submenu,
+  for the case where the right-click happens first.
 - **Timeline view** - right-click a commit row of the selected file
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
@@ -92,6 +101,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 | after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
+| graph *toolbar* (`scm/history/title`, `navigation`) | **Clean History (Remove Dead Paths)...** next to Refresh - the one operation that belongs to the whole graph instead of one commit row |
 
 Nothing is duplicated: the built-in graph already offers checkout, create branch,
 create tag, cherry pick, copy commit id and - on a branch badge - delete branch,
@@ -168,6 +178,13 @@ do that before publishing).
 - **Undo of a remote change** never clobbers a colleague: a remote branch we pushed
   is only deleted again while it still points at the sha we left behind
   (`--force-with-lease`).
+- **Clean History** is the one operation git itself cannot undo (every commit gets
+  a new SHA), so it refuses a dirty working tree or a linked worktree *before*
+  anything is written, insists on a `git bundle` backup of *every* ref (full ref
+  names, recovery points included) next to the repository, excludes the recovery
+  points from the rewrite, verifies with a rescan, and journals the bundle path -
+  that journal entry is the map back. If the bundle cannot be written it stops
+  and asks; without `git-filter-repo` on `PATH` it touches nothing at all.
 - Patch probing never touches your index or working tree; a failed apply removes
   the worktree and branch it created.
 - git runs with `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `LC_ALL=C`, no
@@ -198,7 +215,7 @@ do that before publishing).
 ```bash
 npm install
 npm run compile        # type-check + bundle to dist/extension.js
-npm test               # 441 headless tests (real git repositories, no editor)
+npm test               # 478 headless tests (real git repositories, no editor)
 npm run test:vscode    # integration smoke test inside a real VS Code
 npm run package        # build the .vsix
 ```
@@ -227,6 +244,12 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
   reports that the old one stayed - change the default branch on the host first.
 - Renaming a branch does not rewrite anything: the commits keep their shas, so no
   force-push is needed for the local rename itself.
+- **Clean History (Remove Dead Paths)...** needs
+  [`git-filter-repo`](https://github.com/newren/git-filter-repo) on your `PATH` - without it you get
+  the full script to run by hand instead. It rewrites *everything*: every SHA
+  changes, every collaborator has to re-clone, and the only way back is the
+  backup bundle. Paths with a literal newline in their name are reported but not
+  compared (git's line-based output cannot carry them).
 
 ## License
 
