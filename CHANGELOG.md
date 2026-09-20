@@ -4,6 +4,49 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- **Clean History (Remove Dead Paths)...** - the operation that belongs to the
+  *whole graph* instead of one commit: it scans every branch, tag,
+  remote-tracking branch and HEAD for paths that exist only in old commits,
+  shows them with the object-store size they still occupy, writes a `git bundle`
+  backup of every ref (recovery points included) next to the repository, and
+  rewrites the history with `git filter-repo`. Afterwards it puts the remotes
+  filter-repo removed back, rescans to verify, journals the bundle path and
+  offers the force push that publishes the result.
+- **Two buttons for it, plus the fallbacks**: the trash icon in the *Git Easy
+  Ops* view toolbar (next to **Refresh**), the inline trash icon on the **Graph**
+  group row, and - because a right-click usually lands on a commit - the *last*
+  item of the commit context menu, of the *Git Easy Ops* submenu and of the Graph
+  row's own menu. The graph build also puts it in the toolbar of the built-in
+  Source Control Graph (`scm/history/title`).
+- **Safety for the cleanup**: the rewrite is limited to the public refs
+  (`--refs --branches --remotes --tags`), so the recovery points under
+  `refs/geco/` keep pointing at what they recorded and **Undo** of earlier
+  operations survives; the flow then offers to drop them (plus
+  `git reflog expire` and `git gc --prune=now`) because until they are gone the
+  removed files stay reachable. Without `git-filter-repo` installed nothing is
+  touched - you get the exact script, with the dead-path list already written.
+  A dirty working tree or a linked worktree is refused up front (both make
+  `git filter-repo` fail anyway), and a backup bundle that cannot be written
+  stops the rewrite instead of quietly continuing without a way back.
+
+### Fixed
+
+- `archive/clean-git-workflow.txt`, the shell workflow this feature came from, is
+  rewritten: the missing `)` after `mktemp -d`, the alive-side scan that passed
+  `--branches --tags HEAD` to `ls-tree` (which takes exactly one tree-ish, so
+  the verification compared against nothing and always "passed"), `--all` on the
+  history side (dragging stashes and hidden refs into the scan), missing
+  `--diff-merges=separate` (files that only ever arrived through a merge were
+  never listed), missing `LC_ALL=C` and `core.quotePath=false` (locale and
+  quoting made the two sides disagree), the blind `git push --all --force`, the
+  `gc --aggressive` + full `repack` that a just-rewritten repository does not
+  need, and the unmentioned facts that `git filter-repo` deletes the remotes and
+  that reflogs have to expire before anything is pruned.
+
 ## 0.2.0
 
 The Source Control sidebar view becomes the graph, the built-in Source Control

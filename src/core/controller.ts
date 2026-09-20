@@ -53,6 +53,26 @@ import { addProposedApi } from './argvJson';
 import { addProductProposals } from './productJson';
 import { buildGraphRows, type GraphCommitRow } from './graphRows';
 import { shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
+import {
+	analyzeDeadPaths,
+	blockingCleanReasons,
+	buildCommands,
+	cleanWarnings,
+	collectCleanFacts,
+	createBackupBundle,
+	deadPathsFileFor,
+	defaultBundleFile,
+	FILTER_REPO_TIMEOUT_MS,
+	describeCleanConfirmation,
+	formatBytes,
+	formatCleanReport,
+	reclaimSpace,
+	writeDeadPathsFile,
+	type CleanPlan,
+	type CleanFacts,
+	type DeadPathAnalysis,
+	type FilterRepoRunner,
+} from './cleanHistory';
 import type { CommitInfo, RefInfo } from './git';
 import type { ForcePushMode, PatchDestination } from './config';
 
@@ -62,6 +82,11 @@ export interface ControllerOptions {
 	ui: UI;
 	settings: Settings;
 	exec?: GitExec;
+	/**
+	 * Runs the external rewrite tool (`git filter-repo`) for "Clean History".
+	 * Injectable so tests can stand in for a tool that is not installed.
+	 */
+	filterRepoRunner?: FilterRepoRunner;
 }
 
 export interface CommitPick {
@@ -933,6 +958,317 @@ export class Controller {
 			this.ui.log(`Backup branch ${backup.name} -> ${backup.sha}${backup.reused ? ' (already existed)' : ''}`);
 			await this.ui.message('info', `Backup branch "${backup.name}" points at ${shorten(sha)}.`);
 		});
+	}
+
+	// ---------------------------------------------------------- clean history
+
+	/**
+	 * "Clean History (Remove Dead Paths)..." - the repository-wide operation the
+	 * archive/clean-git-workflow.txt notes describe: find every path that exists
+	 * in old commits but in no current ref, then rewrite the whole history with
+	 * `git filter-repo` so those files (and the objects behind them) are gone.
+	 *
+	 * There is no ref-level Undo for a full-history rewrite, so the flow insists
+	 * on a `git bundle` backup first, journals where that bundle is, excludes the
+	 * extension's own recovery refs from the rewrite (Undo of *earlier*
+	 * operations keeps working), verifies with a rescan, and offers the force
+	 * push that publishes the result. When `git-filter-repo` is not installed it
+	 * degrades to the exact script, ready to copy into a terminal.
+	 */
+	async cleanHistory(cwd: string): Promise<void> {
+		await this.guard('Clean history', async () => {
+			const ctx = this.contextFor(cwd);
+			if ((await ctx.git.commits({ limit: 1 })).length === 0) {
+				throw new GecoError('nothing-to-do', 'This repository has no commits yet - there is no history to clean.');
+			}
+
+			const analysis = await this.ui.withProgress('Scanning history for dead paths', async (report) => {
+				report('listing every path any commit ever touched');
+				return analyzeDeadPaths(ctx);
+			});
+			const facts = await collectCleanFacts(ctx, this.settings.backupRefPrefix);
+			if (analysis.deadPaths.length === 0) {
+				this.ui.log(
+					[
+						`Clean history: ${cwd}`,
+						`  ${analysis.historicalPaths.length} paths ever existed, ${analysis.alivePaths.length} of them are in a current ref.`,
+						'  No dead paths - nothing to remove from the history.',
+					].join('\n'),
+				);
+				await this.ui.message('info', 'No dead paths: every path that ever existed is still in a branch, tag or remote-tracking branch.');
+				return;
+			}
+
+			const root = await ctx.git.repoRoot();
+			const pathsFile = await deadPathsFileFor(ctx);
+			const plan = await this.buildCleanPlan(ctx, { root, pathsFile, analysis, facts });
+			this.ui.log([`Clean history plan for ${root}`, '', plan.report, '', 'Commands:', plan.commands.script].join('\n'));
+
+			if (!plan.filterRepoAvailable) {
+				await this.reportMissingFilterRepo(plan);
+				return;
+			}
+
+			// filter-repo refuses a dirty tree and linked worktrees anyway - say
+			// so *before* a multi-gigabyte bundle is written for nothing.
+			const blockers = blockingCleanReasons(facts);
+			if (blockers.length > 0) {
+				this.ui.log(`Clean history refused:\n${blockers.map((reason) => `  ! ${reason}`).join('\n')}`);
+				const chosen = await this.ui.ask(`Cannot rewrite this history yet - ${blockers.length} thing(s) have to go first.`, {
+					detail: blockers.join('\n'),
+					actions: [ACTIONS.openLog],
+				});
+				if (chosen === ACTIONS.openLog) {
+					await this.ui.showOutput?.();
+				}
+				return;
+			}
+
+			const confirmation = describeCleanConfirmation(analysis, facts, { bundleFile: plan.bundleFile, pathsFile });
+			if (this.settings.confirmDestructiveOperations) {
+				const confirmed = await this.ui.confirm(confirmation.message, {
+					confirmLabel: 'Clean History',
+					destructive: true,
+					detail: confirmation.detail,
+				});
+				if (!confirmed) {
+					this.ui.log('Clean history cancelled by the user - nothing was rewritten.');
+					return;
+				}
+			}
+
+			await this.runHistoryClean(ctx, plan);
+		});
+	}
+
+	/** Scans for the external tool, writes the dead-path list and builds the plan. */
+	private async buildCleanPlan(
+		ctx: RepoContext,
+		input: { root: string; pathsFile: string; analysis: DeadPathAnalysis; facts: CleanFacts },
+	): Promise<CleanPlan> {
+		const { root, pathsFile, analysis, facts } = input;
+		await writeDeadPathsFile(pathsFile, analysis.deadPaths);
+
+		const probe = await this.runFilterRepo(ctx, ['git', 'filter-repo', '--version']);
+		const filterRepoAvailable = probe.exitCode === 0;
+		if (!filterRepoAvailable) {
+			this.ui.log(`git filter-repo is not available (${probe.stderr.trim().split('\n')[0] ?? `exit ${probe.exitCode}`}).`);
+		}
+
+		// The bundle is written next to the repository, never inside it: a file
+		// in the worktree would show up as untracked (and could be committed).
+		// It has to list *full* ref names (`listRefs()` reports the short ones,
+		// and a bundle of "main" cannot be restored as refs/heads/main), and it
+		// has to include the hidden recovery refs - `--all` skips them, and they
+		// are the Undo of every earlier operation.
+		const bundleFile = defaultBundleFile(root);
+		const bundleRefs = [
+			...new Set([
+				...(await ctx.git.refsUnder('refs/heads')).map((ref) => ref.name),
+				...(await ctx.git.refsUnder('refs/remotes')).map((ref) => ref.name),
+				...(await ctx.git.refsUnder('refs/tags')).map((ref) => ref.name),
+				...facts.recoveryRefs,
+			]),
+		];
+		const commands = buildCommands({
+			pathsFile,
+			bundleFile,
+			bundleRefs,
+			refsToKeep: facts.recoveryRefs,
+			droppedRemotes: facts.remotes,
+			forceFilterRepo: true,
+		});
+
+		return {
+			analysis,
+			facts,
+			commands,
+			report: formatCleanReport(analysis, facts, { pathsFile }),
+			warnings: cleanWarnings(analysis, facts),
+			filterRepoAvailable,
+			bundleFile,
+			pathsFile,
+			repoRoot: root,
+			bundleRefs,
+		};
+	}
+
+	/** `git-filter-repo` is missing: hand over the exact script instead of failing. */
+	private async reportMissingFilterRepo(plan: CleanPlan): Promise<void> {
+		this.ui.log(
+			[
+				'git-filter-repo is not installed - the cleanup was NOT run.',
+				'  pip install git-filter-repo      (or: brew install git-filter-repo)',
+				`  the dead-path list is already written to ${plan.pathsFile}`,
+				'  then run the commands above, or install the tool and use this command again.',
+			].join('\n'),
+		);
+		const chosen = await this.ui.ask(
+			`${plan.analysis.deadPaths.length} dead path(s) found, but git-filter-repo is not installed - nothing was rewritten.`,
+			{ detail: plan.commands.script, actions: [ACTIONS.copyCommands, ACTIONS.openLog] },
+		);
+		if (chosen === ACTIONS.copyCommands) {
+			await this.ui.copy(plan.commands.script);
+			await this.ui.message('info', `Copied ${plan.commands.all.filter((line) => !line.startsWith('#')).length} commands - the dead-path list is at ${plan.pathsFile}.`);
+		} else if (chosen === ACTIONS.openLog) {
+			await this.ui.showOutput?.();
+		}
+	}
+
+	/** Backup bundle -> filter-repo -> remotes -> rescan -> journal -> offer the push. */
+	private async runHistoryClean(ctx: RepoContext, plan: CleanPlan): Promise<void> {
+		const { analysis, facts, commands } = plan;
+
+		let bundleNote = 'no backup bundle was created';
+		if (commands.bundle && plan.bundleFile) {
+			const bundle = await this.ui.withProgress('Creating the backup bundle', (report) => {
+				report(`bundling ${plan.bundleRefs.length} refs into ${plan.bundleFile}`);
+				return createBackupBundle(ctx, plan.bundleFile!, plan.bundleRefs);
+			});
+			if (!bundle.ok) {
+				this.ui.log(`Backup bundle failed: ${bundle.detail}`);
+				const proceed = await this.ui.confirm('The backup bundle could not be created. Rewrite the history anyway?', {
+					confirmLabel: 'Rewrite Anyway',
+					destructive: true,
+					detail: `${bundle.detail}\n\nWithout the bundle there is no way back to the current history.`,
+				});
+				if (!proceed) {
+					this.ui.log('Clean history aborted: no backup bundle.');
+					return;
+				}
+				bundleNote = `the bundle FAILED (${bundle.detail}) - restore is not possible`;
+			} else {
+				bundleNote = plan.bundleFile;
+				this.ui.log(`Backup bundle written to ${plan.bundleFile} (${bundle.detail}).`);
+			}
+		}
+
+		const result = await this.ui.withProgress(`Removing ${analysis.deadPaths.length} dead paths`, (report) => {
+			report('git filter-repo is rewriting every commit - this can take a while');
+			return this.runFilterRepo(ctx, commands.filterRepo);
+		});
+		if (result.exitCode !== 0) {
+			throw new GecoError(
+				'git-failed',
+				'git filter-repo failed - the history was not rewritten.',
+				`${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}\nBackup bundle: ${bundleNote}`,
+			);
+		}
+		this.ui.log(`git filter-repo finished:\n${(result.stdout + result.stderr).trim().split('\n').map((line) => `  | ${line}`).join('\n')}`);
+
+		// filter-repo removes every remote on purpose (so a half-cleaned history
+		// cannot be pushed by accident) - put them back before offering the push.
+		const restoredRemotes: string[] = [];
+		for (const remote of facts.remotes) {
+			const existing = await ctx.git.tryRun(['remote', 'get-url', remote.name]);
+			if (existing) {
+				continue;
+			}
+			const add = await ctx.git.run(['remote', 'add', remote.name, remote.url]);
+			if (add.exitCode === 0) {
+				restoredRemotes.push(remote.name);
+			} else {
+				this.ui.log(`Could not re-add the remote ${remote.name}: ${add.stderr.trim()}`);
+			}
+		}
+		if (restoredRemotes.length > 0) {
+			this.ui.log(`Re-added remote(s): ${restoredRemotes.join(', ')} (filter-repo removes them).`);
+		}
+
+		// Verify the way the workflow doc does: rescan and diff.
+		const verification = await this.ui.withProgress('Verifying', (report) => {
+			report('rescanning every ref');
+			return analyzeDeadPaths(ctx, { sizeAnalysis: false });
+		});
+		const keptAlive = verification.deadPaths;
+		const keptByRecovery = facts.recoveryRefs.length > 0 && keptAlive.length > 0
+			? `still held by the ${facts.recoveryRefs.length} recovery point(s) under ${this.settings.backupRefPrefix} (they were excluded from the rewrite)`
+			: undefined;
+		this.ui.log(
+			[
+				keptAlive.length === 0
+					? 'Verification: no dead paths remain in any branch, remote-tracking branch or tag.'
+					: `Verification: ${keptAlive.length} dead path(s) remain${keptByRecovery ? ` - ${keptByRecovery}` : ''}:`,
+				...keptAlive.slice(0, 20).map((p) => `  ${p}`),
+				...analysis.sizes?.slice(0, 10).map((entry) => `  removed ${formatBytes(entry.bytes).padStart(9)}  ${entry.path}`) ?? [],
+			].join('\n'),
+		);
+
+		await ctx.safety.record({
+			kind: 'cleanHistory',
+			summary: `Removed ${analysis.deadPaths.length} dead path(s) from the history${analysis.deadBytes ? ` (${formatBytes(analysis.deadBytes)})` : ''}`,
+			undo: {
+				type: 'none',
+				hint:
+					`A full-history rewrite cannot be undone ref by ref. Every commit has a new SHA; `
+					+ `the way back is the backup bundle: ${bundleNote}. `
+					+ `Restore with: git clone --mirror ${plan.bundleFile ?? '<bundle>'} && push the refs back, or re-clone from a colleague.`,
+			},
+		});
+
+		// The recovery points still reference the removed objects: offer to drop
+		// them so `git gc` can actually reclaim the space (that is the moment
+		// Undo of *earlier* operations stops working - the user decides).
+		let recoveryNote = '';
+		if (facts.recoveryRefs.length > 0) {
+			const drop = await this.ui.confirm(
+				`Drop the ${facts.recoveryRefs.length} Git Easy Ops recovery point(s) and reclaim the space?`,
+				{
+					confirmLabel: 'Drop & GC',
+					destructive: true,
+					detail:
+						`They were excluded from the rewrite, so they still hold every removed file:\n`
+						+ facts.recoveryRefs.slice(0, 10).map((ref) => `  ${ref}`).join('\n')
+						+ (facts.recoveryRefs.length > 10 ? `\n  ... ${facts.recoveryRefs.length - 10} more` : '')
+						+ '\n\nDropping them makes "Undo Last Operation" unable to restore earlier operations\n'
+						+ 'and runs git reflog expire + git gc --prune=now (the bundle stays as the way back).',
+				},
+			);
+			if (drop) {
+				for (const ref of facts.recoveryRefs) {
+					await ctx.git.run(['update-ref', '-d', ref]);
+				}
+				recoveryNote = await reclaimSpace(ctx);
+				this.ui.log(`Dropped ${facts.recoveryRefs.length} recovery point(s); ${recoveryNote}.`);
+			} else {
+				recoveryNote = `recovery points kept - the removed files stay reachable under ${this.settings.backupRefPrefix} until they are dropped`;
+				this.ui.log(recoveryNote);
+			}
+		}
+
+		const headline = keptAlive.length === 0
+			? `Cleaned the history: ${analysis.deadPaths.length} dead path(s) removed${analysis.deadBytes ? ` (${formatBytes(analysis.deadBytes)})` : ''}.`
+			: `Cleaned the history: ${analysis.deadPaths.length - keptAlive.length} of ${analysis.deadPaths.length} dead path(s) removed - ${keptAlive.length} remain${keptByRecovery ? ` (${keptByRecovery})` : ''}.`;
+		const actions = facts.remotes.length > 0 ? [ACTIONS.forcePush, ACTIONS.openLog] : [ACTIONS.openLog];
+		const chosen = await this.ui.ask(headline, {
+			detail: [
+				plan.bundleFile ? `Backup bundle: ${plan.bundleFile}` : '',
+				facts.remotes.length > 0
+					? 'The remotes still have the OLD history (and with it the dead files) until every branch and tag is force-pushed.'
+					: '',
+				recoveryNote,
+			].filter(Boolean).join('\n'),
+			actions,
+		});
+		if (chosen === ACTIONS.forcePush) {
+			await this.forcePush(ctx.git.cwd, []);
+		} else if (chosen === ACTIONS.openLog) {
+			await this.ui.showOutput?.();
+		}
+	}
+
+	/** Runs the external rewrite tool; injectable through {@link ControllerOptions}. */
+	private async runFilterRepo(ctx: RepoContext, command: readonly string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+		const runner = this.options.filterRepoRunner;
+		if (runner) {
+			return runner(command, ctx.git.cwd);
+		}
+		if (!this.options.exec) {
+			throw new GecoError('git-not-found', 'No process runner is available to start git-filter-repo.');
+		}
+		const [binary, ...args] = command;
+		const result = await this.options.exec([binary!, ...args], { cwd: ctx.git.cwd, timeoutMs: FILTER_REPO_TIMEOUT_MS });
+		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 	}
 
 	// ------------------------------------------------------- branch operations
