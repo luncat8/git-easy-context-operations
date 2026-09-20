@@ -34,19 +34,20 @@ const GRAPH_MENUS = {
 	// cherry pick and (on a ref) checkout + delete branch, so this build adds
 	// what it does not have.
 	'scm/historyItem/context': [
-		{ command: 'geco.squashWithPreviousCommits', when: 'scmProvider == git', group: '4_modify@2' },
-		{ command: 'geco.rewordCommit', when: 'scmProvider == git', group: '4_modify@3' },
-		{ command: 'geco.rewordCommitAppend', when: 'scmProvider == git', group: '4_modify@4' },
-		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git', group: '4_modify@5' },
-		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git', group: '6_patch@1' },
-		{ command: 'geco.findProperBase', when: 'scmProvider == git', group: '6_patch@2' },
-		{ command: 'geco.fastForwardDefaultBranch', when: 'scmProvider == git', group: '7_move@1' },
-		{ command: 'geco.fastForwardBranch', when: 'scmProvider == git', group: '7_move@2' },
-		{ command: 'geco.createBackupBranch', when: 'scmProvider == git', group: '7_move@3' },
-		{ command: 'geco.forcePush', when: 'scmProvider == git', group: '8_remote@1' },
-		{ command: 'geco.forcePushHard', when: 'scmProvider == git', group: '8_remote@2' },
-		{ command: 'geco.copyCommitSha', when: 'scmProvider == git', group: 'inline@1' },
-		{ command: 'geco.enableGraphMenu', when: 'scmProvider == git', group: '9_misc@1' },
+		{ command: 'geco.squashWithPreviousCommits', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)', group: '4_modify@2' },
+		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: '4_modify@3' },
+		{ command: 'geco.rewordCommitAppend', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)', group: '4_modify@4' },
+		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)', group: '4_modify@5' },
+		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: '6_patch@1' },
+		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: '6_patch@2' },
+		{ command: 'geco.fastForwardDefaultBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.fastForwardDefaultBranch)', group: '7_move@1' },
+		{ command: 'geco.fastForwardBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)', group: '7_move@2' },
+		{ command: 'geco.createBackupBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)', group: '7_move@3' },
+		{ command: 'geco.forcePush', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.forcePush)', group: '8_remote@1' },
+		{ command: 'geco.forcePushHard', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)', group: '8_remote@2' },
+		{ command: 'geco.copyCommitSha', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyCommitSha)', group: 'inline@1' },
+		{ command: 'geco.enableGraphMenu', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.enableGraphMenu)', group: '9_misc@1' },
+		{ command: 'geco.customizeMenus', when: 'scmProvider == git', group: '9_misc@2' },
 	],
 	// VS Code builds this menu per *ref* and only looks at plain commands
 	// (`isIMenuItem`), turning each one into a "Title > <ref>" submenu of the
@@ -56,14 +57,14 @@ const GRAPH_MENUS = {
 	// the very commit it points at would do nothing, so **rename** is what this
 	// build adds here (git has no rename in the graph at all).
 	'scm/historyItemRef/context': [
-		{ command: 'geco.renameBranch', when: BRANCH_WHEN, group: '2_branch@3' },
+		{ command: 'geco.renameBranch', when: `${BRANCH_WHEN} && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)`, group: '2_branch@3' },
 	],
 	'scm/history/title': [
-		{ command: 'geco.refresh', when: 'scmProvider == git', group: 'navigation@90' },
+		{ command: 'geco.refresh', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.refresh)', group: 'navigation@90' },
 		// The whole-graph operation gets the toolbar of the built-in graph too:
 		// it is not about one commit, so it never joins the per-commit menu.
-		{ command: 'geco.cleanHistory', when: 'scmProvider == git', group: 'navigation@91' },
-		{ command: 'geco.explainMenus', when: 'scmProvider == git', group: '9_geco@1' },
+		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@91' },
+		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };
 

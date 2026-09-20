@@ -4,7 +4,43 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.0
+
+The menus become user-configurable, "Clean History" installs its own
+prerequisite, and two bugs that made the shipped clean button weaker than the
+workflow notes promise are fixed.
+
+### Added
+
+- **Customize Context Menus...** - the menu editor (`0.3-plan-interactive-menu-editor.md`,
+  shipped as its Plan B): a hidden **"Git Easy Ops Menus"** view with one
+  collapsible surface per real menu and one native checkbox per command.
+  Unchecking hides that command from *every* menu that shows it - immediately,
+  no reload; the Command Palette always keeps it. The state machine
+  (`src/core/menuCatalog.ts` + `menuVisibility.ts`) is pure and drift-tested:
+  `src/test/core/menuCatalog.test.ts` fails the moment `package.json`, the graph
+  patcher script and the catalogue disagree, in either direction.
+- **Fail-open safety rails**: every `when` clause gained
+  `(!geco.menuFilter || geco.menuVisible.<row>)` - with the extension disabled,
+  crashed or not yet activated nothing can be hidden; the required
+  *Customize Context Menus...* entry stays in every menu we contribute as the
+  way back; a submenu whose rows are all hidden collapses its parent entry
+  (`geco.menuHasItems.*`); unknown ids in `geco.hiddenMenuItems` are kept, so a
+  downgrade never loses customizations.
+- **The editor costs nothing until used**: the view ships with
+  `"visibility": "hidden"` and is a native tree (no webview, no second bundle,
+  no assets) - the deliberate choice over the plan's webview replica, which
+  stays a `TODO(v1.0)` re-review.
+- **Ask and install `git-filter-repo`** instead of only informing: when the
+  rewrite tool is missing, Clean History offers *Install with pip3 / brew /
+  python3 -m pip / ...*, falls through to the next candidate when one fails
+  (PEP 668 "externally managed" gets its own explanation), offers the distro
+  packages only when `sudo -n` proves no password would be asked for, and
+  continues the cleanup automatically after a successful install. The
+  copy-paste script remains the last resort and the refusal path.
+- **`--user` pip installs work**: after installing, the probe also accepts the
+  `git-filter-repo` binary form (not only the `git filter-repo` subcommand) and
+  the generated script uses whichever invocation works.
 
 ### Added
 
@@ -35,6 +71,17 @@ the project uses [semantic versioning](https://semver.org/).
 
 ### Fixed
 
+- **The shipped extension could never detect an installed `git-filter-repo`**:
+  the probe handed `git filter-repo --version` to the git-only process runner,
+  which actually spawned `git git filter-repo --version`. Every run degraded to
+  the script handout even with the tool present. (Found by running the real
+  tool end to end.)
+- **The rewrite failed with `--replace-refs update-no`**: that choice does not
+  exist in `git filter-repo` (valid: `delete-no-add`, `delete-and-add`,
+  `update-no-add`, `update-or-add`, `update-and-add`, `old-default`). The
+  command now uses `delete-no-add`, which is also the actual intent - leave no
+  `refs/replace/` behind that would silently translate old SHAs for colleagues.
+  The workflow notes in `archive/` are corrected too.
 - `archive/clean-git-workflow.txt`, the shell workflow this feature came from, is
   rewritten: the missing `)` after `mktemp -d`, the alive-side scan that passed
   `--branches --tags HEAD` to `ls-tree` (which takes exactly one tree-ish, so

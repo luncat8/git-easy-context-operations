@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -181,6 +181,18 @@
         "title": "Why Don't I See the Menus?",
         "category": "Git Easy Ops",
         "icon": "$(question)"
+      },
+      {
+        "command": "geco.customizeMenus",
+        "title": "Customize Context Menus...",
+        "category": "Git Easy Ops",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "geco.menuResetAll",
+        "title": "Reset Hidden Menu Items",
+        "category": "Git Easy Ops",
+        "icon": "$(clear-all)"
       }
     ],
     "submenus": [
@@ -205,293 +217,354 @@
       "view/title": [
         {
           "command": "geco.refresh",
-          "when": "view == geco.history",
+          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.refresh)",
           "group": "navigation@1"
         },
         {
           "command": "geco.cleanHistory",
-          "when": "view == geco.history && geco.repositoryOpen",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
           "group": "navigation@2"
         },
         {
           "command": "geco.showBackups",
-          "when": "view == geco.history",
+          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.showBackups)",
           "group": "1_geco@1"
         },
         {
           "command": "geco.undoLastOperation",
-          "when": "view == geco.history",
+          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)",
           "group": "1_geco@2"
         },
         {
           "command": "geco.explainMenus",
-          "when": "view == geco.history",
+          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)",
           "group": "9_geco@1"
         },
         {
           "command": "geco.enableGraphMenu",
-          "when": "view == geco.history",
+          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.enableGraphMenu)",
           "group": "9_geco@2"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "when": "view == geco.history",
+          "group": "navigation@3"
+        },
+        {
+          "command": "geco.menuResetAll",
+          "when": "view == geco.menuEditor",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
           "command": "geco.rewordCommit",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)",
           "group": "1_message@1"
         },
         {
           "command": "geco.rewordCommitAppend",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)",
           "group": "1_message@2"
         },
         {
           "command": "geco.rewordCommitRename",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)",
           "group": "1_message@3"
         },
         {
           "command": "geco.squashSelectedCommits",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.squashSelectedCommits)",
           "group": "2_commit@1"
         },
         {
           "command": "geco.squashWithPreviousCommits",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)",
           "group": "2_commit@2"
         },
         {
           "command": "geco.createBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.createBranch)",
           "group": "3_branch@1"
         },
         {
           "command": "geco.fastForwardDefaultBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.fastForwardDefaultBranch)",
           "group": "4_move@1"
         },
         {
           "command": "geco.fastForwardBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)",
           "group": "4_move@2"
         },
         {
           "command": "geco.createBackupBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)",
           "group": "4_move@3"
         },
         {
           "command": "geco.forcePush",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.forcePush)",
           "group": "5_remote@1"
         },
         {
           "command": "geco.forcePushHard",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)",
           "group": "5_remote@2"
         },
         {
           "command": "geco.applyPatchAtProperBase",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)",
           "group": "6_patch@1"
         },
         {
           "command": "geco.findProperBase",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)",
           "group": "6_patch@2"
         },
         {
           "command": "geco.cleanHistory",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
           "group": "8_clean@1"
         },
         {
           "command": "geco.enableGraphMenu",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.enableGraphMenu)",
           "group": "9_misc@1"
         },
         {
           "command": "geco.copyCommitSha",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.copyCommitSha)",
           "group": "inline@1"
         },
         {
           "command": "geco.createBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.createBranch)",
           "group": "1_branch@1"
         },
         {
           "command": "geco.renameBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)",
           "group": "1_branch@2"
         },
         {
           "command": "geco.checkoutBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.checkoutBranch)",
           "group": "1_branch@3"
         },
         {
           "command": "geco.deleteBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)",
           "group": "1_branch@4"
         },
         {
           "command": "geco.fastForwardBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)",
           "group": "2_move@1"
         },
         {
           "command": "geco.createBackupBranch",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)",
           "group": "2_move@2"
         },
         {
           "command": "geco.forcePush",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.forcePush)",
           "group": "3_remote@1"
         },
         {
           "command": "geco.forcePushHard",
-          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)",
           "group": "3_remote@2"
         },
         {
           "command": "geco.undoLastOperation",
-          "when": "view == geco.history && viewItem =~ /^geco\\.backup/",
+          "when": "view == geco.history && viewItem =~ /^geco\\.backup/ && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)",
           "group": "1_geco@1"
         },
         {
           "command": "geco.cleanHistory",
-          "when": "view == geco.history && viewItem == geco.group.graph",
+          "when": "view == geco.history && viewItem == geco.group.graph && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
           "group": "inline@1"
         },
         {
           "command": "geco.cleanHistory",
-          "when": "view == geco.history && viewItem == geco.group.graph",
+          "when": "view == geco.history && viewItem == geco.group.graph && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
           "group": "9_clean@1"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "9_customize@9"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/",
+          "group": "9_customize@9"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "when": "view == geco.history && viewItem =~ /^geco\\.backup/",
+          "group": "9_customize@9"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "when": "view == geco.history && viewItem == geco.group.graph",
+          "group": "9_customize@2"
         }
       ],
       "geco.commitSubmenu": [
         {
           "command": "geco.rewordCommit",
-          "group": "1_message@1"
+          "group": "1_message@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)"
         },
         {
           "command": "geco.rewordCommitAppend",
-          "group": "1_message@2"
+          "group": "1_message@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)"
         },
         {
           "command": "geco.rewordCommitRename",
-          "group": "1_message@3"
+          "group": "1_message@3",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)"
         },
         {
           "command": "geco.squashWithPreviousCommits",
-          "group": "2_commit@1"
+          "group": "2_commit@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)"
         },
         {
           "command": "geco.fastForwardDefaultBranch",
-          "group": "2_branch@1"
+          "group": "2_branch@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.fastForwardDefaultBranch)"
         },
         {
           "command": "geco.fastForwardBranch",
-          "group": "2_branch@2"
+          "group": "2_branch@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)"
         },
         {
           "command": "geco.createBackupBranch",
-          "group": "2_branch@3"
+          "group": "2_branch@3",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)"
         },
         {
           "command": "geco.createBranch",
-          "group": "2_branch@4"
+          "group": "2_branch@4",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBranch)"
         },
         {
           "command": "geco.forcePush",
-          "group": "3_remote@1"
+          "group": "3_remote@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePush)"
         },
         {
           "command": "geco.forcePushHard",
-          "group": "3_remote@2"
+          "group": "3_remote@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)"
         },
         {
           "command": "geco.applyPatchAtProperBase",
-          "group": "4_patch@1"
+          "group": "4_patch@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)"
         },
         {
           "command": "geco.findProperBase",
-          "group": "4_patch@2"
+          "group": "4_patch@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)"
         },
         {
           "command": "geco.copyCommitSha",
-          "group": "9_misc@1"
+          "group": "9_misc@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.copyCommitSha)"
         },
         {
           "command": "geco.enableGraphMenu",
-          "group": "9_misc@2"
+          "group": "9_misc@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.enableGraphMenu)"
         },
         {
           "command": "geco.cleanHistory",
-          "group": "9_misc@3"
+          "group": "9_misc@3",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "group": "9_customize@9"
         }
       ],
       "geco.branchSubmenu": [
         {
           "command": "geco.createBranch",
-          "group": "1_branch@1"
+          "group": "1_branch@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBranch)"
         },
         {
           "command": "geco.renameBranch",
-          "group": "1_branch@2"
+          "group": "1_branch@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)"
         },
         {
           "command": "geco.checkoutBranch",
-          "group": "1_branch@3"
+          "group": "1_branch@3",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.checkoutBranch)"
         },
         {
           "command": "geco.deleteBranch",
-          "group": "1_branch@4"
+          "group": "1_branch@4",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)"
         },
         {
           "command": "geco.fastForwardBranch",
-          "group": "2_move@1"
+          "group": "2_move@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.fastForwardBranch)"
         },
         {
           "command": "geco.createBackupBranch",
-          "group": "2_move@2"
+          "group": "2_move@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)"
         },
         {
           "command": "geco.forcePush",
-          "group": "3_remote@1"
+          "group": "3_remote@1",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePush)"
         },
         {
           "command": "geco.forcePushHard",
-          "group": "3_remote@2"
+          "group": "3_remote@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)"
+        },
+        {
+          "command": "geco.customizeMenus",
+          "group": "9_customize@9"
         }
       ],
       "scm/title": [
         {
           "submenu": "geco.commitSubmenu",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && (!geco.menuFilter || geco.menuHasItems.geco.commitSubmenu)",
           "group": "9_geco@1"
         }
       ],
       "scm/sourceControl": [
         {
           "submenu": "geco.commitSubmenu",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && (!geco.menuFilter || geco.menuHasItems.geco.commitSubmenu)",
           "group": "9_geco@1"
         }
       ],
       "timeline/item/context": [
         {
           "submenu": "geco.commitSubmenu",
-          "when": "timelineItem == git:file:commit",
+          "when": "timelineItem == git:file:commit && (!geco.menuFilter || geco.menuHasItems.geco.commitSubmenu)",
           "group": "9_geco@1"
         }
       ],
       "scm/repository": [
         {
           "submenu": "geco.commitSubmenu",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && (!geco.menuFilter || geco.menuHasItems.geco.commitSubmenu)",
           "group": "9_geco@1"
         }
       ]
@@ -504,6 +577,12 @@
           "icon": "$(git-commit)",
           "contextualTitle": "Git Easy Ops",
           "visibility": "visible"
+        },
+        {
+          "id": "geco.menuEditor",
+          "name": "Git Easy Ops Menus",
+          "contextualTitle": "Git Easy Ops Menus",
+          "visibility": "hidden"
         }
       ]
     },
@@ -614,6 +693,15 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Draw the `●│╮…` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits."
+        },
+        "geco.hiddenMenuItems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them."
         }
       }
     }
