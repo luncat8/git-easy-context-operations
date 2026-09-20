@@ -25,9 +25,9 @@ const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'ut
 		commands: { command: string; title: string; category?: string; icon?: string }[];
 		submenus: { id: string; label: string }[];
 		menus: Record<string, { command?: string; submenu?: string; when?: string; group?: string }[]>;
-		views: Record<string, { id: string; name: string }[]>;
+		views: Record<string, { id: string; name: string; visibility?: string }[]>;
 		viewsWelcome: { view: string; contents: string }[];
-		configuration: { title: string; properties: Record<string, { type: string; default?: unknown; enum?: unknown[] }> };
+		configuration: { title: string; properties: Record<string, { type: string; default?: unknown; enum?: unknown[]; items?: { type: string } }> };
 	};
 	scripts: Record<string, string>;
 };
@@ -225,14 +225,23 @@ describe('manifest - menus', () => {
 		}
 
 		const submenu = (manifest.contributes.menus['geco.commitSubmenu'] ?? []).map((e) => e.command);
-		assert.equal(submenu[submenu.length - 1], 'geco.cleanHistory', 'the submenu does not end with the whole-graph operation');
+		// The required "Customize Context Menus..." entry comes after it, but
+		// among the toggleable entries the whole-graph operation is last.
+		const toggleable = submenu.filter((id) => id !== 'geco.customizeMenus');
+		assert.equal(toggleable[toggleable.length - 1], 'geco.cleanHistory', 'the submenu does not end with the whole-graph operation');
+		assert.equal(submenu[submenu.length - 1], 'geco.customizeMenus', 'the required way back is the last entry');
 	});
 
-	it('scopes title menus to our own view', () => {
+	it('scopes title menus to our own views', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
 			// The toolbar buttons may additionally require an open repository -
-			// but never another view.
-			assert.match(entry.when ?? '', /^view == geco\.history( && geco\.repositoryOpen)?$/);
+			// but never another view. The menu editor contributes its own view
+			// (its reset button lives on the editor's toolbar).
+			assert.match(
+				entry.when ?? '',
+				/^view == geco\.(history|menuEditor)( && geco\.repositoryOpen)?( && \(!geco\.menuFilter.*)?$/,
+				entry.command,
+			);
 		}
 	});
 
@@ -299,7 +308,11 @@ describe('manifest - menus', () => {
 		assert.ok((manifest.contributes.menus['scm/title'] ?? []).some((e) => e.submenu === 'geco.commitSubmenu'));
 		assert.ok((manifest.contributes.menus['scm/sourceControl'] ?? []).some((e) => e.submenu === 'geco.commitSubmenu'));
 		for (const entry of [...(manifest.contributes.menus['scm/title'] ?? []), ...(manifest.contributes.menus['scm/sourceControl'] ?? [])]) {
-			assert.equal(entry.when, 'scmProvider == git');
+			assert.match(
+				entry.when ?? '',
+				/^scmProvider == git && \(!geco\.menuFilter \|\| geco\.menuHasItems\.geco\.commitSubmenu\)$/,
+				'the submenu parent must keep its fail-open guard',
+			);
 		}
 	});
 
@@ -309,23 +322,27 @@ describe('manifest - menus', () => {
 		assert.equal(timeline[0]!.submenu, 'geco.commitSubmenu');
 		// The built-in git timeline tags commit rows 'git:file:commit' (and staged /
 		// working-tree rows with other values, where our commands make no sense).
-		assert.equal(timeline[0]!.when, 'timelineItem == git:file:commit');
+		assert.match(timeline[0]!.when ?? '', /^timelineItem == git:file:commit && \(!geco\.menuFilter/);
 	});
 
 	it('also offers the submenu on the repository row of the Source Control view', () => {
 		const entries = manifest.contributes.menus['scm/repository'] ?? [];
 		assert.equal(entries.length, 1);
 		assert.equal(entries[0]!.submenu, 'geco.commitSubmenu');
-		assert.equal(entries[0]!.when, 'scmProvider == git');
+		assert.match(entries[0]!.when ?? '', /^scmProvider == git && \(!geco\.menuFilter/);
 	});
 });
 
 describe('manifest - views and configuration', () => {
 	it('contributes the history view in the Source Control container with a welcome message', () => {
 		const views = manifest.contributes.views.scm ?? [];
-		assert.equal(views.length, 1);
+		assert.equal(views.length, 2);
 		assert.equal(views[0]!.id, 'geco.history');
 		assert.equal(views[0]!.name, 'Git Easy Ops');
+		// The menu editor ships hidden: it costs nothing until the user asks
+		// for it ("Customize Context Menus..." focuses and reveals it).
+		assert.equal(views[1]!.id, 'geco.menuEditor');
+		assert.equal(views[1]!.visibility, 'hidden');
 		assert.equal(manifest.contributes.viewsWelcome.length, 1);
 		assert.equal(manifest.contributes.viewsWelcome[0]!.view, 'geco.history');
 		assert.match(manifest.contributes.viewsWelcome[0]!.contents, /No Git repository/);
@@ -349,7 +366,10 @@ describe('manifest - views and configuration', () => {
 				assert.ok(property.enum.includes(expected as never), `${configKey} default is not in its enum`);
 			}
 			const type = typeof expected;
-			assert.equal(property.type, type === 'number' ? 'number' : type, `${configKey} type`);
+			assert.equal(property.type, Array.isArray(expected) ? 'array' : type === 'number' ? 'number' : type, `${configKey} type`);
+			if (Array.isArray(expected)) {
+				assert.deepEqual(property.items, { type: 'string' }, `${configKey} items`);
+			}
 			assert.ok(
 				(property as { markdownDescription?: string; description?: string }).markdownDescription
 					|| (property as { description?: string }).description,

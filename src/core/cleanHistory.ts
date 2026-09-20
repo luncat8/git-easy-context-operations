@@ -444,8 +444,11 @@ export function buildCommands(options: CommandsOptions): CleanHistoryCommands {
 		'--invert-paths',
 		'--paths-from-file',
 		options.pathsFile,
+		// `delete-no-add`: leave no refs/replace/ behind - stale replace refs
+		// would silently translate old SHAs for everyone who has not re-cloned.
+		// (The workflow notes' old value `update-no` is not a valid choice.)
 		'--replace-refs',
-		'update-no',
+		'delete-no-add',
 	];
 	if (refsToKeep.length > 0) {
 		// Only rewrite the public refs: the recovery points under refs/geco/

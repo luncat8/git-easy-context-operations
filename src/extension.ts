@@ -8,20 +8,25 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { Controller, type RewordFlow } from './core/controller';
-import { createGitExec, type GitExec } from './core/gitRunner';
+import { createGitExec, createProcessExec, type GitExec } from './core/gitRunner';
 import type { Settings } from './core/config';
+import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, parseHiddenItems } from './core/menuVisibility';
 import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
 import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
+import { MenuEditorProvider, commandTitlesFromManifest } from './vscode/menuEditorTree';
+import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 
 const VIEW_ID = 'geco.history';
+const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
 const GRAPH_HINT_KEY = 'geco.graphMenuHintShown';
 
 interface Runtime {
 	settings: Settings;
 	exec: GitExec;
+	processExec: GitExec;
 	controller: Controller;
 }
 
@@ -51,6 +56,38 @@ export function activate(context: vscode.ExtensionContext): void {
 	// the whole selection.
 	const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true });
 	context.subscriptions.push(treeView);
+
+	// --- Customize Context Menus -------------------------------------------
+	// The hidden "Git Easy Ops Menus" view plus the context-key state machine.
+	// Applied right on activation and re-applied whenever the setting changes
+	// (also from another window or Settings Sync) - every window converges.
+	const applyMenus = () => {
+		const hidden = readHiddenMenuItems();
+		void applyMenuContext(contextKeysFor(hidden), (key, value) => vscode.commands.executeCommand('setContext', key, value));
+		return hidden;
+	};
+	const readHiddenMenuItems = () =>
+		parseHiddenItems(vscode.workspace.getConfiguration('geco').get<string[]>(HIDDEN_MENU_ITEMS_SETTING, []));
+
+	const menuEditor = new MenuEditorProvider({
+		titles: commandTitlesFromManifest(context.extension.packageJSON),
+		hidden: () => readHiddenMenuItems(),
+		setHidden: (ids) => writeHiddenMenuItems(ids, output),
+		graphBuildInstalled: () => Boolean(context.extension.packageJSON?.contributes?.menus?.['scm/historyItem/context']),
+		onLog: (message) => output.appendLine(message),
+	});
+	context.subscriptions.push(menuEditor);
+	const menuEditorView = vscode.window.createTreeView(MENU_EDITOR_VIEW_ID, {
+		treeDataProvider: menuEditor,
+		manageCheckboxStateManually: true,
+	});
+	context.subscriptions.push(
+		menuEditorView,
+		menuEditorView.onDidChangeCheckboxState((event) => {
+			void menuEditor.handleCheckboxChange(event.items);
+		}),
+	);
+	applyMenus();
 
 	const setRepoContext = () => {
 		void vscode.commands.executeCommand('setContext', 'geco.repositoryOpen', Boolean(activeRepo));
@@ -131,6 +168,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			await runtime.controller.enableGraphMenu(build, new FsFileStore(build.argvPath), new FsFileStore(build.productPath));
 			output.show(true);
 		}),
+		// "Customize Context Menus..." - works with no repository open (the
+		// editor is about the menus, not about git), reveals the hidden view.
+		vscode.commands.registerCommand('geco.customizeMenus', async () => {
+			await vscode.commands.executeCommand(`${MENU_EDITOR_VIEW_ID}.focus`);
+		}),
+		vscode.commands.registerCommand('geco.menuResetAll', async () => {
+			await writeHiddenMenuItems([], output);
+			applyMenus();
+			menuEditor.refresh();
+			await vscode.window.showInformationMessage('Git Easy Ops: every hidden menu item is visible again.');
+		}),
 	);
 
 	// Keep the view alive as repositories and settings change.
@@ -170,6 +218,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			runtime = buildRuntime(readSettings(), ui);
 			output.appendLine('Settings reloaded.');
 			tree.refresh();
+			// Hidden-menu items changed here or in another window: converge.
+			applyMenus();
+			menuEditor.refresh();
 		}),
 	);
 
@@ -177,9 +228,28 @@ export function activate(context: vscode.ExtensionContext): void {
 	output.appendLine(`Git Easy Ops ready (git: ${resolveGitPath(runtime.settings) ?? 'git from PATH'}).`);
 }
 
+/**
+ * Persists `geco.hiddenMenuItems`. User scope by default; when a workspace
+ * value exists it stays a workspace override (so trimming menus in a work
+ * repository never changes the home repository). Clearing writes `undefined`
+ * in the user scope (no settings.json noise) and `[]` in the workspace scope
+ * (an explicit override of a user-level list).
+ */
+async function writeHiddenMenuItems(ids: readonly string[], output: vscode.OutputChannel): Promise<void> {
+	const config = vscode.workspace.getConfiguration('geco');
+	const inspect = config.inspect<string[]>(HIDDEN_MENU_ITEMS_SETTING);
+	const target = inspect?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+	const value = ids.length > 0 ? [...ids] : target === vscode.ConfigurationTarget.Workspace ? [] : undefined;
+	await config.update(HIDDEN_MENU_ITEMS_SETTING, value, target);
+	output.appendLine(`${HIDDEN_MENU_ITEMS_FULL_KEY} -> ${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'user'}: [${ids.join(', ')}]`);
+}
+
 function buildRuntime(settings: Settings, ui: VsCodeUI): Runtime {
 	const exec = createGitExec({ gitPath: resolveGitPath(settings) });
-	return { settings, exec, controller: new Controller({ ui, settings, exec }) };
+	// The process runner for everything that is not git itself: the
+	// git-filter-repo probe/rewrite of "Clean History" and its installers.
+	const processExec = createProcessExec({});
+	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec }) };
 }
 
 function contains(parent: string, child: string): boolean {

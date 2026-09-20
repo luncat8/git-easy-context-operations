@@ -27,6 +27,8 @@ export interface Settings {
 	showGraphMenuHint: boolean;
 	graphCommitLimit: number;
 	showGraphLanes: boolean;
+	/** Row ids hidden from the context menus by "Customize Context Menus...". */
+	hiddenMenuItems: string[];
 }
 
 /**
@@ -49,6 +51,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	showGraphMenuHint: 'geco.showGraphMenuHint',
 	graphCommitLimit: 'geco.graphCommitLimit',
 	showGraphLanes: 'geco.showGraphLanes',
+	hiddenMenuItems: 'geco.hiddenMenuItems',
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -67,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	showGraphMenuHint: true,
 	graphCommitLimit: 200,
 	showGraphLanes: true,
+	hiddenMenuItems: [],
 };
 
 const FORCE_PUSH_MODES: readonly ForcePushMode[] = ['lease', 'force'];
@@ -86,6 +90,19 @@ function asInt(value: unknown, fallback: number, min: number, max: number): numb
 	}
 	const clamped = Math.round(value);
 	return Math.min(max, Math.max(min, clamped));
+}
+
+function normalizeHiddenItems(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<string>();
+	for (const entry of value) {
+		if (typeof entry === 'string' && entry.trim()) {
+			seen.add(entry.trim());
+		}
+	}
+	return [...seen];
 }
 
 function asEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -114,6 +131,7 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
 		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
 		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),
+		hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
 	};
 }
 
