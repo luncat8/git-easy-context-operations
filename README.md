@@ -11,6 +11,7 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 ## Main Highlighted Features
 
 - **Squash N commits** - combine any contiguous run of commits into one
+- **Customize the context menus** - switch every Git Easy Ops menu item on/off from a native checkbox tree (`Git Easy Ops: Customize Context Menus...`)
 - **Change commit message** - reword, append, or rename text in any commit's message
 - **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first
 - **Clean the whole graph** - one trash button on the **Graph** row finds every file that exists only in old commits (no branch, tag or remote has it anymore), backs the repository up as a bundle and rewrites the history so those files are gone for good
@@ -31,7 +32,9 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
 
-| 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it hands you the exact script instead of failing. |
+| 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it **offers to install it for you** (pip, Homebrew, or the system package manager when sudo needs no password) and continues the cleanup once the tool is in place - the exact script is the fallback, not the answer. |
+
+| 9 | **Customize Context Menus...** / **Reset Hidden Menu Items** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. Saved in `geco.hiddenMenuItems`, fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
 
 Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
 (lanes, ref badges, relative dates) with the same context menus on commits and
@@ -63,6 +66,8 @@ without any proposed API.
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
 - **Command Palette** → `Git Easy Ops: ...` (asks for the commit when nothing is selected).
+- **The gear icon** in the view toolbar - and **Customize Context Menus...** as the last
+  entry of every context menu the extension contributes - opens the menu editor below.
 
 ### The built-in **Source Control Graph** (commit and branch rows)
 
@@ -72,7 +77,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`git-easy-context-operations-0.2.0+graph.vsix`), and
+1. install the graph build (`git-easy-context-operations-0.3.0+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -120,6 +125,27 @@ is refused with an explanation instead of guessing).
 Running from source (`F5`) needs no flag at all: an Extension Development Host
 grants the proposals listed in `enabledApiProposals`.
 
+### Customize Context Menus...
+
+`Git Easy Ops: Customize Context Menus...` reveals the hidden **"Git Easy Ops Menus"**
+view in the Source Control sidebar: one collapsible surface per real menu, one
+checkbox per command. It is a plain native tree - no webview, nothing loaded
+until you open it.
+
+- One switch hides the command **everywhere** (sidebar commit menu, branch menu,
+  submenu, Timeline, graph build) - that is what "I don't want this item" means.
+  The Command Palette, keybindings and other extensions keep working regardless.
+- The *Customize Context Menus...* entry itself is locked (the way back), and the
+  palette command **Reset Hidden Menu Items** shows everything again.
+- Hidden state lives in `geco.hiddenMenuItems` (user scope by default; a
+  workspace value keeps this workspace different). Unknown ids are kept, so a
+  downgrade never loses customizations.
+- **Known limits** (VS Code has no API for more): built-in git items (*Cherry
+  Pick*, *Compare*, ...) cannot be hidden - microsoft/vscode#9285 is open since
+  2016. Items cannot be reordered or moved between sections. Immediately after
+  startup (or with the extension disabled) everything is visible until the state
+  is applied - fail-open by design.
+
 ## Install
 
 The built artifacts are **committed to this repository**, so a clone is enough -
@@ -127,12 +153,12 @@ no toolchain needed:
 
 ```bash
 # the everyday build: sidebar graph, Timeline, SCM menus, palette
-code   --install-extension git-easy-context-operations-0.2.0.vsix
-codium --install-extension git-easy-context-operations-0.2.0.vsix
+code   --install-extension git-easy-context-operations-0.3.0.vsix
+codium --install-extension git-easy-context-operations-0.3.0.vsix
 
 # the graph flavour: the same plus context menus in the built-in Source Control Graph
-code   --install-extension git-easy-context-operations-0.2.0+graph.vsix
-codium --install-extension git-easy-context-operations-0.2.0+graph.vsix
+code   --install-extension git-easy-context-operations-0.3.0+graph.vsix
+codium --install-extension git-easy-context-operations-0.3.0+graph.vsix
 ```
 
 For the graph flavour, allow the proposed API once - inside the editor run **Git
@@ -144,7 +170,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`git-easy-context-operations-0.2.0.vsix` (no `+graph`) is the Marketplace-safe
+`git-easy-context-operations-0.3.0.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
@@ -209,13 +235,14 @@ do that before publishing).
 | `geco.showGraphMenuHint` | `true` | One-time hint about the entry points. |
 | `geco.graphCommitLimit` | `200` | Commits listed in the **Graph** group of the sidebar view. |
 | `geco.showGraphLanes` | `true` | Draw the `●│╮…` lane art in the Graph group (`false` = plain list). |
+| `geco.hiddenMenuItems` | `[]` | Row ids hidden from the context menus. Maintained by **Customize Context Menus...** - edit by hand at your own risk. |
 
 ## Development
 
 ```bash
 npm install
 npm run compile        # type-check + bundle to dist/extension.js
-npm test               # 478 headless tests (real git repositories, no editor)
+npm test               # 500+ headless tests (real git repositories, no editor)
 npm run test:vscode    # integration smoke test inside a real VS Code
 npm run package        # build the .vsix
 ```
@@ -245,8 +272,10 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
 - Renaming a branch does not rewrite anything: the commits keep their shas, so no
   force-push is needed for the local rename itself.
 - **Clean History (Remove Dead Paths)...** needs
-  [`git-filter-repo`](https://github.com/newren/git-filter-repo) on your `PATH` - without it you get
-  the full script to run by hand instead. It rewrites *everything*: every SHA
+  [`git-filter-repo`](https://github.com/newren/git-filter-repo) - without it the extension offers to
+  install it (pip / Homebrew / `apt`/`dnf`/`pacman` when sudo works without a password; PEP 668
+  "externally managed" Pythons are explained and skipped). If nothing can be installed
+  automatically you get the full script to run by hand instead. It rewrites *everything*: every SHA
   changes, every collaborator has to re-clone, and the only way back is the
   backup bundle. Paths with a literal newline in their name are reported but not
   compared (git's line-based output cannot carry them).

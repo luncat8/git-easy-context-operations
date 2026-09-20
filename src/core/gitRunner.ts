@@ -75,6 +75,45 @@ export function createGitExec(options: CreateGitExecOptions = {}): GitExec {
 	const baseEnv = options.baseEnv ?? (process.env as Record<string, string | undefined>);
 
 	return async (args, execOptions) => {
+		// The git binary is prepended here: `GitExec` receives pure git args.
+		return runSpawned(spawnImpl, gitPath, args, execOptions, baseEnv);
+	};
+}
+
+/**
+ * A runner for *arbitrary* processes - `git-filter-repo`, `pip3`, `brew`, ...
+ * Unlike {@link createGitExec} (which always spawns the git binary and
+ * therefore receives pure git args), `args[0]` is the binary to start.
+ */
+export function createProcessExec(options: CreateGitExecOptions = {}): GitExec {
+	const spawnImpl: SpawnLike = options.spawnImpl ?? (spawn as unknown as SpawnLike);
+	const baseEnv = options.baseEnv ?? (process.env as Record<string, string | undefined>);
+
+	return async (args, execOptions) => {
+		const [binary, ...rest] = args;
+		if (!binary) {
+			return {
+				args,
+				cwd: execOptions.cwd,
+				exitCode: 127,
+				stdout: '',
+				stderr: 'no command given',
+				timedOut: false,
+				truncated: false,
+			};
+		}
+		return runSpawned(spawnImpl, binary, rest, execOptions, baseEnv);
+	};
+}
+
+/** Shared spawn/collect plumbing for both runners. */
+function runSpawned(
+	spawnImpl: SpawnLike,
+	binary: string,
+	args: readonly string[],
+	execOptions: GitExecOptions,
+	baseEnv: Record<string, string | undefined>,
+): Promise<GitExecResult> {
 		const env: Record<string, string | undefined> = { ...baseEnv, ...GIT_BASE_ENV };
 		if (execOptions.env) {
 			for (const [key, value] of Object.entries(execOptions.env)) {
@@ -92,7 +131,7 @@ export function createGitExec(options: CreateGitExecOptions = {}): GitExec {
 			let timedOut = false;
 			let settled = false;
 
-			const child = spawnImpl(gitPath, args, {
+			const child = spawnImpl(binary, args, {
 				cwd: execOptions.cwd,
 				env,
 				stdio: ['pipe', 'pipe', 'pipe'],
@@ -161,5 +200,4 @@ export function createGitExec(options: CreateGitExecOptions = {}): GitExec {
 				try { child.stdin.end(); } catch { /* ignore */ }
 			}
 		});
-	};
 }

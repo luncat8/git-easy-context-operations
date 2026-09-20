@@ -41,6 +41,8 @@ const EXPECTED_COMMANDS = [
 	'geco.refresh',
 	'geco.explainMenus',
 	'geco.enableGraphMenu',
+	'geco.customizeMenus',
+	'geco.menuResetAll',
 ];
 
 export async function run(): Promise<void> {
@@ -74,6 +76,8 @@ async function testManifest(): Promise<void> {
 	assert.ok(extension, `${EXTENSION_ID} is not installed in the test instance`);
 	const contributes = extension.packageJSON.contributes;
 	assert.equal(contributes.views.scm[0].id, 'geco.history');
+	assert.equal(contributes.views.scm[1].id, 'geco.menuEditor');
+	assert.equal(contributes.views.scm[1].visibility, 'hidden');
 	assert.equal(contributes.viewsWelcome[0].view, 'geco.history');
 	assert.ok(contributes.commands.length >= EXPECTED_COMMANDS.length - 1, 'commands are contributed');
 	assert.equal(contributes.configuration.title, 'Git Easy Ops');

@@ -159,7 +159,7 @@ describe('cleanHistory - pure helpers', () => {
 		});
 		assert.deepEqual(commands.bundle, ['git', 'bundle', 'create', '/tmp/backup.bundle', '--all']);
 		assert.deepEqual(commands.filterRepo, [
-			'git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'update-no',
+			'git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'delete-no-add',
 			'--refs', '--branches', '--remotes', '--tags', '--force',
 		]);
 		assert.ok(commands.all.indexOf('# 1. Backup - the rewrite cannot be undone by git afterwards.') >= 0, 'the backup comes first');
@@ -172,7 +172,7 @@ describe('cleanHistory - pure helpers', () => {
 		// Without recovery refs the rewrite covers everything, and --refs would
 		// only limit it for no reason.
 		const plain = buildCommands({ pathsFile: '/tmp/dead.txt' });
-		assert.deepEqual(plain.filterRepo, ['git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'update-no', '--force']);
+		assert.deepEqual(plain.filterRepo, ['git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'delete-no-add', '--force']);
 		assert.equal(plain.bundle, undefined);
 		assert.ok(plain.script.includes('No remote is configured'), 'nothing to push is said, not guessed');
 	});

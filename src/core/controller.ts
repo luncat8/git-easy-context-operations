@@ -73,6 +73,17 @@ import {
 	type DeadPathAnalysis,
 	type FilterRepoRunner,
 } from './cleanHistory';
+import {
+	externallyManagedHint,
+	filterRepoInstallers,
+	firstErrorLine,
+	INSTALL_TIMEOUT_MS,
+	INSTALLER_PROBE_TIMEOUT_MS,
+	needsSudo,
+	SUDO_PROBE,
+	type FilterRepoInstaller,
+	type InstallerRunner,
+} from './installFilterRepo';
 import type { CommitInfo, RefInfo } from './git';
 import type { ForcePushMode, PatchDestination } from './config';
 
@@ -87,6 +98,19 @@ export interface ControllerOptions {
 	 * Injectable so tests can stand in for a tool that is not installed.
 	 */
 	filterRepoRunner?: FilterRepoRunner;
+	/**
+	 * Runs arbitrary processes (installer probes, installations, and the
+	 * `git-filter-repo` binary form) - unlike `exec`, which always spawns the
+	 * git binary. Wired to `createProcessExec()` in production.
+	 */
+	processExec?: GitExec;
+	/**
+	 * Runs the installer probes and the installation itself when
+	 * `git-filter-repo` is missing ("Install with pip3" / brew / sudo apt-get).
+	 * Injectable so tests are independent of the tools on the host. When
+	 * neither this nor `exec` exists, the flow falls back to informing only.
+	 */
+	filterRepoInstaller?: InstallerRunner;
 }
 
 export interface CommitPick {
@@ -1001,12 +1025,17 @@ export class Controller {
 
 			const root = await ctx.git.repoRoot();
 			const pathsFile = await deadPathsFileFor(ctx);
-			const plan = await this.buildCleanPlan(ctx, { root, pathsFile, analysis, facts });
+			let plan = await this.buildCleanPlan(ctx, { root, pathsFile, analysis, facts });
 			this.ui.log([`Clean history plan for ${root}`, '', plan.report, '', 'Commands:', plan.commands.script].join('\n'));
 
 			if (!plan.filterRepoAvailable) {
-				await this.reportMissingFilterRepo(plan);
-				return;
+				// Ask first, then install - and only inform (the old behavior)
+				// when nothing installable is left to try.
+				const ready = await this.ensureFilterRepo(ctx, plan);
+				if (!ready) {
+					return;
+				}
+				plan = ready;
 			}
 
 			// filter-repo refuses a dirty tree and linked worktrees anyway - say
@@ -1049,10 +1078,10 @@ export class Controller {
 		const { root, pathsFile, analysis, facts } = input;
 		await writeDeadPathsFile(pathsFile, analysis.deadPaths);
 
-		const probe = await this.runFilterRepo(ctx, ['git', 'filter-repo', '--version']);
-		const filterRepoAvailable = probe.exitCode === 0;
+		const probe = await this.probeFilterRepo(ctx);
+		const filterRepoAvailable = probe.available;
 		if (!filterRepoAvailable) {
-			this.ui.log(`git filter-repo is not available (${probe.stderr.trim().split('\n')[0] ?? `exit ${probe.exitCode}`}).`);
+			this.ui.log(`git filter-repo is not available (${probe.detail}).`);
 		}
 
 		// The bundle is written next to the repository, never inside it: a file
@@ -1077,6 +1106,9 @@ export class Controller {
 			refsToKeep: facts.recoveryRefs,
 			droppedRemotes: facts.remotes,
 			forceFilterRepo: true,
+			// pip --user installs put `git-filter-repo` on PATH without git
+			// finding it as a subcommand - the probe remembers which form works.
+			filterRepoCommand: probe.command,
 		});
 
 		return {
@@ -1091,6 +1123,132 @@ export class Controller {
 			repoRoot: root,
 			bundleRefs,
 		};
+	}
+
+	/**
+	 * Which invocation of the rewrite tool works: the `git filter-repo`
+	 * subcommand (the normal case), or the `git-filter-repo` binary directly
+	 * (what a pip `--user` install produces when its bin directory is on PATH
+	 * but git's exec path has not picked the subcommand shim up).
+	 */
+	private async probeFilterRepo(ctx: RepoContext): Promise<{ available: boolean; command: readonly string[]; detail: string }> {
+		const asSubcommand = await this.runFilterRepo(ctx, ['git', 'filter-repo', '--version']);
+		if (asSubcommand.exitCode === 0) {
+			return { available: true, command: ['git', 'filter-repo'], detail: asSubcommand.stdout.trim() };
+		}
+		const asBinary = await this.runFilterRepo(ctx, ['git-filter-repo', '--version']);
+		if (asBinary.exitCode === 0) {
+			return { available: true, command: ['git-filter-repo'], detail: asBinary.stdout.trim() };
+		}
+		return {
+			available: false,
+			command: ['git', 'filter-repo'],
+			detail: asSubcommand.stderr.trim().split('\n')[0] ?? asBinary.stderr.trim().split('\n')[0] ?? 'not found',
+		};
+	}
+
+	/**
+	 * `git-filter-repo` is missing: ask to install it (the first installer
+	 * that exists on this machine), fall through to the next candidate when an
+	 * install fails, and hand over the copy-paste script only when nothing
+	 * works or the user declines. Returns the re-probed plan when the tool
+	 * became available, so the caller continues the cleanup it already began.
+	 */
+	private async ensureFilterRepo(ctx: RepoContext, plan: CleanPlan): Promise<CleanPlan | undefined> {
+		let remaining = filterRepoInstallers(process.platform);
+		for (;;) {
+			// Probe in priority order; the first tool that answers is offered.
+			let installer: FilterRepoInstaller | undefined;
+			while (remaining.length > 0) {
+				const candidate = remaining[0]!;
+				if (needsSudo(candidate)) {
+					const sudo = await this.runInstaller(SUDO_PROBE, ctx.git.cwd, INSTALLER_PROBE_TIMEOUT_MS);
+					if (sudo.exitCode !== 0) {
+						this.ui.log(`Skipping the ${candidate.label} installer: sudo needs a password, which cannot be answered here.`);
+						remaining = remaining.slice(1);
+						continue;
+					}
+				}
+				const probe = await this.runInstaller(candidate.probe, ctx.git.cwd, INSTALLER_PROBE_TIMEOUT_MS);
+				if (probe.exitCode === 0) {
+					installer = candidate;
+					break;
+				}
+				this.ui.log(`The ${candidate.label} installer is not available (${firstErrorLine(probe)}).`);
+				remaining = remaining.slice(1);
+			}
+			if (!installer) {
+				await this.reportMissingFilterRepo(plan);
+				return undefined;
+			}
+
+			const installAction = `Install with ${installer.label}`;
+			const chosen = await this.ui.ask(
+				`${plan.analysis.deadPaths.length} dead path(s) found, but git-filter-repo is not installed - install it now?`,
+				{
+					detail: [
+						'The cleanup continues automatically once the tool is in place.',
+						`Will run: ${installer.command.join(' ')}`,
+						installer.note ? `(${installer.note})` : '',
+						plan.commands.script,
+					].filter((line) => line !== '').join('\n'),
+					actions: [installAction, ACTIONS.copyCommands, ACTIONS.openLog],
+				},
+			);
+			if (chosen !== installAction) {
+				if (chosen === ACTIONS.copyCommands) {
+					await this.ui.copy(plan.commands.script);
+					await this.ui.message('info', `Copied ${plan.commands.all.filter((line) => !line.startsWith('#')).length} commands - the dead-path list is at ${plan.pathsFile}.`);
+				} else if (chosen === ACTIONS.openLog) {
+					await this.ui.showOutput?.();
+				}
+				this.ui.log(`Clean history stopped: git-filter-repo was not installed (${chosen === undefined ? 'dialog dismissed' : `chose "${chosen}"`}).`);
+				return undefined;
+			}
+
+			const result = await this.ui.withProgress(`Installing git-filter-repo (${installer.label})`, (report) => {
+				report(installer.command.join(' '));
+				return this.runInstaller(installer!.command, ctx.git.cwd, INSTALL_TIMEOUT_MS);
+			});
+			if (result.exitCode !== 0) {
+				const hint = externallyManagedHint(result.stderr);
+				this.ui.log(
+					[
+						`Installing with ${installer.label} failed: ${firstErrorLine(result)}`,
+						...(hint ? [`  ${hint}`] : []),
+					].join('\n'),
+				);
+				remaining = remaining.slice(1);
+				continue;
+			}
+
+			const reprobe = await this.probeFilterRepo(ctx);
+			if (!reprobe.available) {
+				// Installed, but reachable neither as `git filter-repo` nor as
+				// `git-filter-repo` (e.g. a pip --user bin dir outside PATH).
+				this.ui.log(`git-filter-repo was installed with ${installer.label}, but git cannot run it (${reprobe.detail}). Restart the editor if the install location was just added to PATH.`);
+				remaining = remaining.slice(1);
+				continue;
+			}
+			this.ui.log(`git-filter-repo installed with ${installer.label} (${reprobe.detail.split('\n')[0]}).`);
+			const rebuilt = await this.buildCleanPlan(ctx, {
+				root: plan.repoRoot,
+				pathsFile: plan.pathsFile,
+				analysis: plan.analysis,
+				facts: plan.facts,
+			});
+			await this.ui.message('info', `git-filter-repo ${reprobe.detail.trim()} installed - continuing with the cleanup of ${plan.analysis.deadPaths.length} dead path(s).`);
+			return rebuilt;
+		}
+	}
+
+	/** Runs an installer probe or install; injectable through {@link ControllerOptions}. */
+	private async runInstaller(command: readonly string[], cwd: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+		const runner: InstallerRunner | undefined = this.options.filterRepoInstaller;
+		if (runner) {
+			return runner(command, cwd);
+		}
+		return this.runExternal(command, cwd, timeoutMs);
 	}
 
 	/** `git-filter-repo` is missing: hand over the exact script instead of failing. */
@@ -1263,12 +1421,26 @@ export class Controller {
 		if (runner) {
 			return runner(command, ctx.git.cwd);
 		}
-		if (!this.options.exec) {
-			throw new GecoError('git-not-found', 'No process runner is available to start git-filter-repo.');
+		return this.runExternal(command, ctx.git.cwd, FILTER_REPO_TIMEOUT_MS);
+	}
+
+	/**
+	 * Runs a non-git process (the rewrite tool in its binary form, an
+	 * installer probe or an installation). `exec` can only start git, so the
+	 * `git ...` form of the rewrite tool is routed through it **without its
+	 * leading `git`** - handing the full argv to `exec` would run
+	 * `git git filter-repo`, which is why every probe used to fail.
+	 */
+	private async runExternal(command: readonly string[], cwd: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+		if (this.options.processExec) {
+			const result = await this.options.processExec(command, { cwd, timeoutMs });
+			return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 		}
-		const [binary, ...args] = command;
-		const result = await this.options.exec([binary!, ...args], { cwd: ctx.git.cwd, timeoutMs: FILTER_REPO_TIMEOUT_MS });
-		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+		if (command[0] === 'git' && this.options.exec) {
+			const result = await this.options.exec(command.slice(1), { cwd, timeoutMs });
+			return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+		}
+		return { exitCode: 127, stdout: '', stderr: `no process runner is available to run ${command[0]}` };
 	}
 
 	// ------------------------------------------------------- branch operations

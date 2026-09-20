@@ -126,8 +126,11 @@ git bundle create ../repo-backup-$(date +%Y%m%d-%H%M%S).bundle \
   $(git for-each-ref --format='%(refname)')
 git bundle verify ../repo-backup-*.bundle
 
-# Then the rewrite. --replace-refs update-no stops filter-repo from leaving
+# Then the rewrite. --replace-refs delete-no-add stops filter-repo from leaving
 # refs/replace/ behind (they would silently "fix" old SHAs for everyone).
+# (An earlier revision said `update-no`, which filter-repo rejects: the valid
+# choices are delete-no-add / delete-and-add / update-no-add / update-or-add /
+# update-and-add / old-default.)
 git filter-repo --invert-paths --paths-from-file "$DEAD" \
   --replace-refs update-no --force
 ```
@@ -257,5 +260,5 @@ consequences, and the extension handles both:
   locally - they keep the files alive on the server.
 - `gc --aggressive` plus a full `repack -f --depth=250 --window=250` after a
   rewrite that already repacked: hours of work for almost nothing.
-- `git filter-repo` was invoked without `--replace-refs update-no`, and the
+- `git filter-repo` was invoked without `--replace-refs delete-no-add`, and the
   notes never mentioned that it deletes the remotes.
