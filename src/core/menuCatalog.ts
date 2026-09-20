@@ -116,7 +116,11 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.renameBranch', label: 'Rename Branch...', surfaces: ['view.branch', 'submenu.branch', 'graph.ref'] },
 	{ id: 'geco.checkoutBranch', label: 'Check Out Branch...', surfaces: ['view.branch', 'submenu.branch'] },
 	{ id: 'geco.deleteBranch', label: 'Delete Branch...', surfaces: ['view.branch', 'submenu.branch'] },
-	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.branch', 'view.title', 'submenu.branch', 'graph.title'] },
+	// The cleanup sits everywhere a commit row shows branch items (it is about
+	// the branch names of the whole graph, not about the clicked commit), and on
+	// branch rows / graph ref badges. On every one of those surfaces it is the
+	// **last** entry of the branch group, right after *Create Branch...*.
+	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.commit', 'view.branch', 'view.title', 'submenu.commit', 'submenu.branch', 'graph.commit', 'graph.ref', 'graph.title'] },
 	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title'] },
 	{ id: 'geco.showBackups', label: 'Show Backups and Recovery Points', surfaces: ['view.title'] },
 	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title', 'graph.title'] },

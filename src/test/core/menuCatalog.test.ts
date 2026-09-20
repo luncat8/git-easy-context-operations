@@ -193,6 +193,62 @@ describe('menu catalogue', () => {
 	});
 });
 
+/**
+ * The ordering half of "Customize Context Menus": a row can be switched off but
+ * not moved, so where a row sits is the manifest's business - and the user's.
+ * The branch cleanup has exactly one place: **last in the branch group, right
+ * after Create Branch...** - on every surface that shows commit rows, and in
+ * the branch group of the built-in graph (`2_branch`, where git.branch is
+ * `2_branch@2`).
+ */
+describe('menu order - Remove Redundant Branches... follows Create Branch...', () => {
+	const GROUP = /^(\w+)@(\d+)$/;
+	const groupName = (group: string | undefined) => GROUP.exec(group ?? '')?.[1];
+	const orderOf = (group: string | undefined) => Number.parseInt(GROUP.exec(group ?? '')?.[2] ?? '-1', 10);
+
+	it('is the last entry of the branch group on every surface that has Create Branch...', () => {
+		const surfaces: MenuSurfaceId[] = ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch'];
+		for (const surfaceId of surfaces) {
+			const entries = entriesForSurface(surfaceId);
+			const create = entries.find((entry) => entry.command === 'geco.createBranch');
+			const cleanup = entries.find((entry) => entry.command === 'geco.removeRedundantBranches');
+			assert.ok(create && cleanup, `${surfaceId}: both entries must exist`);
+			assert.equal(
+				groupName(cleanup!.group),
+				groupName(create!.group),
+				`${surfaceId}: the cleanup belongs in the same (branch) group as Create Branch...`,
+			);
+			assert.ok(
+				orderOf(cleanup!.group) > orderOf(create!.group),
+				`${surfaceId}: the cleanup must come after Create Branch... (${create!.group} vs ${cleanup!.group})`,
+			);
+			const group = entries.filter((entry) => groupName(entry.group) === groupName(cleanup!.group));
+			assert.equal(
+				group[group.length - 1]!.command,
+				'geco.removeRedundantBranches',
+				`${surfaceId}: the cleanup must be the last entry of the branch group`,
+			);
+		}
+	});
+
+	it('sits in the built-in branch group of the graph rows, right after git.branch', () => {
+		// git.branch ("Create Branch...") is 2_branch@2 in the built-in graph, so
+		// the next slot of that group is what "last, right after Create Branch..."
+		// means there. The repo badge has our rename at 2_branch@3 already.
+		const entries = graphEntries();
+		const commitRow = entries.find((entry) => entry.key === 'scm/historyItem/context' && entry.command === 'geco.removeRedundantBranches');
+		assert.ok(commitRow, 'the graph commit row carries the cleanup too');
+		assert.equal(commitRow!.group, '2_branch@3');
+
+		const refRow = entries.find((entry) => entry.key === 'scm/historyItemRef/context' && entry.command === 'geco.removeRedundantBranches');
+		assert.ok(refRow, 'the graph branch badge carries the cleanup too');
+		assert.equal(groupName(refRow!.group), '2_branch');
+		const rename = entries.find((entry) => entry.key === 'scm/historyItemRef/context' && entry.command === 'geco.renameBranch');
+		assert.ok(rename, 'rename is still on the badge');
+		assert.ok(orderOf(refRow!.group) > orderOf(rename!.group), 'the cleanup must be the last entry of that group');
+	});
+});
+
 interface GraphEntry extends MenuEntry {
 	key: string;
 }

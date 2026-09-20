@@ -176,6 +176,174 @@ describe('redundant branches - what counts as redundant', () => {
 	});
 });
 
+/**
+ * What a merge leaves behind *on the remote*: `origin/fix/x` while `origin/main`
+ * already holds every commit of it. The local tracking ref goes with the
+ * cleanup; the branch itself only when the caller asks for it - and never while
+ * a surviving local branch still tracks it.
+ */
+async function repoWithMergedRemoteBranch(): Promise<{ repo: TempRepo; remoteDir: string; fixSha: string }> {
+	const repo = await createTempRepo();
+	await repo.commit('v0.1', { 'a.txt': 'a\n' });
+	await repo.gitOk(['checkout', '--quiet', '-b', 'fix/x']);
+	const fixSha = await repo.commit('fix work', { 'f.txt': 'f\n' });
+	await repo.gitOk(['checkout', '--quiet', 'main']);
+	const remoteDir = await repo.addBareRemote('origin', ['main']);
+	await repo.gitOk(['push', '--quiet', 'origin', 'fix/x']);
+	// The merge that makes the remote branch redundant - and the local name goes.
+	await repo.gitOk(['merge', '--quiet', '--no-edit', '-m', 'merge fix/x', 'fix/x']);
+	await repo.gitOk(['push', '--quiet', 'origin', 'main']);
+	await repo.gitOk(['branch', '-D', 'fix/x']);
+	return { repo, remoteDir, fixSha };
+}
+
+const REMOTE_FIX = 'refs/remotes/origin/fix/x';
+
+describe('redundant branches - remote-tracking branches', () => {
+	it('offers a merged remote branch and removes only the local ref by default', async () => {
+		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
+		try {
+			const scan = await findRedundantBranches(repo.ctx);
+			const remote = scan.redundant.find((branch) => branch.name === 'origin/fix/x');
+			assert.ok(remote, `the merged remote branch must be offered: ${JSON.stringify(scan.redundant)}`);
+			assert.equal(remote!.sha, fixSha);
+			assert.deepEqual(remote!.remote, { remote: 'origin', branch: 'fix/x', ref: REMOTE_FIX, trackedBy: [] });
+			assert.ok(remote!.keptAliveBy.includes('origin/main'), `kept alive by origin/main: ${remote!.keptAliveBy}`);
+
+			const result = await deleteRedundantBranches(repo.ctx, scan.redundant);
+			assert.deepEqual(result.deleted.map((branch) => branch.name), ['origin/fix/x']);
+			assert.equal(await repo.hasRef(REMOTE_FIX), false, 'the local tracking ref is gone');
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'the remote itself was not touched');
+			assert.match(result.notes.join('\n'), /Only the local remote-tracking refs were removed/);
+
+			// The whole batch is one entry, and Undo brings the ref back.
+			const journal = await repo.ctx.safety.readJournal();
+			assert.equal(journal.length, 1);
+			await repo.ctx.safety.undo(journal[0]!);
+			assert.equal(await repo.hasRef(REMOTE_FIX), true);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('deletes the branch on the remote when asked, and Undo pushes it back', async () => {
+		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
+		try {
+			// With the local branch still there, tracking the remote one: both are
+			// redundant, and the cleanup may take the pair in one go.
+			await repo.checkout('fix/x');
+			await repo.gitOk(['branch', '--set-upstream-to=origin/fix/x', 'fix/x']);
+			await repo.checkout('main');
+			const scan = await findRedundantBranches(repo.ctx);
+			const remote = scan.redundant.find((branch) => branch.name === 'origin/fix/x');
+			assert.deepEqual(remote?.remote?.trackedBy, ['fix/x'], 'the tracking configuration is recorded');
+
+			const result = await deleteRedundantBranches(repo.ctx, scan.redundant, { deleteRemote: true });
+			assert.deepEqual(result.deleted.map((branch) => branch.name), ['fix/x', 'origin/fix/x']);
+			assert.equal(await repo.hasBranch('fix/x'), false);
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), undefined, 'the remote branch is gone');
+			assert.match(result.notes.join('\n'), /deleted on the remote too/);
+
+			const journal = await repo.ctx.safety.readJournal();
+			assert.equal(journal.length, 1, 'one entry for local and remote together');
+			await repo.ctx.safety.undo(journal[0]!);
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'Undo pushed the branch back');
+			assert.equal(await repo.branchSha('fix/x'), fixSha, 'and recreated the local branch');
+			assert.equal((await repo.ctx.git.upstream('fix/x'))?.ref, 'refs/remotes/origin/fix/x');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('never offers the remote trunk, the remote HEAD or the remote copy of the checked out branch', async () => {
+		const { repo } = await repoWithMergedRemoteBranch();
+		try {
+			// A second redundant name on the remote (`extra` == `main`).
+			await repo.gitOk(['push', '--quiet', 'origin', 'main:refs/heads/extra']);
+			await repo.fetch();
+			const names = (await findRedundantBranches(repo.ctx)).redundant.map((branch) => branch.name);
+			assert.equal(names.includes('origin/main'), false, 'the trunk of the remote is protected');
+			assert.equal(names.includes('origin/HEAD'), false, 'the symbolic HEAD is not a branch');
+			assert.equal(names.includes('origin/extra'), true, `a merged, unused name is offered: ${names}`);
+
+			// With a local branch of that name checked out, its remote copy is in use.
+			await repo.checkout('extra', { create: true });
+			await repo.gitOk(['branch', '--set-upstream-to=origin/extra', 'extra']);
+			const after = (await findRedundantBranches(repo.ctx)).redundant.map((branch) => branch.name);
+			assert.equal(after.includes('origin/extra'), false, 'the remote copy of the checked out branch is protected');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps a remote branch a surviving local branch tracks, and refuses it in a delete', async () => {
+		const { repo } = await repoWithMergedRemoteBranch();
+		try {
+			// The local branch keeps one commit of its own - it survives, so the
+			// remote name it tracks is not offered.
+			await repo.gitOk(['checkout', '--quiet', '-b', 'fix/x', 'origin/fix/x']);
+			await repo.gitOk(['branch', '--set-upstream-to=origin/fix/x', 'fix/x']);
+			await repo.commit('unpushed work', { 'w.txt': 'w\n' });
+			await repo.checkout('main');
+
+			const scan = await findRedundantBranches(repo.ctx);
+			assert.deepEqual(scan.redundant.map((branch) => branch.name), [], `nothing may go: ${JSON.stringify(scan.redundant)}`);
+			assert.match(scan.kept.find((branch) => branch.name === 'fix/x')!.reason, /only ref that has these commits/);
+
+			// Asked directly, the delete still refuses: the tracker survives.
+			const remoteSha = await repo.sha('origin/fix/x');
+			const result = await deleteRedundantBranches(repo.ctx, [
+				{ name: 'origin/fix/x', sha: remoteSha, subject: 'fix work', keptAliveBy: ['origin/main'], remote: { remote: 'origin', branch: 'fix/x', ref: REMOTE_FIX, trackedBy: ['fix/x'] } },
+			], { deleteRemote: true });
+			assert.deepEqual(result.deleted, []);
+			assert.match(result.skipped[0]!.reason, /the local branch "fix\/x" still tracks it/);
+			assert.equal(await repo.hasRef(REMOTE_FIX), true);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('refuses a remote branch whose tip moved since the scan', async () => {
+		const { repo } = await repoWithMergedRemoteBranch();
+		try {
+			const scan = await findRedundantBranches(repo.ctx);
+			const remote = scan.redundant.find((branch) => branch.name === 'origin/fix/x')!;
+			// Meanwhile somebody moved the tracking ref (a fetch of a moved branch).
+			// The merge above fast-forwarded, so `main` is the fix commit itself -
+			// use the commit before it, which really is a different tip.
+			const moved = await repo.sha('main~1');
+			assert.notEqual(moved, remote.sha);
+			await repo.gitOk(['update-ref', REMOTE_FIX, moved]);
+
+			const result = await deleteRedundantBranches(repo.ctx, [remote]);
+			assert.deepEqual(result.deleted, []);
+			assert.match(result.skipped[0]!.reason, /it moved to/);
+			assert.equal(await repo.hasRef(REMOTE_FIX), true);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('refuses to delete a remote branch a colleague moved (the lease protects their push)', async () => {
+		const { repo, remoteDir } = await repoWithMergedRemoteBranch();
+		try {
+			const scan = await findRedundantBranches(repo.ctx);
+			const remote = scan.redundant.find((branch) => branch.name === 'origin/fix/x')!;
+			// A colleague pushes to the very branch on the remote; our tracking ref
+			// is stale, so the delete must be refused instead of clobbering it.
+			await repo.pushFromElsewhere(remoteDir, 'colleague work', 'fix/x');
+			const colleague = await repo.remoteBranchSha(remoteDir, 'fix/x');
+
+			const result = await deleteRedundantBranches(repo.ctx, [remote], { deleteRemote: true });
+			assert.deepEqual(result.deleted, []);
+			assert.match(result.skipped[0]!.reason, /the remote refused it/);
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), colleague, 'their commit is still there');
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
+
 describe('redundant branches - deleting them', () => {
 	it('deletes the branch, keeps every file and commit, and journals one undoable entry', async () => {
 		const { repo, shas } = await repoWithLeftovers();

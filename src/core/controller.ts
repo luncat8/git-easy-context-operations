@@ -1698,6 +1698,13 @@ export class Controller {
 	 * nothing about the files - only the list of names gets shorter. The user
 	 * sees exactly what would go (and what is kept, with the reason) before
 	 * anything happens, and one Undo brings the whole batch back.
+	 *
+	 * Remote-tracking branches are part of that list: a branch that was merged on
+	 * the remote (`origin/fix/x` while `origin/main` holds every commit of it)
+	 * carries nothing either. Its local ref goes with the cleanup; whether the
+	 * branch is *also* deleted on the remote (`git push --delete`) is a second
+	 * question, because that is the half other people see - the same choice
+	 * "Delete Branch..." offers.
 	 */
 	async removeRedundantBranches(cwd: string): Promise<void> {
 		await this.guard('Remove redundant branches', async () => {
@@ -1707,10 +1714,13 @@ export class Controller {
 				return findRedundantBranches(ctx);
 			});
 
+			const localRedundant = scan.redundant.filter((branch) => !branch.remote).length;
+			const remoteRedundant = scan.redundant.length - localRedundant;
 			this.ui.log(
 				[
-					`Scanned ${scan.branchCount} local branch(es): ${scan.redundant.length} redundant, ${scan.kept.length} kept.`,
-					...scan.redundant.map((branch) => `  redundant: ${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}`),
+					`Scanned ${scan.branchCount} local branch(es) and ${scan.remoteCount} remote-tracking branch(es): `
+						+ `${localRedundant} local and ${remoteRedundant} remote redundant, ${scan.kept.length} kept.`,
+					...scan.redundant.map((branch) => `  redundant: ${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}${branch.remote ? ` [remote branch on ${branch.remote.remote}]` : ''}`),
 					...scan.kept.map((branch) => `  kept: ${branch.name} (${shorten(branch.sha)}) - ${branch.reason}${branch.uniqueCommits > 0 ? ` (${branch.uniqueCommits} own commit(s))` : ''}`),
 				].join('\n'),
 			);
@@ -1718,7 +1728,7 @@ export class Controller {
 			if (scan.redundant.length === 0) {
 				await this.ui.message(
 					'info',
-					scan.branchCount <= 1
+					scan.branchCount <= 1 && scan.remoteCount === 0
 						? 'There is nothing to clean up: this repository has a single branch.'
 						: 'No redundant branches: every branch here has commits no other branch, tag or remote has.',
 					scan.kept.map((branch) => `${branch.name} - ${branch.reason}`).join('\n') || undefined,
@@ -1735,7 +1745,9 @@ export class Controller {
 				const picked = await this.ui.pickMany(
 					scan.redundant.map((branch) => ({
 						label: branch.name,
-						description: `${shorten(branch.sha)}${branch.upstream ? ` - tracks ${branch.upstream}` : ''}`,
+						description: branch.remote
+							? `remote branch on ${branch.remote.remote} - ${shorten(branch.sha)}`
+							: `${shorten(branch.sha)}${branch.upstream ? ` - tracks ${branch.upstream}` : ''}`,
 						detail: `already contained in ${branch.keptAliveBy.join(', ')}${branch.subject ? ` - ${branch.subject}` : ''}`,
 						value: branch,
 						picked: true,
@@ -1756,6 +1768,29 @@ export class Controller {
 				return;
 			}
 
+			// Remote-tracking branches need one more answer: their local ref goes
+			// either way, the branch on the remote only when the user says so.
+			let deleteRemote = false;
+			const remoteChosen = chosen.filter((branch) => branch.remote);
+			if (remoteChosen.length > 0) {
+				const remotes = [...new Set(remoteChosen.map((branch) => branch.remote!.remote))].join(', ');
+				const scope = await this.ui.pick<boolean>(
+					[
+						{ label: 'Remove them locally only', description: `the branch(es) stay on ${remotes}`, value: false },
+						{ label: 'Remove them locally and on the remote', description: `deleted on ${remotes} with git push --delete`, value: true },
+					],
+					{
+						title: `${remoteChosen.length} of the selected branches are remote branches`,
+						placeholder: remoteChosen.map((branch) => branch.name).join(', '),
+					},
+				);
+				if (scope === undefined) {
+					this.ui.log('Remove redundant branches: cancelled, every branch was kept.');
+					return;
+				}
+				deleteRemote = scope;
+			}
+
 			if (this.settings.confirmDestructiveOperations) {
 				const confirmed = await this.ui.confirm(
 					chosen.length === 1 ? `Delete the redundant branch "${chosen[0]!.name}"?` : `Delete ${chosen.length} redundant branches?`,
@@ -1764,11 +1799,16 @@ export class Controller {
 						cancelLabel: 'Keep Them',
 						destructive: true,
 						detail: [
-							...chosen.map((branch) => `${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}`),
+							...chosen.map((branch) => `${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}${branch.remote ? ` [remote branch on ${branch.remote.remote}]` : ''}`),
 							'',
 							'No commit is lost: every one of them is already reachable from another ref,',
 							'so the files and the history stay exactly as they are - only the names go.',
-							'The remote branches are not touched. One Undo brings all of them back.',
+							remoteChosen.length === 0
+								? 'The remote branches are not touched.'
+								: deleteRemote
+									? `The remote branch(es) are deleted on ${[...new Set(remoteChosen.map((branch) => branch.remote!.remote))].join(', ')} as well - the commits stay reachable there too.`
+									: 'The branches themselves stay on the remote, only the local remote-tracking refs go.',
+							deleteRemote ? 'One Undo brings all of them back and pushes the remote ones back.' : 'One Undo brings all of them back.',
 						].join('\n'),
 					},
 				);
@@ -1778,7 +1818,7 @@ export class Controller {
 				}
 			}
 
-			const result = await this.ui.withProgress('Removing redundant branches', () => deleteRedundantBranches(ctx, chosen));
+			const result = await this.ui.withProgress('Removing redundant branches', () => deleteRedundantBranches(ctx, chosen, { deleteRemote }));
 
 			this.ui.log(
 				[

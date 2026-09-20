@@ -299,6 +299,11 @@
           "group": "3_branch@1"
         },
         {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "3_branch@2"
+        },
+        {
           "command": "geco.fastForwardDefaultBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.fastForwardDefaultBranch)",
           "group": "4_move@1"
@@ -469,6 +474,11 @@
           "command": "geco.createBranch",
           "group": "2_branch@4",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBranch)"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "group": "2_branch@5",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)"
         },
         {
           "command": "geco.forcePush",

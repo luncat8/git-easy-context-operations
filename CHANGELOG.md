@@ -31,13 +31,28 @@ behind get a one-click cleanup.
     duplicate pair never disappears completely.
   - Every tip is **re-verified immediately before deletion**, so a scan that
     went stale (a commit landed meanwhile) deletes less, never more.
-  - Remote branches are never touched, and the whole batch is **one** journal
-    entry: a single **Undo** restores every branch with its tracking
-    configuration.
-  - Available on branch rows in the sidebar, in the view's `···` menu, in the
-    *Git Easy Ops* branch submenu, on the graph toolbar of the `+graph` build,
-    and from the Command Palette. Like every other item it can be switched off
-    in **Customize Context Menus...**.
+  - **Remote-tracking branches are covered too.** A branch that was merged on
+    the remote (`origin/fix/x` while `origin/main` holds every commit of it)
+    carries nothing either, so it lands in the same list, marked *remote
+    branch on origin*. Its local remote-tracking ref goes with the cleanup;
+    the branch on the remote is a second question, asked once per batch (and
+    only when a remote branch was selected): remove the local ref only (the
+    default - the branch stays on the remote) or delete it there too with
+    `git push --delete` - the same choice **Delete Branch...** offers. Never
+    offered: the remote's default branch, the remote copy of the checked-out
+    branch, and a remote branch a surviving local branch still tracks; the
+    remote delete itself uses `--force-with-lease`, so a colleague's newer
+    push is never clobbered.
+  - The whole batch is **one** journal entry: a single **Undo** restores
+    every branch with its tracking configuration and pushes back the remote
+    branches it deleted (also with a lease, and it re-attaches the local
+    branch to the remote one).
+  - Available on branch rows **and commit rows** in the sidebar, in the view's
+    `···` menu, in the *Git Easy Ops* commit/branch submenus, on the graph
+    toolbar *and* on the commit rows and branch badges of the `+graph` build, and
+    from the Command Palette. Wherever it lands it is the **last** entry of the
+    branch group, directly behind **Create Branch...** - and like every other
+    item it can be switched off in **Customize Context Menus...**.
 
 ### Fixed
 

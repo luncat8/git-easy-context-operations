@@ -37,7 +37,7 @@ https://github.com/luncat8/git-easy-context-operations
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
 
-| 7b | **Remove Redundant Branches...** | The cleanup for what fast-forwarding leaves behind. A branch is *redundant* when every commit it points at is already reachable from another branch, tag or remote-tracking branch - deleting it changes no file, no diff and no `git log`, only the list of names gets shorter (`old`, merged feature branches, a second name on the same commit). You get a checkbox list of exactly what would go, each with the ref that already holds its commits; the checked-out branch, branches checked out in another worktree and the default branch are never offered, and a branch whose commits only *it* has is kept and reported with the count. Every tip is re-verified right before deletion, so a scan that went stale deletes less, never more. Remote branches are never touched, and the whole batch is one journal entry - a single **Undo** restores every branch with its tracking configuration. item is last in branch related group after **Create Branch...**|
+| 7b | **Remove Redundant Branches...** | The cleanup for what fast-forwarding leaves behind. A branch is *redundant* when every commit it points at is already reachable from another branch, tag or remote-tracking branch - deleting it changes no file, no diff and no `git log`, only the list of names gets shorter (`old`, merged feature branches, a second name on the same commit). You get a checkbox list of exactly what would go, each with the ref that already holds its commits; the checked-out branch, branches checked out in another worktree and the default branch are never offered, and a branch whose commits only *it* has is kept and reported with the count. Every tip is re-verified right before deletion, so a scan that went stale deletes less, never more. Remote-tracking branches are part of the list too: a branch that was merged on the remote (`origin/fix/x` while `origin/main` holds every commit of it) is offered as *remote branch on origin*, and one question decides whether it is deleted there as well (`git push --delete`) or only its local remote-tracking ref goes - the default keeps the branch on the remote. The remote's default branch and the remote copy of the checked-out branch are never offered, and neither is a remote branch a surviving local branch still tracks. The whole batch is one journal entry - a single **Undo** restores every branch with its tracking configuration and pushes back the remote branches it deleted. It shows up on commit rows as well as branch rows, and on every one of them it is the **last** entry of the branch group, directly behind **Create Branch...**|
 
 | 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it **offers to install it for you** (pip, Homebrew, or the system package manager when sudo needs no password) and continues the cleanup once the tool is in place - the exact script is the fallback, not the answer. |
 
@@ -65,8 +65,10 @@ without any proposed API.
   changes the repository - including the *Undo* you pick in the notification
   afterwards - so what you see is never one squash behind.
 - **The same view** also lists all branches and the recovery points/journal.
-- **Remove Redundant Branches...** sits on every branch row and in the view's
-  `···` menu: it sweeps up the names a fast-forward left behind (see feature 7b).
+- **Remove Redundant Branches...** sits on every branch row *and* on every commit
+  row (in the branch group, last - right after **Create Branch...**) and in the
+  view's `···` menu: it sweeps up the names a fast-forward left behind (see
+  feature 7b).
 - **Two buttons for the whole graph** (they are not about one commit, so they do
   not sit in a commit row): the *trash* icon in the view toolbar next to
   **Refresh**, and the inline *trash* icon on the **Graph** group row itself -
@@ -114,6 +116,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 | Group (next to the built-in items) | What this build adds |
 |------------------------------------|----------------------|
 | *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reword Commit Message...**, **Append to...**, **Rename Text in...** |
+| *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`); the same entry sits on a branch badge (`scm/historyItemRef/context`, behind **Rename Branch...**) |
 | after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
@@ -125,7 +128,8 @@ so this build does not repeat them. The one thing git has no counterpart for is
 renaming a branch, which is why **Rename Branch... › main** appears on the ref
 badge itself (`scm/historyItemRef/context`: VS Code only accepts plain commands
 there and builds the per-ref entry itself, exactly like *Checkout › main* and
-*Delete Branch › main*).
+*Delete Branch › main*). **Remove Redundant Branches...** is the second entry on
+that badge, last in the branch group.
 
 The built-in graph cannot select several rows, so use **Squash with Previous
 Commits...** there - it asks for the number of commits before the one you clicked.

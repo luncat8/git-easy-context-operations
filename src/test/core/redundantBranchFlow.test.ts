@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
 import { DEFAULT_SETTINGS, type Settings } from '../../core/config';
 import { Controller } from '../../core/controller';
 import { ACTIONS } from '../../core/ui';
-import { createLinearRepo, TempRepo } from '../helpers/tempRepo';
+import { createTempRepo, createLinearRepo, TempRepo } from '../helpers/tempRepo';
 import { FakeUI } from '../helpers/fakeUi';
 
 function controllerFor(ui: FakeUI, repo: TempRepo, settings: Settings = DEFAULT_SETTINGS, onRepositoryChanged?: () => void): Controller {
@@ -142,6 +142,89 @@ describe('controller - remove redundant branches flow', () => {
 
 			assert.match(ui.allLogs(), /kept: main .* - it is (checked out|the default branch)/);
 			assert.match(ui.allLogs(), /redundant: old .* already in main/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
+
+/** A branch that was merged on the remote and no longer exists locally. */
+async function repoWithMergedRemoteBranch(): Promise<{ repo: TempRepo; remoteDir: string; fixSha: string }> {
+	const repo = await createTempRepo();
+	await repo.commit('v0.1', { 'a.txt': 'a\n' });
+	await repo.gitOk(['checkout', '--quiet', '-b', 'fix/x']);
+	const fixSha = await repo.commit('fix work', { 'f.txt': 'f\n' });
+	await repo.gitOk(['checkout', '--quiet', 'main']);
+	const remoteDir = await repo.addBareRemote('origin', ['main']);
+	await repo.gitOk(['push', '--quiet', 'origin', 'fix/x']);
+	await repo.gitOk(['merge', '--quiet', '--no-edit', '-m', 'merge fix/x', 'fix/x']);
+	await repo.gitOk(['push', '--quiet', 'origin', 'main']);
+	await repo.gitOk(['branch', '-D', 'fix/x']);
+	return { repo, remoteDir, fixSha };
+}
+
+describe('controller - remove redundant branches flow, remote branches', () => {
+	it('asks where the remote branch should go and, by default answer, keeps it on the remote', async () => {
+		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
+		try {
+			// The extra question only appears because a remote branch was selected.
+			const ui = new FakeUI({ picks: ['Remove them locally only'] });
+			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+
+			assert.equal(ui.pickCalls.length, 1, `expected the scope question: ${ui.transcript}`);
+			assert.deepEqual(ui.pickCalls[0]!.items.map((item) => item.label), ['Remove them locally only', 'Remove them locally and on the remote']);
+			assert.match(ui.pickCalls[0]!.options!.title!, /remote branches/);
+
+			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), false, 'the local tracking ref is gone');
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'the branch itself stays on the remote');
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /stay on the remote, only the local remote-tracking refs go/);
+			assert.match(ui.allLogs(), /redundant: origin\/fix\/x .* \[remote branch on origin\]/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('deletes it on the remote when that answer is chosen', async () => {
+		const { repo, remoteDir } = await repoWithMergedRemoteBranch();
+		try {
+			const ui = new FakeUI({ picks: ['Remove them locally and on the remote'] });
+			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), undefined, 'the branch is gone from the remote');
+			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), false);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /deleted on origin as well/);
+			assert.match(ui.askCalls[0]!.message, /Removed the redundant branch "origin\/fix\/x"/);
+			assert.match(ui.allLogs(), /The remote branch was deleted on the remote too/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('pushes the remote branch back when the user picks Undo', async () => {
+		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
+		try {
+			// `asks: ACTIONS.undo` means the Undo runs before the flow returns.
+			const ui = new FakeUI({ picks: ['Remove them locally and on the remote'], asks: ACTIONS.undo });
+			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'Undo pushed the branch back');
+			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), true, 'the tracking ref is back too');
+			assert.deepEqual(await repo.ctx.safety.readJournal(), [], 'the journal entry is consumed');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps every branch when the remote question is dismissed', async () => {
+		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
+		try {
+			const ui = new FakeUI({ picks: -1 });
+			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+
+			assert.equal(ui.confirmCalls.length, 0, 'a dismissed question must not fall through to a delete');
+			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), true);
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha);
+			assert.match(ui.allLogs(), /cancelled, every branch was kept/);
 		} finally {
 			repo.cleanup();
 		}
