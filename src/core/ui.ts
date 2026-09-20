@@ -26,6 +26,11 @@ export interface PickOptions {
 	placeholder?: string;
 }
 
+/** A choice in a multi-select picker; `picked` is its initial checkbox state. */
+export interface MultiPickChoice<T> extends QuickPickChoice<T> {
+	picked?: boolean;
+}
+
 export interface ConfirmOptions {
 	detail?: string;
 	confirmLabel?: string;
@@ -51,6 +56,12 @@ export interface UI {
 	input(options: InputOptions): Promise<string | undefined>;
 	/** One of the given choices; `undefined` means the user cancelled. */
 	pick<T>(items: readonly QuickPickChoice<T>[], options?: PickOptions): Promise<T | undefined>;
+	/**
+	 * Optional: several of the given choices (checkboxes). `undefined` means the
+	 * user cancelled, `[]` that everything was unticked. A UI without it makes
+	 * the caller fall back to "all of them".
+	 */
+	pickMany?<T>(items: readonly MultiPickChoice<T>[], options?: PickOptions): Promise<T[] | undefined>;
 	/** Yes/no. `false` on cancel and when the dialog is dismissed. */
 	confirm(message: string, options?: ConfirmOptions): Promise<boolean>;
 	/** A message with optional action buttons; resolves to the chosen action. */

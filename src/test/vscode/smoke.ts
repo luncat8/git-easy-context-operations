@@ -33,6 +33,7 @@ const EXPECTED_COMMANDS = [
 	'geco.createBranch',
 	'geco.renameBranch',
 	'geco.deleteBranch',
+	'geco.removeRedundantBranches',
 	'geco.checkoutBranch',
 	'geco.undoLastOperation',
 	'geco.showBackups',

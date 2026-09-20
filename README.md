@@ -11,12 +11,17 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 ## Main Highlighted Features
 
 - **Squash N commits** - combine any contiguous run of commits into one
+- **Remove redundant branches** - one click deletes the branch names left over after fast-forwarding `main`: branches whose every commit another branch, tag or remote already has, so nothing about the files changes
+- **The view keeps up** - squash, fast-forward, branch work and undo repaint the graph as soon as the operation is done, no manual refresh
 - **Customize the context menus** - switch every Git Easy Ops menu item on/off from a native checkbox tree (`Git Easy Ops: Customize Context Menus...`)
 - **Change commit message** - reword, append, or rename text in any commit's message
 - **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first
 - **Clean the whole graph** - one trash button on the **Graph** row finds every file that exists only in old commits (no branch, tag or remote has it anymore), backs the repository up as a bundle and rewrites the history so those files are gone for good
 
 # Next text is not for human (ask LLM if need)
+
+This repo
+https://github.com/luncat8/git-easy-context-operations
 
 ## Features
 
@@ -31,6 +36,8 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 | 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
+
+| 7b | **Remove Redundant Branches...** | The cleanup for what fast-forwarding leaves behind. A branch is *redundant* when every commit it points at is already reachable from another branch, tag or remote-tracking branch - deleting it changes no file, no diff and no `git log`, only the list of names gets shorter (`old`, merged feature branches, a second name on the same commit). You get a checkbox list of exactly what would go, each with the ref that already holds its commits; the checked-out branch, branches checked out in another worktree and the default branch are never offered, and a branch whose commits only *it* has is kept and reported with the count. Every tip is re-verified right before deletion, so a scan that went stale deletes less, never more. Remote-tracking branches are part of the list too: a branch that was merged on the remote (`origin/fix/x` while `origin/main` holds every commit of it) is offered as *remote branch on origin*, and one question decides whether it is deleted there as well (`git push --delete`) or only its local remote-tracking ref goes - the default keeps the branch on the remote. The remote's default branch and the remote copy of the checked-out branch are never offered, and neither is a remote branch a surviving local branch still tracks. The whole batch is one journal entry - a single **Undo** restores every branch with its tracking configuration and pushes back the remote branches it deleted. It shows up on commit rows as well as branch rows, and on every one of them it is the **last** entry of the branch group, directly behind **Create Branch...**|
 
 | 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it **offers to install it for you** (pip, Homebrew, or the system package manager when sudo needs no password) and continues the cleanup once the tool is in place - the exact script is the fallback, not the answer. |
 
@@ -54,8 +61,14 @@ without any proposed API.
   branches as child nodes - right-clicking one of those gives **Create / Rename /
   Check Out / Delete Branch**, fast-forward, backup and force push. This is the
   stand-in for the built-in Source Control Graph, which cannot be extended without
-  a proposed API (see below).
+  a proposed API (see below). The view **reloads itself** whenever an operation
+  changes the repository - including the *Undo* you pick in the notification
+  afterwards - so what you see is never one squash behind.
 - **The same view** also lists all branches and the recovery points/journal.
+- **Remove Redundant Branches...** sits on every branch row *and* on every commit
+  row (in the branch group, last - right after **Create Branch...**) and in the
+  view's `···` menu: it sweeps up the names a fast-forward left behind (see
+  feature 7b).
 - **Two buttons for the whole graph** (they are not about one commit, so they do
   not sit in a commit row): the *trash* icon in the view toolbar next to
   **Refresh**, and the inline *trash* icon on the **Graph** group row itself -
@@ -77,7 +90,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`git-easy-context-operations-0.3.0+graph.vsix`), and
+1. install the graph build (`git-easy-context-operations-0.4.0+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -103,10 +116,11 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 | Group (next to the built-in items) | What this build adds |
 |------------------------------------|----------------------|
 | *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reword Commit Message...**, **Append to...**, **Rename Text in...** |
+| *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`). Deliberately **not** on the branch badges - see below. |
 | after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
-| graph *toolbar* (`scm/history/title`, `navigation`) | **Clean History (Remove Dead Paths)...** next to Refresh - the one operation that belongs to the whole graph instead of one commit row |
+| graph *toolbar* (`scm/history/title`, `navigation`) | **Clean History (Remove Dead Paths)...** and **Remove Redundant Branches...** next to Refresh - the two operations that belong to the whole graph instead of one commit row |
 
 Nothing is duplicated: the built-in graph already offers checkout, create branch,
 create tag, cherry pick, copy commit id and - on a branch badge - delete branch,
@@ -115,6 +129,14 @@ renaming a branch, which is why **Rename Branch... › main** appears on the ref
 badge itself (`scm/historyItemRef/context`: VS Code only accepts plain commands
 there and builds the per-ref entry itself, exactly like *Checkout › main* and
 *Delete Branch › main*).
+
+**Remove Redundant Branches...** is deliberately *not* on those badges: VS Code
+would expand the entry per ref into sub-items like *Remove Redundant Branches... ›
+main*, and a sub-item carrying the selected branch name reads as "this branch
+gets deleted" - the opposite of a whole-graph cleanup whose list of victims only
+exists after the scan. It sits flat on the commit row and on the graph toolbar
+instead; clicking it shows the redundant branches as a checkbox list, all
+pre-ticked, and OK removes exactly the ticked ones.
 
 The built-in graph cannot select several rows, so use **Squash with Previous
 Commits...** there - it asks for the number of commits before the one you clicked.
@@ -153,12 +175,12 @@ no toolchain needed:
 
 ```bash
 # the everyday build: sidebar graph, Timeline, SCM menus, palette
-code   --install-extension git-easy-context-operations-0.3.0.vsix
-codium --install-extension git-easy-context-operations-0.3.0.vsix
+code   --install-extension git-easy-context-operations-0.4.0.vsix
+codium --install-extension git-easy-context-operations-0.4.0.vsix
 
 # the graph flavour: the same plus context menus in the built-in Source Control Graph
-code   --install-extension git-easy-context-operations-0.3.0+graph.vsix
-codium --install-extension git-easy-context-operations-0.3.0+graph.vsix
+code   --install-extension git-easy-context-operations-0.4.0+graph.vsix
+codium --install-extension git-easy-context-operations-0.4.0+graph.vsix
 ```
 
 For the graph flavour, allow the proposed API once - inside the editor run **Git
@@ -170,7 +192,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`git-easy-context-operations-0.3.0.vsix` (no `+graph`) is the Marketplace-safe
+`git-easy-context-operations-0.4.0.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.

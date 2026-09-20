@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -134,6 +134,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "geco.removeRedundantBranches",
+        "title": "Remove Redundant Branches...",
+        "category": "Git Easy Ops",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "geco.checkoutBranch",
         "title": "Check Out Branch...",
         "category": "Git Easy Ops",
@@ -236,6 +242,11 @@
           "group": "1_geco@2"
         },
         {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "1_geco@3"
+        },
+        {
           "command": "geco.explainMenus",
           "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)",
           "group": "9_geco@1"
@@ -286,6 +297,11 @@
           "command": "geco.createBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.createBranch)",
           "group": "3_branch@1"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "3_branch@2"
         },
         {
           "command": "geco.fastForwardDefaultBranch",
@@ -356,6 +372,11 @@
           "command": "geco.deleteBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)",
           "group": "1_branch@4"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "1_branch@5"
         },
         {
           "command": "geco.fastForwardBranch",
@@ -455,6 +476,11 @@
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.createBranch)"
         },
         {
+          "command": "geco.removeRedundantBranches",
+          "group": "2_branch@5",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)"
+        },
+        {
           "command": "geco.forcePush",
           "group": "3_remote@1",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePush)"
@@ -514,6 +540,11 @@
           "command": "geco.deleteBranch",
           "group": "1_branch@4",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "group": "1_branch@5",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)"
         },
         {
           "command": "geco.fastForwardBranch",

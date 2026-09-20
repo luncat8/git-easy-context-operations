@@ -4,6 +4,95 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **Remove Redundant Branches... no longer sits on the branch badges of the
+  `+graph` build** (`scm/historyItemRef/context`). VS Code expands every entry
+  contributed there into a per-ref sub-item of the commit menu, so the cleanup
+  showed up as *Remove Redundant Branches... › main*, one sub-item per branch
+  of the clicked commit - which reads as "this branch gets deleted", the exact
+  opposite of what the command does. It remains one flat entry on the graph
+  commit rows, the graph toolbar, and every sidebar/ submenu surface it had
+  before; **Rename Branch...** stays on the badge (it genuinely is about that
+  one branch).
+- **The checkbox list is now the confirmation.** The flow is: one click, the
+  list of redundant branches with checkboxes (all pre-ticked, each entry
+  naming the ref that already holds its commits), untick anything you want to
+  keep, OK removes exactly the ticked names. The extra modal confirmation that
+  repeated the same list afterwards is gone; only a UI without checkbox
+  pickers falls back to it as its gate. The safety rails are unchanged - every
+  tip is re-verified right before deletion, and one **Undo** restores the
+  whole batch.
+
+## 0.4.0
+
+The sidebar stops going stale, and the branch names a fast-forward leaves
+behind get a one-click cleanup.
+
+### Added
+
+- **Remove Redundant Branches...** (`geco.removeRedundantBranches`) - deletes
+  the local branches that carry no commit of their own. A branch is *redundant*
+  when every commit it points at is already reachable from another branch, tag
+  or remote-tracking branch, so deleting it changes no file, no diff and no
+  `git log` - only the list of names gets shorter. That is exactly what piles up
+  after "Fast-Forward Default Branch to Commit..." parks the old tip on `old`,
+  after a merged branch is never cleaned up, or when the same commit collected a
+  second name.
+  - The flow shows a **checkbox list of what would go**, each entry naming the
+    ref that already holds its commits, then a modal confirmation that spells
+    out the safety property. Everything is pre-ticked; unticking keeps a name.
+  - **Never offered:** the checked-out branch, a branch checked out in another
+    worktree, and the default branch - however redundant they look. Branches
+    with commits only *they* have are kept and reported with the count.
+  - Recovery refs under `refs/geco/` deliberately do **not** count as keepers
+    (they are our own throw-away backups), while tags and remote-tracking
+    branches do. Two branches on the same commit keep each other alive, so a
+    duplicate pair never disappears completely.
+  - Every tip is **re-verified immediately before deletion**, so a scan that
+    went stale (a commit landed meanwhile) deletes less, never more.
+  - **Remote-tracking branches are covered too.** A branch that was merged on
+    the remote (`origin/fix/x` while `origin/main` holds every commit of it)
+    carries nothing either, so it lands in the same list, marked *remote
+    branch on origin*. Its local remote-tracking ref goes with the cleanup;
+    the branch on the remote is a second question, asked once per batch (and
+    only when a remote branch was selected): remove the local ref only (the
+    default - the branch stays on the remote) or delete it there too with
+    `git push --delete` - the same choice **Delete Branch...** offers. Never
+    offered: the remote's default branch, the remote copy of the checked-out
+    branch, and a remote branch a surviving local branch still tracks; the
+    remote delete itself uses `--force-with-lease`, so a colleague's newer
+    push is never clobbered.
+  - The whole batch is **one** journal entry: a single **Undo** restores
+    every branch with its tracking configuration and pushes back the remote
+    branches it deleted (also with a lease, and it re-attaches the local
+    branch to the remote one).
+  - Available on branch rows **and commit rows** in the sidebar, in the view's
+    `···` menu, in the *Git Easy Ops* commit/branch submenus, on the graph
+    toolbar *and* on the commit rows and branch badges of the `+graph` build, and
+    from the Command Palette. Wherever it lands it is the **last** entry of the
+    branch group, directly behind **Create Branch...** - and like every other
+    item it can be switched off in **Customize Context Menus...**.
+
+### Fixed
+
+- **The view now refreshes itself when the graph changes.** After a squash (and
+  after reword, fast-forward, branch create/rename/delete, patch apply, clean
+  history and undo) the "Git Easy Ops" sidebar kept showing the *old* graph
+  until the user hit Refresh. The command wrapper did refresh, but only around
+  the command call itself - the follow-up actions offered in the result
+  notification ("Undo", "Force Push") run *after* that, so the one operation
+  most likely to change the graph again always left a stale view behind.
+  The refresh is now driven by the repository instead of the command wrapper:
+  `SafetyNet` fires an `onChanged` hook wherever an operation is journaled or
+  undone - the choke point every graph-changing operation already passes
+  through - and the extension repaints the tree from it. No flow has to
+  remember to refresh, and follow-up actions are covered. Repaints are coalesced
+  (50 ms), so a multi-step undo reloads the view once instead of per step, and a
+  listener that throws can never break a git operation.
+
 ## 0.3.0
 
 The menus become user-configurable, "Clean History" installs its own

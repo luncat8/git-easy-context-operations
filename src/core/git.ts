@@ -314,10 +314,14 @@ export class Git {
 		return this.refExists(`refs/heads/${name}`);
 	}
 
-	async listRefs(patterns: readonly string[] = ['refs/heads', 'refs/remotes', 'refs/tags']): Promise<RefInfo[]> {
+	async listRefs(
+		patterns: readonly string[] = ['refs/heads', 'refs/remotes', 'refs/tags'],
+		options: { contains?: string } = {},
+	): Promise<RefInfo[]> {
 		const format = ['%(refname)', '%(objectname)', '%(HEAD)', '%(upstream:short)', '%(refname:lstrip=2)']
 			.join(US) + RS;
-		const out = await this.tryRun(['for-each-ref', `--format=${format}`, ...patterns]);
+		const filter = options.contains ? ['--contains', options.contains] : [];
+		const out = await this.tryRun(['for-each-ref', `--format=${format}`, ...filter, ...patterns]);
 		if (!out) {
 			return [];
 		}
