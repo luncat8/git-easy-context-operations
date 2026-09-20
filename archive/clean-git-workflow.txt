@@ -1,0 +1,75 @@
+# Best Workflow: Clean Git History of Deleted/Unused Files
+
+This combines the thorough scanning of a.txt with the simplicity of b.txt.
+
+## Prerequisities
+- `git-filter-repo` installed
+- Backup created: `git bundle create backup.bundle --all`
+
+## Step 1: Analyze - Find Dead Paths Across ALL Refs
+
+```bash
+TMPDIR=$(mktemp -d)
+ALL="$TMPDIR/all_paths.txt"
+HEADS="$TMPDIR/heads_paths.txt"
+DEAD="$TMPDIR/dead_paths.txt"
+
+# All paths ever in history
+git log --all --name-only --pretty=format: | grep -v '^$' | sort -u > "$ALL"
+
+# ALL paths in EVERY ref (branches, tags, remotes)
+{
+  for r in $(git for-each-ref --format='%(refname)' refs/heads refs/tags refs/remotes); do
+    git ls-tree -r --name-only "$r" 2>/dev/null || true
+  done
+} | sort -u > "$HEADS"
+
+# Paths only in history, not in any current ref
+comm -23 "$ALL" "$HEADS" > "$DEAD"
+
+COUNT=$(wc -l < "$DEAD")
+echo "Found $COUNT dead paths"
+cat "$DEAD"
+```
+
+## Step 2: Targeted Removal (if you know specific files)
+
+```bash
+# For specific known files/folders:
+git filter-repo --path 'path/to/big-file.bin' --invert-paths --force
+git filter-repo --path-glob 'experiments/logs/*.log' --invert-paths --force
+git filter-repo --path-regex '(^|/)target/.*' --invert-paths --force
+```
+
+## Step 3: Nuclear Purge (if dead_paths.txt is correct)
+
+```bash
+git filter-repo --invert-paths --paths-from-file "$DEAD" --force
+```
+
+## Step 4: Verify
+
+```bash
+# Rescan
+comm -23 <(git log --all --name-only --pretty=format: | grep -v '^$' | sort -u) \
+         <({ for r in $(git for-each-ref --format='%(refname)' refs/heads refs/tags refs/remotes); do git ls-tree -r --name-only "$r" 2>/dev/null || true; done; } | sort -u)
+# Should output nothing
+```
+
+## Step 5: Cleanup & Push
+
+```bash
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+git repack -A -d -f --depth=250 --window=250
+git prune --expire=now
+
+git push origin --all --force
+git push origin --tags --force
+```
+
+## Key Lessons
+- Always scan ALL refs (heads, tags, remotes), not just HEAD
+- After first purge, rescan - other branches may still contain the files
+- The `--invert-paths --paths-from-file` method is safest when you trust the dead list
+- For specific known files, use targeted `--path`/`--path-glob`/`--path-regex`
