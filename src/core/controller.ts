@@ -38,6 +38,7 @@ import {
 	suggestBranchName,
 	type RenameBranchOptions,
 } from './branch';
+import { deleteRedundantBranches, findRedundantBranches } from './redundantBranches';
 import { forcePush, planForcePush, type ForcePushResult } from './forcePush';
 import {
 	applyPatch,
@@ -111,6 +112,14 @@ export interface ControllerOptions {
 	 * neither this nor `exec` exists, the flow falls back to informing only.
 	 */
 	filterRepoInstaller?: InstallerRunner;
+	/**
+	 * Called whenever an operation changed the repository. The VS Code layer
+	 * refreshes the tree view with it, so the graph reflects a squash, a
+	 * fast-forward or an undo the moment it is done - including the follow-up
+	 * actions ("Undo", "Force Push") that only run after the command itself
+	 * has already returned.
+	 */
+	onRepositoryChanged?(): void;
 }
 
 export interface CommitPick {
@@ -132,7 +141,10 @@ export class Controller {
 	}
 
 	contextFor(cwd: string): RepoContext {
-		return createRepoContext(cwd, this.settings, this.options.exec);
+		return createRepoContext(cwd, this.settings, {
+			exec: this.options.exec,
+			onChanged: () => this.options.onRepositoryChanged?.(),
+		});
 	}
 
 	// ------------------------------------------------------------- feature 1
@@ -1677,6 +1689,133 @@ export class Controller {
 	}
 
 	/**
+	 * "Remove Redundant Branches..." - deletes the branches that carry no commit
+	 * of their own, which is what piles up after fast-forwarding `main` (the old
+	 * tip stays behind as `old`) or after a merged branch was never cleaned up.
+	 *
+	 * Redundant means: every commit of the branch is already reachable from
+	 * another branch, tag or remote-tracking branch, so removing it changes
+	 * nothing about the files - only the list of names gets shorter. The user
+	 * sees exactly what would go (and what is kept, with the reason) before
+	 * anything happens, and one Undo brings the whole batch back.
+	 */
+	async removeRedundantBranches(cwd: string): Promise<void> {
+		await this.guard('Remove redundant branches', async () => {
+			const ctx = this.contextFor(cwd);
+			const scan = await this.ui.withProgress('Looking for redundant branches', (report) => {
+				report('checking which branches carry commits of their own');
+				return findRedundantBranches(ctx);
+			});
+
+			this.ui.log(
+				[
+					`Scanned ${scan.branchCount} local branch(es): ${scan.redundant.length} redundant, ${scan.kept.length} kept.`,
+					...scan.redundant.map((branch) => `  redundant: ${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}`),
+					...scan.kept.map((branch) => `  kept: ${branch.name} (${shorten(branch.sha)}) - ${branch.reason}${branch.uniqueCommits > 0 ? ` (${branch.uniqueCommits} own commit(s))` : ''}`),
+				].join('\n'),
+			);
+
+			if (scan.redundant.length === 0) {
+				await this.ui.message(
+					'info',
+					scan.branchCount <= 1
+						? 'There is nothing to clean up: this repository has a single branch.'
+						: 'No redundant branches: every branch here has commits no other branch, tag or remote has.',
+					scan.kept.map((branch) => `${branch.name} - ${branch.reason}`).join('\n') || undefined,
+				);
+				return;
+			}
+
+			// Pre-selected, but every branch can be unticked: "redundant" is a
+			// fact about the history, whether a name is still wanted is not.
+			// A UI without checkboxes falls back to the whole list (the modal
+			// confirmation below is then the only gate, and it lists them all).
+			let chosen = scan.redundant;
+			if (this.ui.pickMany) {
+				const picked = await this.ui.pickMany(
+					scan.redundant.map((branch) => ({
+						label: branch.name,
+						description: `${shorten(branch.sha)}${branch.upstream ? ` - tracks ${branch.upstream}` : ''}`,
+						detail: `already contained in ${branch.keptAliveBy.join(', ')}${branch.subject ? ` - ${branch.subject}` : ''}`,
+						value: branch,
+						picked: true,
+					})),
+					{
+						title: `Remove ${scan.redundant.length} redundant branch(es)?`,
+						placeholder: 'Deleting these changes no file - untick anything you want to keep',
+					},
+				);
+				if (picked === undefined) {
+					this.ui.log('Remove redundant branches: cancelled, every branch was kept.');
+					return;
+				}
+				chosen = picked;
+			}
+			if (chosen.length === 0) {
+				this.ui.log('Remove redundant branches: nothing was selected.');
+				return;
+			}
+
+			if (this.settings.confirmDestructiveOperations) {
+				const confirmed = await this.ui.confirm(
+					chosen.length === 1 ? `Delete the redundant branch "${chosen[0]!.name}"?` : `Delete ${chosen.length} redundant branches?`,
+					{
+						confirmLabel: chosen.length === 1 ? 'Delete Branch' : 'Delete Branches',
+						cancelLabel: 'Keep Them',
+						destructive: true,
+						detail: [
+							...chosen.map((branch) => `${branch.name} (${shorten(branch.sha)}) - already in ${branch.keptAliveBy.join(', ')}`),
+							'',
+							'No commit is lost: every one of them is already reachable from another ref,',
+							'so the files and the history stay exactly as they are - only the names go.',
+							'The remote branches are not touched. One Undo brings all of them back.',
+						].join('\n'),
+					},
+				);
+				if (!confirmed) {
+					this.ui.log('Remove redundant branches: cancelled, every branch was kept.');
+					return;
+				}
+			}
+
+			const result = await this.ui.withProgress('Removing redundant branches', () => deleteRedundantBranches(ctx, chosen));
+
+			this.ui.log(
+				[
+					`Deleted ${result.deleted.length} redundant branch(es): ${result.deleted.map((b) => `${b.name} (${shorten(b.sha)})`).join(', ') || '(none)'}`,
+					...result.skipped.map((entry) => `  skipped ${entry.name}: ${entry.reason}`),
+					...result.notes.map((note) => `  ${note}`),
+				].join('\n'),
+			);
+
+			if (result.deleted.length === 0) {
+				await this.ui.message(
+					'warn',
+					'No branch was deleted.',
+					result.skipped.map((entry) => `${entry.name}: ${entry.reason}`).join('\n') || undefined,
+				);
+				return;
+			}
+
+			const chosenAction = await this.ui.ask(
+				result.deleted.length === 1
+					? `Removed the redundant branch "${result.deleted[0]!.name}".`
+					: `Removed ${result.deleted.length} redundant branches: ${result.deleted.map((b) => b.name).join(', ')}.`,
+				{
+					actions: [ACTIONS.undo],
+					detail: [
+						...result.notes,
+						...result.skipped.map((entry) => `Kept ${entry.name}: ${entry.reason}`),
+					].join('\n') || undefined,
+				},
+			);
+			if (chosenAction === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	/**
 	 * Git refuses to delete a branch with unmerged commits; ask explicitly before
 	 * forcing, because that is the one case where commits really go away.
 	 */
@@ -1858,7 +1997,11 @@ export class Controller {
 			'    commit graph (lane art plus ref badges), and its context menus carry every',
 			'    operation - right-click a commit, or expand it and right-click a branch.',
 			'    Ctrl/Shift-click selects several commit rows, so "Squash Selected Commits..."',
-			'    can turn a run of commits into one.',
+			'    can turn a run of commits into one. The view reloads itself as soon as an',
+			'    operation is done, so the graph is never a squash behind.',
+			'  - Branch row / view toolbar: "Remove Redundant Branches..." sweeps up the',
+			'    names left over after fast-forwarding - branches whose commits another',
+			'    branch, tag or remote already has, so deleting them changes no file.',
 			'  - Source Control title / repository menu ("..."): "Git Easy Ops" submenu.',
 			'  - Timeline view: right-click a commit of the selected file.',
 			'  - Command Palette: "Git Easy Ops: ..." (asks for the commit when nothing is selected).',

@@ -99,7 +99,26 @@ export interface BackupBranchResult {
 }
 
 export class SafetyNet {
-	constructor(private readonly git: Git, private readonly settings: Settings) {}
+	/**
+	 * @param onChanged Fired right after the repository changed (an operation
+	 * was journaled, or an undo put refs back) - the hook the UI layer uses to
+	 * refresh its views. It runs *before* the flow reports its result, which is
+	 * what makes the view current while the result notification is still up.
+	 * Never let it break an operation: it is called inside a try/catch.
+	 */
+	constructor(private readonly git: Git, private readonly settings: Settings, private readonly onChanged?: () => void) {}
+
+	/** Announce a change; a broken listener must never fail the operation. */
+	private announceChange(): void {
+		if (!this.onChanged) {
+			return;
+		}
+		try {
+			this.onChanged();
+		} catch {
+			// A refreshing view is a nicety, not part of the git operation.
+		}
+	}
 
 	// ----------------------------------------------------------------- journal
 
@@ -139,6 +158,10 @@ export class SafetyNet {
 		const tmp = `${file}.${process.pid}.tmp`;
 		await fsp.writeFile(tmp, `${JSON.stringify(trimmed, undefined, 2)}\n`, 'utf8');
 		await fsp.rename(tmp, file);
+		// Everything that changes the graph journals it, so this is the one
+		// choke point where the views can be told to reload - no flow has to
+		// remember to do it, and the journal row itself is up to date too.
+		this.announceChange();
 		return full;
 	}
 
@@ -214,6 +237,8 @@ export class SafetyNet {
 			await fsp.writeFile(file, `${JSON.stringify(remaining, undefined, 2)}\n`, 'utf8');
 		}
 
+		// An undo moves refs back: the views are stale in exactly the same way.
+		this.announceChange();
 		return { entry, restored, messages };
 	}
 

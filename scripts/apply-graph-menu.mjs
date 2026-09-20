@@ -64,6 +64,9 @@ const GRAPH_MENUS = {
 		// The whole-graph operation gets the toolbar of the built-in graph too:
 		// it is not about one commit, so it never joins the per-commit menu.
 		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@91' },
+		// Same idea, one level down: not about a commit either, it prunes the
+		// branch names the graph shows once their commits live elsewhere.
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@92' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };

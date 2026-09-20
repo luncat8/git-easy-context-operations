@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -134,6 +134,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "geco.removeRedundantBranches",
+        "title": "Remove Redundant Branches...",
+        "category": "Git Easy Ops",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "geco.checkoutBranch",
         "title": "Check Out Branch...",
         "category": "Git Easy Ops",
@@ -234,6 +240,11 @@
           "command": "geco.undoLastOperation",
           "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)",
           "group": "1_geco@2"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "1_geco@3"
         },
         {
           "command": "geco.explainMenus",
@@ -356,6 +367,11 @@
           "command": "geco.deleteBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)",
           "group": "1_branch@4"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && viewItem =~ /^geco\\.branch/ && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "1_branch@5"
         },
         {
           "command": "geco.fastForwardBranch",
@@ -514,6 +530,11 @@
           "command": "geco.deleteBranch",
           "group": "1_branch@4",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.deleteBranch)"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "group": "1_branch@5",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)"
         },
         {
           "command": "geco.fastForwardBranch",

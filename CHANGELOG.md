@@ -4,6 +4,58 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.0
+
+The sidebar stops going stale, and the branch names a fast-forward leaves
+behind get a one-click cleanup.
+
+### Added
+
+- **Remove Redundant Branches...** (`geco.removeRedundantBranches`) - deletes
+  the local branches that carry no commit of their own. A branch is *redundant*
+  when every commit it points at is already reachable from another branch, tag
+  or remote-tracking branch, so deleting it changes no file, no diff and no
+  `git log` - only the list of names gets shorter. That is exactly what piles up
+  after "Fast-Forward Default Branch to Commit..." parks the old tip on `old`,
+  after a merged branch is never cleaned up, or when the same commit collected a
+  second name.
+  - The flow shows a **checkbox list of what would go**, each entry naming the
+    ref that already holds its commits, then a modal confirmation that spells
+    out the safety property. Everything is pre-ticked; unticking keeps a name.
+  - **Never offered:** the checked-out branch, a branch checked out in another
+    worktree, and the default branch - however redundant they look. Branches
+    with commits only *they* have are kept and reported with the count.
+  - Recovery refs under `refs/geco/` deliberately do **not** count as keepers
+    (they are our own throw-away backups), while tags and remote-tracking
+    branches do. Two branches on the same commit keep each other alive, so a
+    duplicate pair never disappears completely.
+  - Every tip is **re-verified immediately before deletion**, so a scan that
+    went stale (a commit landed meanwhile) deletes less, never more.
+  - Remote branches are never touched, and the whole batch is **one** journal
+    entry: a single **Undo** restores every branch with its tracking
+    configuration.
+  - Available on branch rows in the sidebar, in the view's `···` menu, in the
+    *Git Easy Ops* branch submenu, on the graph toolbar of the `+graph` build,
+    and from the Command Palette. Like every other item it can be switched off
+    in **Customize Context Menus...**.
+
+### Fixed
+
+- **The view now refreshes itself when the graph changes.** After a squash (and
+  after reword, fast-forward, branch create/rename/delete, patch apply, clean
+  history and undo) the "Git Easy Ops" sidebar kept showing the *old* graph
+  until the user hit Refresh. The command wrapper did refresh, but only around
+  the command call itself - the follow-up actions offered in the result
+  notification ("Undo", "Force Push") run *after* that, so the one operation
+  most likely to change the graph again always left a stale view behind.
+  The refresh is now driven by the repository instead of the command wrapper:
+  `SafetyNet` fires an `onChanged` hook wherever an operation is journaled or
+  undone - the choke point every graph-changing operation already passes
+  through - and the extension repaints the tree from it. No flow has to
+  remember to refresh, and follow-up actions are covered. Repaints are coalesced
+  (50 ms), so a multi-step undo reloads the view once instead of per step, and a
+  listener that throws can never break a git operation.
+
 ## 0.3.0
 
 The menus become user-configurable, "Clean History" installs its own
