@@ -174,20 +174,65 @@ describe('manifest - menus', () => {
 
 	it('matches the contextValue strings the tree view actually produces', () => {
 		const treeSource = sourceOf('src/vscode/treeView.ts');
-		const produced = [...new Set([...treeSource.matchAll(/contextValue: '(geco\.[a-z]+)'/g)].map((m) => m[1]!))];
-		assert.deepEqual(produced.sort(), ['geco.backup', 'geco.branch', 'geco.commit', 'geco.empty', 'geco.group']);
+		const produced = [...new Set([...treeSource.matchAll(/contextValue: '(geco\.[a-z.]+)'/g)].map((m) => m[1]!))];
+		assert.deepEqual(produced.sort(), ['geco.backup', 'geco.branch', 'geco.commit', 'geco.empty', 'geco.group', 'geco.group.graph']);
 
-		const patterns = (manifest.contributes.menus['view/item/context'] ?? [])
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		const patterns = itemContext
 			.map((e) => /viewItem =~ \/(.*)\//.exec(e.when ?? '')?.[1])
 			.filter((p): p is string => Boolean(p))
 			.map((p) => new RegExp(p));
-		const matched = produced.filter((value) => patterns.some((pattern) => pattern.test(value)));
-		assert.deepEqual(matched.sort(), ['geco.backup', 'geco.branch', 'geco.commit'], 'every actionable node has a menu');
+		// Exact `viewItem ==` matches count too: the Graph group row carries the
+		// whole-graph operation as an inline button.
+		const exact = itemContext
+			.map((e) => /viewItem == ([\w.]+)$/.exec(e.when ?? '')?.[1])
+			.filter((p): p is string => Boolean(p));
+		const matched = produced.filter((value) => patterns.some((pattern) => pattern.test(value)) || exact.includes(value));
+		assert.deepEqual(matched.sort(), ['geco.backup', 'geco.branch', 'geco.commit', 'geco.group.graph'], 'every actionable node has a menu');
+	});
+
+	it('gives the whole graph a clean-history button and keeps it below every per-commit item', () => {
+		// The operation is repository-wide, so it belongs to the graph as a
+		// whole: a toolbar button of the view, the inline (trash) button of the
+		// "Graph" group row, that row's context menu, and - because a commit row
+		// is where everybody right-clicks first - the *bottom* of the commit
+		// menu and of the "Git Easy Ops" submenu. It must never sit in one of
+		// the per-commit groups (message / commit / branch / move / remote / patch).
+		const title = manifest.contributes.menus['view/title'] ?? [];
+		const toolbar = title.find((e) => e.command === 'geco.cleanHistory');
+		assert.ok(toolbar, 'no clean-history button in the view toolbar');
+		assert.equal(toolbar!.group, 'navigation@2', 'the toolbar button does not sit next to Refresh');
+		assert.match(toolbar!.when ?? '', /geco\.repositoryOpen/, 'the toolbar button shows without a repository');
+
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		const graphRow = itemContext.filter((e) => e.command === 'geco.cleanHistory' && (e.when ?? '').includes('geco.group.graph'));
+		assert.ok(graphRow.some((e) => e.group === 'inline@1'), 'the Graph group row has no inline clean button');
+		assert.ok(graphRow.some((e) => (e.group ?? '').startsWith('9_clean@')), 'the Graph group row has no context-menu entry');
+
+		const commitEntry = itemContext.find((e) => e.command === 'geco.cleanHistory' && /viewItem =~ \/\^geco\\\.commit/.test(e.when ?? ''));
+		assert.ok(commitEntry, 'the commit rows have no clean-history fallback');
+		assert.match(commitEntry!.group ?? '', /^8_clean@/, 'the whole-graph item is not in its own below-all group');
+		// Every other commit-row item lives in one of the per-commit groups;
+		// the repository-wide operation must not pretend to be one of them.
+		const perCommitGroups = new Set(
+			itemContext
+				.filter((e) => /viewItem =~ \/\^geco\\\.commit/.test(e.when ?? '') && e.command !== 'geco.cleanHistory')
+				.map((e) => (e.group ?? '').split('@')[0]!),
+		);
+		assert.equal(perCommitGroups.has('8_clean'), false, '8_clean is shared with a per-commit item');
+		for (const group of ['1_message', '2_commit', '3_branch', '4_move', '5_remote', '6_patch']) {
+			assert.ok(perCommitGroups.has(group), `the ${group} group disappeared`);
+		}
+
+		const submenu = (manifest.contributes.menus['geco.commitSubmenu'] ?? []).map((e) => e.command);
+		assert.equal(submenu[submenu.length - 1], 'geco.cleanHistory', 'the submenu does not end with the whole-graph operation');
 	});
 
 	it('scopes title menus to our own view', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
-			assert.equal(entry.when, 'view == geco.history');
+			// The toolbar buttons may additionally require an open repository -
+			// but never another view.
+			assert.match(entry.when ?? '', /^view == geco\.history( && geco\.repositoryOpen)?$/);
 		}
 	});
 

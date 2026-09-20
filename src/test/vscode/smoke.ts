@@ -36,6 +36,7 @@ const EXPECTED_COMMANDS = [
 	'geco.checkoutBranch',
 	'geco.undoLastOperation',
 	'geco.showBackups',
+	'geco.cleanHistory',
 	'geco.copyCommitSha',
 	'geco.refresh',
 	'geco.explainMenus',

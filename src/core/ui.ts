@@ -82,6 +82,8 @@ export const ACTIONS = {
 	openLog: 'Show Details',
 	checkout: 'Check Out',
 	enableGraphMenu: 'How to Enable the Graph Menu',
+	copyCommands: 'Copy Commands',
+	dropRecoveryPoints: 'Drop Recovery Points',
 } as const;
 
 export type ActionLabel = typeof ACTIONS[keyof typeof ACTIONS];

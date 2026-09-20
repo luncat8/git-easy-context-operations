@@ -130,8 +130,12 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 			new GecoTreeItem(repoPath, 'group', GROUP_GRAPH, {
 				icon: 'git-commit',
 				collapsible: 'expanded',
-				contextValue: 'geco.group',
-				tooltip: 'The commit graph - right-click a commit for the operations, or expand it to right-click one of its branches',
+				// Its own context value: the whole-graph operation ("Clean
+				// History") is the inline button of *this* row, not of every group.
+				contextValue: 'geco.group.graph',
+				tooltip:
+					'The commit graph - right-click a commit for the operations, or expand it to right-click one of its branches.\n'
+					+ 'The trash button (and the last context-menu item) cleans the WHOLE graph: it removes every path that exists in old commits but in no branch, tag or remote anymore.',
 			}),
 			new GecoTreeItem(repoPath, 'group', GROUP_BRANCHES, { icon: 'git-branch', collapsible: true, contextValue: 'geco.group', tooltip: 'Local branches' }),
 			new GecoTreeItem(repoPath, 'group', GROUP_SAFETY, { icon: 'history', collapsible: true, contextValue: 'geco.group', tooltip: 'Recovery points and journaled operations' }),

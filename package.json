@@ -152,6 +152,12 @@
         "icon": "$(history)"
       },
       {
+        "command": "geco.cleanHistory",
+        "title": "Clean History (Remove Dead Paths)...",
+        "category": "Git Easy Ops",
+        "icon": "$(trash)"
+      },
+      {
         "command": "geco.copyCommitSha",
         "title": "Copy Commit SHA",
         "category": "Git Easy Ops",
@@ -201,6 +207,11 @@
           "command": "geco.refresh",
           "when": "view == geco.history",
           "group": "navigation@1"
+        },
+        {
+          "command": "geco.cleanHistory",
+          "when": "view == geco.history && geco.repositoryOpen",
+          "group": "navigation@2"
         },
         {
           "command": "geco.showBackups",
@@ -290,6 +301,11 @@
           "group": "6_patch@2"
         },
         {
+          "command": "geco.cleanHistory",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
+          "group": "8_clean@1"
+        },
+        {
           "command": "geco.enableGraphMenu",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/",
           "group": "9_misc@1"
@@ -343,6 +359,16 @@
           "command": "geco.undoLastOperation",
           "when": "view == geco.history && viewItem =~ /^geco\\.backup/",
           "group": "1_geco@1"
+        },
+        {
+          "command": "geco.cleanHistory",
+          "when": "view == geco.history && viewItem == geco.group.graph",
+          "group": "inline@1"
+        },
+        {
+          "command": "geco.cleanHistory",
+          "when": "view == geco.history && viewItem == geco.group.graph",
+          "group": "9_clean@1"
         }
       ],
       "geco.commitSubmenu": [
@@ -401,6 +427,10 @@
         {
           "command": "geco.enableGraphMenu",
           "group": "9_misc@2"
+        },
+        {
+          "command": "geco.cleanHistory",
+          "group": "9_misc@3"
         }
       ],
       "geco.branchSubmenu": [

@@ -60,6 +60,9 @@ const GRAPH_MENUS = {
 	],
 	'scm/history/title': [
 		{ command: 'geco.refresh', when: 'scmProvider == git', group: 'navigation@90' },
+		// The whole-graph operation gets the toolbar of the built-in graph too:
+		// it is not about one commit, so it never joins the per-commit menu.
+		{ command: 'geco.cleanHistory', when: 'scmProvider == git', group: 'navigation@91' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git', group: '9_geco@1' },
 	],
 };
