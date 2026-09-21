@@ -39,6 +39,23 @@ export interface ConfirmOptions {
 	destructive?: boolean;
 }
 
+/** One button of a {@link UI.choose} dialog. */
+export interface Choice {
+	/** The button label. */
+	label: string;
+	/** What picking the button resolves to. */
+	value: string;
+	/** The answer a UI uses when the choice is unscripted: the safe default action. */
+	primary?: boolean;
+}
+
+export interface ChooseOptions {
+	/** Optional second line, shown under the message. */
+	detail?: string;
+	/** The dialog buttons, left to right. */
+	choices: readonly Choice[];
+}
+
 export interface AskOptions {
 	detail?: string;
 	actions: readonly string[];
@@ -64,6 +81,12 @@ export interface UI {
 	pickMany?<T>(items: readonly MultiPickChoice<T>[], options?: PickOptions): Promise<T[] | undefined>;
 	/** Yes/no. `false` on cancel and when the dialog is dismissed. */
 	confirm(message: string, options?: ConfirmOptions): Promise<boolean>;
+	/**
+	 * Optional: a modal dialog with several buttons. Resolves to the picked
+	 * choice's `value`, or `undefined` when the dialog is dismissed. A UI
+	 * without it makes the caller fall back to a plain confirm.
+	 */
+	choose?(message: string, options: ChooseOptions): Promise<string | undefined>;
 	/** A message with optional action buttons; resolves to the chosen action. */
 	ask(message: string, options: AskOptions): Promise<string | undefined>;
 	message(kind: MessageKind, message: string, detail?: string): Promise<void>;
@@ -86,7 +109,7 @@ export const ACTIONS = {
 	showBackups: 'Show Backups',
 	openWorktree: 'Open Worktree',
 	retryWithForce: 'Move Anyway (keep old tip)',
-	rewordNow: 'Reword Message',
+	rewordNow: 'Rename Message',
 	copySha: 'Copy SHA',
 	applyPatch: 'Apply Patch at Proper Base',
 	findBase: 'Show Candidate Bases',

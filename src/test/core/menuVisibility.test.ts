@@ -16,6 +16,8 @@ import {
 import {
 	canHide,
 	contextKeysFor,
+	defaultHiddenIds,
+	effectiveHiddenList,
 	hiddenRows,
 	isHidden,
 	parseHiddenItems,
@@ -61,6 +63,31 @@ describe('menu visibility - default state (the no-op acceptance criterion)', () 
 		const keys = contextKeysFor([]);
 		assert.ok(Object.keys(keys).length >= MENU_ROWS.length, 'one key per row at least');
 		assert.ok(Object.values(keys).every((value) => value === true));
+	});
+});
+
+describe('menu visibility - default-hidden rows (no stored value means defaults)', () => {
+	it('knows which rows are hidden out of the box', () => {
+		assert.deepEqual(defaultHiddenIds(), ['geco.rewordCommitRename']);
+	});
+
+	it('applies the catalogue default when nothing was ever stored', () => {
+		assert.deepEqual(effectiveHiddenList(undefined), ['geco.rewordCommitRename']);
+		const keys = contextKeysFor(effectiveHiddenList(undefined));
+		assert.equal(keys[visibilityKey('geco.rewordCommitRename')], false, 'the default-hidden row is hidden');
+		assert.equal(keys[visibilityKey('geco.rewordCommit')], true, 'the rest of the menu is untouched');
+	});
+
+	it('honours an explicit empty list - "show everything" beats the default', () => {
+		assert.deepEqual(effectiveHiddenList([]), []);
+		const keys = contextKeysFor(effectiveHiddenList([]));
+		assert.equal(keys[visibilityKey('geco.rewordCommitRename')], true, 'an explicit [] re-enables the default-hidden row');
+	});
+
+	it('keeps an explicit list authoritative, stored list and all', () => {
+		assert.deepEqual(effectiveHiddenList(['geco.rewordCommitRename']), ['geco.rewordCommitRename']);
+		assert.deepEqual(effectiveHiddenList(['geco.refresh']), ['geco.refresh']);
+		assert.deepEqual(effectiveHiddenList(['geco.refresh', 'geco.rewordCommitRename']), ['geco.refresh', 'geco.rewordCommitRename']);
 	});
 });
 

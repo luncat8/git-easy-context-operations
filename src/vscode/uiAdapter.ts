@@ -1,7 +1,7 @@
 /** The real {@link UI}, implemented with the VS Code API. */
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
-import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../core/ui';
+import type { AskOptions, ChooseOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../core/ui';
 
 export class VsCodeUI implements UI {
 	constructor(private readonly output: vscode.OutputChannel) {}
@@ -69,6 +69,20 @@ export class VsCodeUI implements UI {
 		// stop the user before something irreversible happens.
 		const chosen = await vscode.window.showWarningMessage(message, { modal: true, detail: options?.detail }, confirmLabel);
 		return chosen === confirmLabel;
+	}
+
+	/**
+	 * A modal dialog with several buttons - the shape the fast-forward flow
+	 * wants: Cancel | Move | Move and remove the redundant old branch.
+	 * Dismissing the dialog (Esc) resolves to `undefined`.
+	 */
+	async choose(message: string, options: ChooseOptions): Promise<string | undefined> {
+		const picked = await vscode.window.showWarningMessage(
+			message,
+			{ modal: true, detail: options.detail },
+			...options.choices.map((choice) => choice.label),
+		);
+		return options.choices.find((choice) => choice.label === picked)?.value;
 	}
 
 	async ask(message: string, options: AskOptions): Promise<string | undefined> {

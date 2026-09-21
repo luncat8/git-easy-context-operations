@@ -52,7 +52,7 @@ import { GecoError, isGecoError, toErrorMessage } from './errors';
 import { assessGraphMenu, graphMenuFixOptions, GRAPH_MENU_PROPOSALS, type ArgvStore, type GraphMenuBuild, type GraphMenuFix } from './graphMenu';
 import { addProposedApi } from './argvJson';
 import { addProductProposals } from './productJson';
-import { buildGraphRows, type GraphCommitRow } from './graphRows';
+import { buildGraphRows, refRowsAt, type GraphCommitRow, type GraphRefRow } from './graphRows';
 import { shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
 import {
 	analyzeDeadPaths,
@@ -150,9 +150,9 @@ export class Controller {
 	// ------------------------------------------------------------- feature 1
 
 	async rewordCommit(cwd: string, args: readonly unknown[], flow: RewordFlow): Promise<void> {
-		await this.guard('Reword commit', async () => {
+		await this.guard('Rename commit', async () => {
 			const ctx = this.contextFor(cwd);
-			const target = await this.resolveCommit(ctx, args, 'Reword which commit?');
+			const target = await this.resolveCommit(ctx, args, 'Rename which commit?');
 			if (!target) {
 				return;
 			}
@@ -179,8 +179,8 @@ export class Controller {
 			const upstream = await ctx.git.upstream(branch);
 
 			if (this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(`Reword ${info.shortSha} on ${branch}?`, {
-					confirmLabel: 'Reword',
+				const confirmed = await this.ui.confirm(`Rename the message of ${info.shortSha} on ${branch}?`, {
+					confirmLabel: 'Rename',
 					destructive: true,
 					detail: [
 						`"${messageSubject(oldMessage)}"`,
@@ -192,12 +192,12 @@ export class Controller {
 					].filter(Boolean).join('\n'),
 				});
 				if (!confirmed) {
-					this.ui.log(`Reword of ${info.shortSha} cancelled by the user.`);
+					this.ui.log(`Rename of ${info.shortSha} cancelled by the user.`);
 					return;
 				}
 			}
 
-			const result = await this.ui.withProgress(`Rewording ${info.shortSha}`, async (report) => {
+			const result = await this.ui.withProgress(`Renaming the message of ${info.shortSha}`, async (report) => {
 				report(`rewriting ${total} commit${total === 1 ? '' : 's'} on ${branch}`);
 				return rewordCommitMessage(ctx, { commit: target, message: edit.message, edit: edit.edit, branch });
 			});
@@ -209,8 +209,8 @@ export class Controller {
 	private async askForMessage(info: CommitInfo, flow: RewordFlow): Promise<{ message?: string; edit?: MessageEdit } | undefined> {
 		if (flow === 'replace') {
 			const value = await this.ui.input({
-				title: `Reword ${info.shortSha}`,
-				prompt: `Commit message (currently "${info.subject}")`,
+				title: `Rename ${info.shortSha}`,
+				prompt: `New commit message (currently "${info.subject}")`,
 				value: info.message,
 			});
 			if (value === undefined) {
@@ -241,7 +241,7 @@ export class Controller {
 		}
 
 		const find = await this.ui.input({
-			title: `Rename in ${info.shortSha}`,
+			title: `Search and replace in ${info.shortSha}`,
 			prompt: 'Find in the commit message',
 			value: info.subject,
 		});
@@ -253,7 +253,7 @@ export class Controller {
 			return undefined;
 		}
 		const replaceWith = await this.ui.input({
-			title: `Rename in ${info.shortSha}`,
+			title: `Search and replace in ${info.shortSha}`,
 			prompt: `Replace "${find}" with`,
 			value: find,
 		});
@@ -263,7 +263,7 @@ export class Controller {
 		return { edit: { mode: 'findReplace', find, text: replaceWith } };
 	}
 
-	private async pickRewriteBranch(ctx: RepoContext, target: string, info: CommitInfo, verb = 'Reword'): Promise<string | undefined> {
+	private async pickRewriteBranch(ctx: RepoContext, target: string, info: CommitInfo, verb = 'Rename'): Promise<string | undefined> {
 		const rewrite = await findRewriteBranch(ctx, target);
 		if (rewrite.branch) {
 			return rewrite.branch;
@@ -286,7 +286,7 @@ export class Controller {
 		const where = result.branch ?? 'detached HEAD';
 		this.ui.log(
 			[
-				`Reworded ${shorten(result.targetSha)} -> ${shorten(result.newTargetSha)} on ${where}`,
+				`Renamed the message of ${shorten(result.targetSha)} -> ${shorten(result.newTargetSha)} on ${where}`,
 				`  before: ${JSON.stringify(messageSubject(result.oldMessage))}`,
 				`  after:  ${JSON.stringify(messageSubject(result.newMessage))}`,
 				`  rewritten commits: ${result.rewritten.length}`,
@@ -311,7 +311,7 @@ export class Controller {
 		}
 		actions.push(ACTIONS.undo);
 
-		const message = `Reworded ${shorten(result.newTargetSha)} on ${where}: "${messageSubject(result.newMessage)}"`
+		const message = `Renamed the message of ${shorten(result.newTargetSha)} on ${where}: "${messageSubject(result.newMessage)}"`
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
@@ -567,23 +567,61 @@ export class Controller {
 			const counts = await ctx.git.counts(from, target);
 			const isFastForward = counts.left === 0;
 
+			// Which name the backup branch will really get - the dialog has to
+			// promise the exact name it will leave behind (or remove). If a
+			// branch by the desired name already exists *at a different
+			// commit*, the mover would append a suffix, and that existing
+			// branch is NOT redundant (it still carries its own commits) - so
+			// removing the backup must not be offered.
+			const backupTakenAtFrom = (await ctx.git.revParse(`refs/heads/${backupName}`)) === from;
+			const actualBackupName = backupTakenAtFrom ? backupName : await ctx.safety.resolveFreeBranchName(backupName);
+			const canRemoveBackup = isFastForward && !backupTakenAtFrom;
+
+			let removeBackup = false;
 			if (this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(`Move ${branch} to ${targetInfo.shortSha}?`, {
-					confirmLabel: isFastForward ? 'Move' : 'Move anyway',
-					destructive: !isFastForward,
-					detail: [
-						`${branch}: ${shorten(from)} -> ${shorten(target)}`,
-						`"${targetInfo.subject}"`,
-						'',
-						isFastForward
-							? `Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`
-							: `NOT a fast-forward: ${counts.left} commit${counts.left === 1 ? '' : 's'} on ${branch} would be left behind.`,
-						`The old tip is kept on branch "${backupName}" (a suffix is added if that name is taken).`,
-					].join('\n'),
-				});
-				if (!confirmed) {
-					this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
-					return;
+				if (canRemoveBackup && this.ui.choose) {
+					// The clean-up the user usually wants in one step: move
+					// the branch AND drop the now-redundant backup it parks at
+					// the old tip. Only offered for a true fast-forward, where
+					// the old tip has no commit of its own on it.
+					const choice = await this.ui.choose(`Move ${branch} to ${targetInfo.shortSha}?`, {
+						detail: [
+							`${branch}: ${shorten(from)} -> ${shorten(target)}`,
+							`"${targetInfo.subject}"`,
+							'',
+							`Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`,
+							`The old tip is kept on branch "${actualBackupName}".`,
+							`"${actualBackupName}" is redundant: every commit of it is already on ${branch}, so removing it loses nothing.`,
+						].join('\n'),
+						choices: [
+							{ label: 'Cancel', value: 'cancel' },
+							{ label: 'Move', value: 'move', primary: true },
+							{ label: `Move and remove "${actualBackupName}"`, value: 'move-remove' },
+						],
+					});
+					if (choice === undefined || choice === 'cancel') {
+						this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
+						return;
+					}
+					removeBackup = choice === 'move-remove';
+				} else {
+					const confirmed = await this.ui.confirm(`Move ${branch} to ${targetInfo.shortSha}?`, {
+						confirmLabel: isFastForward ? 'Move' : 'Move anyway',
+						destructive: !isFastForward,
+						detail: [
+							`${branch}: ${shorten(from)} -> ${shorten(target)}`,
+							`"${targetInfo.subject}"`,
+							'',
+							isFastForward
+								? `Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`
+								: `NOT a fast-forward: ${counts.left} commit${counts.left === 1 ? '' : 's'} on ${branch} would be left behind.`,
+							`The old tip is kept on branch "${actualBackupName}".`,
+						].join('\n'),
+					});
+					if (!confirmed) {
+						this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
+						return;
+					}
 				}
 			}
 
@@ -607,7 +645,32 @@ export class Controller {
 				});
 			}
 
-			await this.reportFastForward(ctx, result, cwd);
+			const backup = result.backup;
+			let removedBackup: string | undefined;
+			if (removeBackup && !result.alreadyAtTarget && backup && !backup.reused) {
+				// The move already parked the old tip there, and the move is a
+				// true fast-forward: the backup is redundant by construction.
+				// deleteRedundantBranches still re-verifies everything
+				// (existence, tip, reachability, protected) right before it
+				// deletes, and it journals the removal as its own entry, so
+				// one Undo brings the backup back without touching the move.
+				const removal = await this.ui.withProgress(`Removing ${backup.name}`, (report) => {
+					report('checking the backup branch is still redundant');
+					return deleteRedundantBranches(
+						ctx,
+						[{ name: backup.name, sha: result.from, subject: result.fromSubject, keptAliveBy: [result.branch] }],
+						{ deleteRemote: false },
+					);
+				});
+				if (removal.deleted.length > 0) {
+					removedBackup = removal.deleted[0]!.name;
+					this.ui.log(`Removed the redundant backup branch ${removedBackup} (${shorten(result.from)}) - every commit of it is on ${result.branch}.`);
+				} else {
+					this.ui.log(`Kept ${backup.name}: ${removal.skipped.map((entry) => entry.reason).join('; ')}`);
+				}
+			}
+
+			await this.reportFastForward(ctx, result, cwd, removedBackup);
 		});
 	}
 
@@ -620,13 +683,17 @@ export class Controller {
 		});
 	}
 
-	private async reportFastForward(ctx: RepoContext, result: FastForwardResult, cwd: string): Promise<void> {
+	private async reportFastForward(ctx: RepoContext, result: FastForwardResult, cwd: string, removedBackup?: string): Promise<void> {
 		this.ui.log(
 			[
 				`Moved ${result.branch}: ${shorten(result.from)} -> ${shorten(result.to)} (${result.wasFastForward ? 'fast-forward' : 'forced'})`,
 				`  "${result.toSubject}"`,
 				`  ahead ${result.ahead}, behind ${result.behind}`,
-				result.backup ? `  old tip kept on ${result.backup.name}${result.backup.reused ? ' (reused)' : ''}` : '  no backup branch created',
+				removedBackup
+					? `  old tip removed - the backup branch "${removedBackup}" was redundant`
+					: result.backup
+						? `  old tip kept on ${result.backup.name}${result.backup.reused ? ' (reused)' : ''}`
+						: '  no backup branch created',
 				result.discardedCommits.length > 0 ? `  left behind: ${result.discardedCommits.map((c) => `${shorten(c.sha)} ${c.subject}`).join(', ')}` : '',
 				result.needsForcePush ? `  ${result.upstreamRef ?? 'the remote'} now needs a force push` : '',
 				...result.notes.map((note) => `  note: ${note}`),
@@ -648,7 +715,9 @@ export class Controller {
 		}
 
 		const chosen = await this.ui.ask(
-			`${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}")${result.backup ? `, old tip kept on ${result.backup.name}` : ''}.`,
+			removedBackup
+				? `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}"); the redundant backup "${removedBackup}" was removed - nothing was lost.`
+				: `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}")${result.backup ? `, old tip kept on ${result.backup.name}` : ''}.`,
 			{ actions },
 		);
 		if (chosen === ACTIONS.forcePush) {
@@ -2263,6 +2332,18 @@ export class Controller {
 			ctx.git.listRefs(['refs/heads', 'refs/remotes', 'refs/tags']),
 		]);
 		return buildGraphRows(commits, refs, { lanes: this.settings.showGraphLanes });
+	}
+
+	/**
+	 * The local branches that point at one commit, re-queried from git. The
+	 * tree view asks for this when a commit row is (re-)expanded, instead of
+	 * trusting the ref snapshot of a row that may have been painted before a
+	 * branch was created or deleted.
+	 */
+	async commitRefs(cwd: string, sha: string): Promise<GraphRefRow[]> {
+		const ctx = this.contextFor(cwd);
+		const refs = await ctx.git.listRefs(['refs/heads', 'refs/remotes', 'refs/tags']);
+		return refRowsAt(refs, sha);
 	}
 
 	async listRecoveryPoints(cwd: string): Promise<RecoveryPoint[]> {

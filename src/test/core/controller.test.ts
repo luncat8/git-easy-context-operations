@@ -44,10 +44,11 @@ describe('controller - reword flows', () => {
 		assert.equal(log.length, 4);
 		assert.equal(ui.pickCalls.length, 0, `no picker needed: ${ui.transcript}`);
 		assert.equal(ui.confirmCalls.length, 1);
-		assert.match(ui.confirmCalls[0]!.message, /Reword [0-9a-f]{7} on main\?/);
+		assert.match(ui.confirmCalls[0]!.message, /Rename the message of [0-9a-f]{7} on main\?/);
+		assert.equal(ui.confirmCalls[0]!.options!.confirmLabel, 'Rename');
 		assert.match(ui.confirmCalls[0]!.options!.detail!, /Recovery point: refs\/geco\//);
 		assert.match(ui.confirmCalls[0]!.options!.detail!, /3 commits get a new SHA \([0-9a-f]{7} plus 2 after it\)/);
-		assert.match(ui.askCalls[0]!.message, /Reworded .* on main/);
+		assert.match(ui.askCalls[0]!.message, /Renamed the message of .* on main/);
 		assert.match(ui.allLogs(), /recovery point: refs\/geco\//);
 	});
 
@@ -56,7 +57,8 @@ describe('controller - reword flows', () => {
 		const ui = new FakeUI({ inputs: ['v0.4 add the new button'] });
 		await controllerFor(ui, repo).rewordCommit(repo.dir, [tip], 'replace');
 
-		assert.equal(ui.inputCalls[0]!.prompt, 'Commit message (currently "v0.4")');
+		assert.equal(ui.inputCalls[0]!.title, `Rename ${tip.slice(0, 7)}`);
+		assert.equal(ui.inputCalls[0]!.prompt, 'New commit message (currently "v0.4")');
 		assert.equal((await repo.message('main')).trim(), 'v0.4 add the new button');
 	});
 
@@ -66,6 +68,7 @@ describe('controller - reword flows', () => {
 		await controllerFor(ui, repo).rewordCommit(repo.dir, [tip], 'findReplace');
 
 		assert.equal((await repo.message('main')).trim(), 'v0.4 add a shiny new button');
+		assert.equal(ui.inputCalls[0]!.title, `Search and replace in ${tip.slice(0, 7)}`);
 		assert.equal(ui.inputCalls[0]!.prompt, 'Find in the commit message');
 		assert.equal(ui.inputCalls[0]!.value, 'v0.4 add the new button');
 	});
@@ -101,7 +104,7 @@ describe('controller - reword flows', () => {
 		const ui = new FakeUI({ picks: [0], inputs: ['picked from the list'] });
 		await controllerFor(ui, repo).rewordCommit(repo.dir, [], 'replace');
 
-		assert.equal(ui.pickCalls[0]!.options!.title, 'Reword which commit?');
+		assert.equal(ui.pickCalls[0]!.options!.title, 'Rename which commit?');
 		assert.match(ui.pickCalls[0]!.items[0]!.label, /^\$\(git-commit\) [0-9a-f]{7}$/);
 		assert.equal((await repo.message('main')).trim(), 'picked from the list');
 	});
@@ -185,11 +188,11 @@ describe('controller - reword flows', () => {
 			await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [before], 'append');
 
 			assert.equal(ui.confirmCalls.length, 2, 'reword + undo confirmations');
-			assert.match(ui.confirmCalls[1]!.message, /Undo "Reworded /);
-			assert.match(ui.allLogs(), /Reworded [0-9a-f]{7,} -> [0-9a-f]{7,} on main/, 'the rewrite really happened');
+			assert.match(ui.confirmCalls[1]!.message, /Undo "Renamed the message of /);
+			assert.match(ui.allLogs(), /Renamed the message of [0-9a-f]{7,} -> [0-9a-f]{7,} on main/, 'the rewrite really happened');
 			assert.equal(await other.repo.sha('main'), before, 'undo put the old history back');
 			assert.equal((await other.repo.message('main')).trim(), 'v0.4');
-			assert.match(ui.allMessages(), /Undone: Reworded /);
+			assert.match(ui.allMessages(), /Undone: Renamed the message of /);
 		} finally {
 			other.repo.cleanup();
 		}
@@ -305,11 +308,21 @@ describe('controller - fast-forward flows', () => {
 			assert.equal(await repo.sha('main'), target);
 			assert.equal(await repo.sha('old'), from);
 			assert.equal(ui.pickCalls.length, 0, ui.transcript);
-			assert.match(ui.confirmCalls[0]!.message, /Move main to [0-9a-f]{7}\?/);
-			assert.match(ui.confirmCalls[0]!.options!.detail!, /Fast-forward: 1 commit is added, nothing is lost\./);
-			assert.match(ui.confirmCalls[0]!.options!.detail!, /kept on branch "old"/);
-			assert.equal(ui.confirmCalls[0]!.options!.destructive, false);
+			// A true fast-forward gets the three-button dialog; the unscripted
+			// fake UI clicks the primary button ("Move"), so the backup stays.
+			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
+			assert.equal(ui.confirmCalls.length, 0, 'the dialog replaces the old two-button confirm');
+			assert.match(ui.chooseCalls[0]!.message, /Move main to [0-9a-f]{7}\?/);
+			assert.deepEqual(
+				ui.chooseCalls[0]!.options.choices.map((choice) => choice.label),
+				['Cancel', 'Move', 'Move and remove "old"'],
+				'Cancel | Ok | Ok and remove redundant old branch',
+			);
+			assert.equal(ui.chooseCalls[0]!.options.choices[1]!.primary, true, 'Move is the default action');
+			assert.match(ui.chooseCalls[0]!.options.detail!, /Fast-forward: 1 commit is added, nothing is lost\./);
+			assert.match(ui.chooseCalls[0]!.options.detail!, /kept on branch "old"/);
 			assert.match(ui.askCalls[0]!.message, /main now points at/);
+			assert.match(ui.askCalls[0]!.message!, /old tip kept on old/);
 			assert.match(ui.allLogs(), /Moved main: .* \(fast-forward\)/);
 			assert.equal(await repo.sha('HEAD'), target, 'the checked-out branch really moved');
 		} finally {
@@ -345,6 +358,7 @@ describe('controller - fast-forward flows', () => {
 			const ui = new FakeUI({ confirms: [true, true] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [featureSha], { askBranch: false });
 
+			assert.equal(ui.chooseCalls.length, 0, 'a diverged move keeps the old confirm - the backup would carry real commits');
 			assert.equal(ui.confirmCalls.length, 2);
 			assert.match(ui.confirmCalls[0]!.options!.detail!, /NOT a fast-forward: 2 commits on main would be left behind\./);
 			assert.match(ui.confirmCalls[1]!.message, /has commits that .* does not\. Move it anyway\?/);
@@ -373,7 +387,7 @@ describe('controller - fast-forward flows', () => {
 		}
 	});
 
-	it('does nothing when the user declines the first confirmation', async () => {
+	it('does nothing when the user cancels the dialog', async () => {
 		const { repo } = await createLinearRepo();
 		try {
 			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
@@ -381,12 +395,127 @@ describe('controller - fast-forward flows', () => {
 			await repo.checkout('main');
 			const before = await repo.sha('main');
 
-			const ui = new FakeUI({ confirms: [false] });
+			const ui = new FakeUI({ choices: ['cancel'] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
 
 			assert.equal(await repo.sha('main'), before);
 			assert.equal(await repo.hasBranch('old'), false);
 			assert.match(ui.allLogs(), /cancelled by the user/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('does nothing when the user dismisses the dialog without choosing', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			const before = await repo.sha('main');
+
+			const ui = new FakeUI({ choices: [null] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.sha('main'), before);
+			assert.equal(await repo.hasBranch('old'), false);
+			assert.match(ui.allLogs(), /cancelled by the user/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('moves and removes the redundant backup when the user picks the third button', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			const from = await repo.sha('main');
+
+			const ui = new FakeUI({ choices: ['move-remove'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.sha('main'), target);
+			assert.equal(await repo.hasBranch('old'), false, 'the redundant backup is gone');
+			assert.match(ui.allLogs(), /Removed the redundant backup branch old \(/);
+			assert.match(ui.askCalls[0]!.message!, /the redundant backup "old" was removed - nothing was lost/);
+			// Two journaled operations: the move, then the removal of the backup.
+			const journal = await repo.ctx.safety.readJournal();
+			assert.equal(journal.length, 2, ui.allLogs());
+			assert.match(journal[1]!.summary, /Removed 1 redundant branch/);
+			assert.equal(from.length, 40, 'the old tip still exists in history');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('undoes the removal alone: the backup branch is back, the move stays', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			const from = await repo.sha('main');
+
+			const ui = new FakeUI({ choices: ['move-remove'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+			assert.equal(await repo.hasBranch('old'), false);
+
+			const undoUi = new FakeUI({ picks: [0] });
+			await controllerFor(undoUi, repo).undoLastOperation(repo.dir);
+			assert.equal(await repo.hasBranch('old'), true, 'the backup branch is back');
+			assert.equal(await repo.sha('old'), from);
+			assert.equal(await repo.sha('main'), target, 'the move itself is untouched');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('offers to remove the suffixed backup when the base name is taken elsewhere', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			// "old" already exists at a different commit: the mover creates
+			// "old-2" instead, and "old-2" - not the pre-existing "old" - is
+			// the redundant branch the third button removes.
+			await repo.gitOk(['branch', 'old', shas.v03]);
+
+			const ui = new FakeUI({ choices: ['move-remove'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
+			assert.equal(ui.chooseCalls[0]!.options.choices[2]!.label, 'Move and remove "old-2"');
+			assert.equal(await repo.hasBranch('old-2'), false, 'the newly created backup was removed');
+			assert.equal(await repo.sha('old'), shas.v03, 'the pre-existing branch is untouched');
+			assert.equal(await repo.sha('main'), target);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('uses the old two-button confirm when the backup branch already sits at the old tip', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			const from = await repo.sha('main');
+			// "old" already points at the old tip: it gets reused, so nothing
+			// new is created and there is nothing safe to remove.
+			await repo.gitOk(['branch', 'old', from]);
+
+			const ui = new FakeUI({ confirms: [true] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(ui.chooseCalls.length, 0, 'no third button for a reused backup');
+			assert.equal(ui.confirmCalls.length, 1);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /kept on branch "old"/);
+			assert.equal(await repo.sha('main'), target);
+			assert.equal(await repo.hasBranch('old'), true);
+			assert.equal(await repo.sha('old'), from);
 		} finally {
 			repo.cleanup();
 		}
@@ -799,9 +928,9 @@ describe('controller - backups, undo and information', () => {
 			await controllerFor(ui, repo).undoLastOperation(repo.dir);
 
 			assert.equal(ui.pickCalls[0]!.items.length, 2);
-			assert.equal(ui.pickCalls[0]!.items[0]!.label.startsWith('reword - Reworded'), true);
+			assert.equal(ui.pickCalls[0]!.items[0]!.label.startsWith('reword - Renamed the message of'), true);
 			assert.match(ui.pickCalls[0]!.items[1]!.description!, /also undoes 1 newer operation/);
-			assert.match(ui.confirmCalls[0]!.message, /^Undo 2 operations, back to "Reworded /);
+			assert.match(ui.confirmCalls[0]!.message, /^Undo 2 operations, back to "Renamed the message of /);
 			assert.match(ui.allMessages(), /Undone: 2 operations/);
 			assert.equal(await repo.sha('main'), shas.v04, 'both rewrites are gone');
 			assert.equal((await repo.message('main')).trim(), 'v0.4');
@@ -822,7 +951,7 @@ describe('controller - backups, undo and information', () => {
 			assert.match(ui.allLogs(), /Recovery points for /);
 			assert.match(ui.allLogs(), /refs\/geco\//);
 			assert.match(ui.allLogs(), /Journal \(1 entries, newest last\):/);
-			assert.match(ui.allLogs(), /reword: Reworded /);
+			assert.match(ui.allLogs(), /reword: Renamed the message of /);
 			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.undo));
 			assert.match(ui.askCalls[0]!.message, /1 recovery point\(s\) and 1 journaled operation/);
 		} finally {
@@ -938,8 +1067,8 @@ describe('controller - backups, undo and information', () => {
 			await controller.rewordCommit(`${repo.dir}/definitely-not-a-repo`, [], 'append');
 
 			assert.equal(ui.messages[0]!.kind, 'error');
-			assert.match(ui.messages[0]!.message, /^Reword commit: /);
-			assert.match(ui.allLogs(), /Reword commit failed:/);
+			assert.match(ui.messages[0]!.message, /^Rename commit: /);
+			assert.match(ui.allLogs(), /Rename commit failed:/);
 		} finally {
 			repo.cleanup();
 		}

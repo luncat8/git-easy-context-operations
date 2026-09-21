@@ -3,7 +3,7 @@
  * VS Code: queues of answers per prompt type, plus a record of every prompt,
  * message, log line and progress step the controller produced.
  */
-import type { AskOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../../core/ui';
+import type { AskOptions, ChooseOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../../core/ui';
 
 export type Answer<T> = T | undefined | (T | undefined)[] | ((callIndex: number) => T | undefined);
 
@@ -20,6 +20,12 @@ export interface UIScript {
 	 * items, which is what a user pressing OK does.
 	 */
 	multiPicks?: Answer<(number | string)[] | null>;
+	/**
+	 * Answers for `choose()`: a choice `value` or button label to click,
+	 * `null` for "dismiss the dialog". The default (no script) clicks the
+	 * choice marked `primary`, falling back to the first one.
+	 */
+	choices?: Answer<string | null>;
 }
 
 export interface PickCall {
@@ -35,10 +41,17 @@ export interface MultiPickCall {
 	cancelled: boolean;
 }
 
+export interface ChooseCall {
+	message: string;
+	options: ChooseOptions;
+	chosenValue: string | undefined;
+}
+
 export class FakeUI implements UI {
 	readonly inputCalls: InputOptions[] = [];
 	readonly pickCalls: PickCall[] = [];
 	readonly multiPickCalls: MultiPickCall[] = [];
+	readonly chooseCalls: ChooseCall[] = [];
 	readonly confirmCalls: { message: string; options?: ConfirmOptions }[] = [];
 	readonly askCalls: { message: string; options: AskOptions }[] = [];
 	readonly messages: { kind: MessageKind; message: string; detail?: string }[] = [];
@@ -48,7 +61,7 @@ export class FakeUI implements UI {
 	readonly copied: string[] = [];
 	readonly openedPaths: string[] = [];
 	readonly outputReveals: number[] = [];
-	private counts = { input: 0, pick: 0, multiPick: 0, confirm: 0, ask: 0, file: 0 };
+	private counts = { input: 0, pick: 0, multiPick: 0, confirm: 0, choose: 0, ask: 0, file: 0 };
 
 	constructor(private readonly script: UIScript = {}) {}
 
@@ -121,6 +134,22 @@ export class FakeUI implements UI {
 		return resolveAnswer(this.script.confirms, index, true) ?? false;
 	}
 
+	async choose(message: string, options: ChooseOptions): Promise<string | undefined> {
+		const index = this.counts.choose++;
+		this.chooseCalls.push({ message, options, chosenValue: undefined as string | undefined });
+		const answer = resolveAnswer(this.script.choices, index, undefined);
+		let chosenValue: string | undefined;
+		if (answer === undefined) {
+			// No script: click the primary choice, like the safe default.
+			const primary = options.choices.find((choice) => choice.primary) ?? options.choices[0];
+			chosenValue = primary?.value;
+		} else {
+			chosenValue = options.choices.find((choice) => choice.value === answer || choice.label === answer)?.value;
+		}
+		this.chooseCalls[this.chooseCalls.length - 1]!.chosenValue = chosenValue;
+		return chosenValue;
+	}
+
 	async ask(message: string, options: AskOptions): Promise<string | undefined> {
 		const index = this.counts.ask++;
 		this.askCalls.push({ message, options });
@@ -169,6 +198,9 @@ export class FakeUI implements UI {
 		}
 		for (const call of this.confirmCalls) {
 			lines.push(`confirm "${call.message}"`);
+		}
+		for (const call of this.chooseCalls) {
+			lines.push(`choose "${call.message}" [${call.options.choices.map((choice) => choice.label).join(' | ')}] -> ${call.chosenValue ?? '(dismissed)'}`);
 		}
 		for (const call of this.askCalls) {
 			lines.push(`ask "${call.message}" [${call.options.actions.join(', ')}]`);

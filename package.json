@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -42,7 +42,7 @@
     "commands": [
       {
         "command": "geco.rewordCommit",
-        "title": "Reword Commit Message...",
+        "title": "Rename Commit Message...",
         "category": "Git Easy Ops",
         "icon": "$(edit)"
       },
@@ -54,7 +54,7 @@
       },
       {
         "command": "geco.rewordCommitRename",
-        "title": "Rename Text in Commit Message...",
+        "title": "Search and Replace in Commit Message...",
         "category": "Git Easy Ops",
         "icon": "$(replace-all)"
       },
@@ -196,7 +196,7 @@
       },
       {
         "command": "geco.menuResetAll",
-        "title": "Reset Hidden Menu Items",
+        "title": "Restore Default Menu Items",
         "category": "Git Easy Ops",
         "icon": "$(clear-all)"
       }
@@ -730,9 +730,8 @@
           "items": {
             "type": "string"
           },
-          "default": [],
           "scope": "window",
-          "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them."
+          "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them. When the setting is absent, the built-in defaults apply: **Search and Replace in Commit Message...** is hidden out of the box; an empty list `[]` means \"show everything\"."
         }
       }
     }

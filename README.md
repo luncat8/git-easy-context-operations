@@ -1,8 +1,8 @@
-# Git Easy Ops
+# Git Easy Context Operations
 
 Right-click a commit or a branch and do the git surgery that is awkward on the
-command line - **reword an old commit**, **fast-forward `main` onto it** (keeping
-the old tip as a backup branch), **create / rename / delete a branch**,
+command line - **rename an old commit's message**, **fast-forward `main` onto it**
+, **create / rename / delete a branch**,
 **force-push safely**, or **apply a patch at the base it actually belongs to**.
 Every operation writes a recovery point first and (i hope) can be undone.
 
@@ -12,10 +12,10 @@ Works in VS Code and VSCodium. No proposed APIs required for the default install
 
 - **Squash N commits** - combine any contiguous run of commits into one
 - **Remove redundant branches** - one click deletes the branch names left over after fast-forwarding `main`: branches whose every commit another branch, tag or remote already has, so nothing about the files changes
-- **The view keeps up** - squash, fast-forward, branch work and undo repaint the graph as soon as the operation is done, no manual refresh
+- **The view keeps up** - squash, fast-forward, branch work and undo repaint the Source Control Graph as soon as the operation is done, no manual refresh
 - **Customize the context menus** - switch every Git Easy Ops menu item on/off from a native checkbox tree (`Git Easy Ops: Customize Context Menus...`)
-- **Change commit message** - reword, append, or rename text in any commit's message
-- **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first
+- **Change commit message** - rename, append, or search and replace in any commit's message
+- **Fast-forward default branch** - move `main` onto any commit safely, with the old tip parked on a backup branch first - and when the move is a true fast-forward, one click (**Move and remove "old"**) also deletes that now-redundant backup, so the result is clean
 - **Clean the whole graph** - one trash button on the **Graph** row finds every file that exists only in old commits (no branch, tag or remote has it anymore), backs the repository up as a bundle and rewrites the history so those files are gone for good
 
 # Next text is not for human (ask LLM if need)
@@ -27,8 +27,8 @@ https://github.com/luncat8/git-easy-context-operations
 
 | # | Command (palette: `Git Easy Ops: ...`) | What it does |
 |---|----------------------------------------|--------------|
-| 1 | **Reword Commit Message...** / **Append to Commit Message...** / **Rename Text in Commit Message...** | Rewrites the message of *any* commit, not just the last one: `v0.2` → `v0.2 add new button`. Descendant commits are replayed with identical trees, parents and author dates. |
-| 2 | **Fast-Forward Default Branch to Commit...** / **Fast-Forward Branch to Commit...** | Moves `main` (or a branch you pick) onto the selected commit. The old tip is parked on a backup branch named `old` (or whatever you type) *before* anything moves. |
+| 1 | **Rename Commit Message...** / **Append to Commit Message...** / **Search and Replace in Commit Message...** | Rewrites the message of *any* commit, not just the last one: `v0.2` → `v0.2 add new button`. Descendant commits are replayed with identical trees, parents and author dates. *Search and Replace in Commit Message...* is hidden by default - tick it back on in **Customize Context Menus...**. |
+| 2 | **Fast-Forward Default Branch to Commit...** / **Fast-Forward Branch to Commit...** | Moves `main` (or a branch you pick) onto the selected commit. The old tip is parked on a backup branch named `old` (or whatever you type) *before* anything moves. (keeping the old tip as a backup branch - or removing that backup right away when it is redundant)|
 | 3 | **Force Push (with lease)...** / **Force Push (--force)...** | Pushes the rewritten history. `--force-with-lease` refuses to overwrite work a colleague pushed since your last fetch. |
 | 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. |
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. Undo rolls operations back, newest first. |
@@ -41,7 +41,7 @@ https://github.com/luncat8/git-easy-context-operations
 
 | 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it **offers to install it for you** (pip, Homebrew, or the system package manager when sudo needs no password) and continues the cleanup once the tool is in place - the exact script is the fallback, not the answer. |
 
-| 9 | **Customize Context Menus...** / **Reset Hidden Menu Items** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. Saved in `geco.hiddenMenuItems`, fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
+| 9 | **Customize Context Menus...** / **Restore Menu Item Defaults** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. One row is hidden *by default* (**Search and Replace in Commit Message...**, shown as "hidden by default" in the editor); everything else is on until you switch it off. Saved in `geco.hiddenMenuItems` (an absent value means the built-in defaults, an explicit `[]` means "show everything"), fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
 
 Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
 (lanes, ref badges, relative dates) with the same context menus on commits and
@@ -63,7 +63,15 @@ without any proposed API.
   stand-in for the built-in Source Control Graph, which cannot be extended without
   a proposed API (see below). The view **reloads itself** whenever an operation
   changes the repository - including the *Undo* you pick in the notification
-  afterwards - so what you see is never one squash behind.
+  afterwards - so what you see is never one squash behind. The *built-in*
+  Source Control Graph is refreshed too: after every operation the extension
+  asks the git extension to re-sync its state (`git.refresh` for the open
+  repository), and a watcher on the repository's git directory picks up changes
+  made elsewhere (another window, the terminal, a colleague's push). Every
+  refresh - and why it happened - is logged in the *Git Easy Ops* output
+  channel. Branch badges under an expanded commit are re-queried from git
+  when the row is expanded, so a branch created or deleted elsewhere never
+  shows up stale.
 - **The same view** also lists all branches and the recovery points/journal.
 - **Remove Redundant Branches...** sits on every branch row *and* on every commit
   row (in the branch group, last - right after **Create Branch...**) and in the
@@ -90,7 +98,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.1+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.2+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -115,7 +123,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 
 | Group (next to the built-in items) | What this build adds |
 |------------------------------------|----------------------|
-| *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reword Commit Message...**, **Append to...**, **Rename Text in...** |
+| *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Rename Commit Message...**, **Append to...**, **Search and Replace in...** |
 | *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`). Deliberately **not** on the branch badges - see below. |
 | after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
@@ -157,11 +165,16 @@ until you open it.
 - One switch hides the command **everywhere** (sidebar commit menu, branch menu,
   submenu, Timeline, graph build) - that is what "I don't want this item" means.
   The Command Palette, keybindings and other extensions keep working regardless.
+- **Search and Replace in Commit Message...** is hidden **by default** (its box
+  starts unchecked, with a "hidden by default" note); every other item starts
+  visible. Tick it to keep it - an explicit choice always wins over the default.
 - The *Customize Context Menus...* entry itself is locked (the way back), and the
-  palette command **Reset Hidden Menu Items** shows everything again.
+  palette command **Restore Default Menu Items** puts the list back to the
+  built-in defaults (showing everything except the default-hidden rows).
 - Hidden state lives in `geco.hiddenMenuItems` (user scope by default; a
-  workspace value keeps this workspace different). Unknown ids are kept, so a
-  downgrade never loses customizations.
+  workspace value keeps this workspace different). An **absent** value means
+  "the built-in defaults apply"; an explicit `[]` means "show everything".
+  Unknown ids are kept, so a downgrade never loses customizations.
 - **Known limits** (VS Code has no API for more): built-in git items (*Cherry
   Pick*, *Compare*, ...) cannot be hidden - microsoft/vscode#9285 is open since
   2016. Items cannot be reordered or moved between sections. Immediately after
@@ -175,12 +188,12 @@ no toolchain needed:
 
 ```bash
 # the everyday build: sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.1.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.1.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.2.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.2.vsix
 
 # the graph flavour: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.1+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.1+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.2+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.2+graph.vsix
 ```
 
 For the graph flavour, allow the proposed API once - inside the editor run **Git
@@ -192,7 +205,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.1.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.2.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
@@ -257,7 +270,7 @@ do that before publishing).
 | `geco.showGraphMenuHint` | `true` | One-time hint about the entry points. |
 | `geco.graphCommitLimit` | `200` | Commits listed in the **Graph** group of the sidebar view. |
 | `geco.showGraphLanes` | `true` | Draw the `●│╮…` lane art in the Graph group (`false` = plain list). |
-| `geco.hiddenMenuItems` | `[]` | Row ids hidden from the context menus. Maintained by **Customize Context Menus...** - edit by hand at your own risk. |
+| `geco.hiddenMenuItems` | *(no default)* | Row ids hidden from the context menus. No value = the built-in defaults (Search and Replace in Commit Message... hidden); `[]` = show everything. Maintained by **Customize Context Menus...** - edit by hand at your own risk. |
 
 ## Development
 

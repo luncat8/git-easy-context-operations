@@ -123,6 +123,7 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 			if (element.gecoKind === 'commit') {
 				return this.refNodes(repoPath, element);
 			}
+
 			// Only the root groups are collapsible otherwise.
 			const label = typeof element.label === 'string' ? element.label : element.label?.label;
 			switch (label) {
@@ -186,9 +187,25 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 		return item;
 	}
 
-	/** The ref badges of a commit row - the branch menu lives here. */
-	private refNodes(repoPath: string, commit: GecoTreeItem): GecoTreeItem[] {
-		const refs = commit.graphRefs ?? [];
+	/**
+	 * The ref badges of a commit row - the branch menu lives here.
+	 *
+	 * Re-queried from git instead of reading the row's own snapshot: the
+	 * element VS Code hands us for an expanded row was painted when the row
+	 * was first fetched, and a branch created or deleted since then would
+	 * otherwise show up (or be missing) until the row itself is repainted.
+	 */
+	private async refNodes(repoPath: string, commit: GecoTreeItem): Promise<GecoTreeItem[]> {
+		let refs: readonly GraphRefRow[];
+		if (commit.sha) {
+			try {
+				refs = await this.deps.controller().commitRefs(repoPath, commit.sha);
+			} catch {
+				refs = commit.graphRefs ?? [];
+			}
+		} else {
+			refs = commit.graphRefs ?? [];
+		}
 		return refs.map((ref) =>
 			new GecoTreeItem(repoPath, 'branch', ref.name, {
 				description: ref.isHead ? 'checked out' : ref.upstream,

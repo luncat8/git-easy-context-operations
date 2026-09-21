@@ -161,10 +161,16 @@ export class MenuEditorProvider implements vscode.TreeDataProvider<MenuEditorNod
 					+ `\n\nContext key: \`geco.menuVisible.${row.id}\``,
 				);
 			} else {
+				if (hiddenHere && row.defaultHidden) {
+					node.description = 'hidden by default';
+				}
 				node.tooltip = new vscode.MarkdownString(
 					`**${label}**\n\nContext key: \`geco.menuVisible.${row.id}\`\n\n`
 					+ `One switch hides this entry in *every* menu that shows it `
 					+ `(${row.surfaces.map((s) => menuSurfaceById(s).label).join(', ')}).`
+					+ (row.defaultHidden
+						? '\n\nHidden by default - tick the box to show it, or "Restore Defaults" to hide it again.'
+						: '')
 					+ '\n\nThe Command Palette always keeps the command.',
 				);
 			}

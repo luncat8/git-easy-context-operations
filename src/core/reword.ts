@@ -260,7 +260,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 			await git.updateRef('HEAD', newTarget, { oldValue: targetSha, message: `geco reword ${shorten(targetSha)}` });
 			await safety.record({
 				kind: 'reword',
-				summary: `Reworded ${shorten(targetSha)} (detached HEAD): "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}"`,
+				summary: `Renamed the message of ${shorten(targetSha)} (detached HEAD): "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}"`,
 				undo: {
 					type: 'refs',
 					refs: [{ ref: 'HEAD', restoreTo: targetSha, expected: newTarget }],
@@ -332,7 +332,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 
 		await safety.record({
 			kind: 'reword',
-			summary: `Reworded ${shorten(targetSha)} on ${branchName}: "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}" (${rewritten.length} commit${rewritten.length === 1 ? '' : 's'} rewritten)`,
+			summary: `Renamed the message of ${shorten(targetSha)} on ${branchName}: "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}" (${rewritten.length} commit${rewritten.length === 1 ? '' : 's'} rewritten)`,
 			undo: {
 				type: 'refs',
 				refs: [{ ref: branchRef, restoreTo: branchSha, expected: newTip }],
