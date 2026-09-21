@@ -8,7 +8,7 @@ import {
 	squashCommits,
 } from '../../core/squash';
 import { GecoError } from '../../core/errors';
-import { createLinearRepo, type TempRepo } from '../helpers/tempRepo';
+import { createLinearRepo, createTempRepo, type TempRepo } from '../helpers/tempRepo';
 
 let repo: TempRepo;
 let shas: Record<string, string>;
@@ -98,7 +98,41 @@ describe('squashCommits', () => {
 		assert.equal(result.backupRef?.startsWith('refs/geco/squash/main/'), true, 'a recovery point was created');
 	});
 
-	test('replays the commits after the squash and journals one undoable entry', async () => {
+		test('a blank combined message is accepted and stored as a single space', async () => {
+			for (const typed of ['', '   ']) {
+				const { repo: fresh, shas: freshShas } = await createLinearRepo();
+				try {
+					const result = await squashCommits(fresh.ctx, {
+						commits: [freshShas.v02!, freshShas.v03!],
+						message: typed,
+					});
+					assert.equal(result.message, ' ');
+					assert.equal(await fresh.ctx.git.rawMessage(result.newSha), ' ');
+					assert.equal(result.rewritten[0]!.subject, '', 'the combined commit shows an empty subject');
+				} finally {
+					fresh.cleanup();
+				}
+			}
+		});
+
+		test('squashing commits whose messages are all blank stores a single space', async () => {
+			const fresh = await createTempRepo();
+			try {
+				fresh.write('a.txt', 'a\n');
+				await fresh.gitOk(['add', '-A']);
+				await fresh.gitOk(['commit', '--quiet', '--allow-empty-message', '-m', '']);
+				fresh.write('b.txt', 'b\n');
+				await fresh.gitOk(['add', '-A']);
+				await fresh.gitOk(['commit', '--quiet', '--allow-empty-message', '-m', ' ']);
+				const result = await squashCommits(fresh.ctx, { commits: ['HEAD~1', 'HEAD'] });
+				assert.equal(result.message, ' ');
+				assert.equal(await fresh.ctx.git.rawMessage(result.newSha), ' ');
+			} finally {
+				fresh.cleanup();
+			}
+		});
+
+		test('replays the commits after the squash and journals one undoable entry', async () => {
 		const before = await repo.log('main');
 		const result = await squashCommits(repo.ctx, { commits: [shas.v02!, shas.v03!], message: 'v0.2 and v0.3 together' });
 

@@ -198,27 +198,97 @@ describe('controller - reword flows', () => {
 		}
 	});
 
-	it('keeps trees, parents, authors and dates while rewriting', async () => {
-		const other = await createLinearRepo();
-		try {
-			const before = await other.repo.log('main');
-			const ui = new FakeUI({ inputs: ['same content, new words'] });
-			await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v02], 'replace');
+		it('keeps trees, parents, authors and dates while rewriting', async () => {
+			const other = await createLinearRepo();
+			try {
+				const before = await other.repo.log('main');
+				const ui = new FakeUI({ inputs: ['same content, new words'] });
+				await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v02], 'replace');
 
-			const after = await other.repo.log('main');
-			assert.deepEqual(after.map((c) => c.tree), before.map((c) => c.tree));
-			assert.deepEqual(after.map((c) => c.authorDate), before.map((c) => c.authorDate));
-			assert.deepEqual(after.map((c) => c.authorName), before.map((c) => c.authorName));
-			assert.equal(after[3]!.parents.length, 0, 'the root commit stays a root commit');
-			assert.equal(after[2]!.parents.length, 1);
-			assert.equal(after[2]!.subject, 'same content, new words');
-			assert.notEqual(after[2]!.sha, before[2]!.sha);
-			assert.equal(after[3]!.sha, before[3]!.sha, 'the untouched root commit keeps its sha');
-		} finally {
-			other.repo.cleanup();
-		}
+				const after = await other.repo.log('main');
+				assert.deepEqual(after.map((c) => c.tree), before.map((c) => c.tree));
+				assert.deepEqual(after.map((c) => c.authorDate), before.map((c) => c.authorDate));
+				assert.deepEqual(after.map((c) => c.authorName), before.map((c) => c.authorName));
+				assert.equal(after[3]!.parents.length, 0, 'the root commit stays a root commit');
+				assert.equal(after[2]!.parents.length, 1);
+				assert.equal(after[2]!.subject, 'same content, new words');
+				assert.notEqual(after[2]!.sha, before[2]!.sha);
+				assert.equal(after[3]!.sha, before[3]!.sha, 'the untouched root commit keeps its sha');
+			} finally {
+				other.repo.cleanup();
+			}
+		});
+
+		it('accepts an empty rename and stores a single space (temporary commits stay quiet)', async () => {
+			const other = await createLinearRepo();
+			try {
+				const ui = new FakeUI({ inputs: [''], confirms: [true] });
+				await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v04], 'replace');
+
+				assert.equal(ui.messages.length, 0, `no warning is shown: ${ui.transcript}`);
+				assert.match(ui.askCalls[0]!.message, /Renamed the message of .* on main/);
+				assert.equal(await other.repo.ctx.git.rawMessage(await other.repo.sha('main')), ' ');
+			} finally {
+				other.repo.cleanup();
+			}
+		});
+
+		it('accepts a whitespace-only rename and stores a single space, and repeats as a no-op', async () => {
+			const other = await createLinearRepo();
+			try {
+				const ui = new FakeUI({ inputs: ['   '], confirms: [true] });
+				await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v04], 'replace');
+				assert.equal(await other.repo.ctx.git.rawMessage(await other.repo.sha('main')), ' ');
+
+				const tip = await other.repo.sha('main');
+				const again = new FakeUI({ inputs: [' '] });
+				await controllerFor(again, other.repo).rewordCommit(other.repo.dir, [tip], 'replace');
+				assert.match(again.allMessages(), /unchanged/);
+				assert.equal(await other.repo.sha('main'), tip, 'nothing was rewritten the second time');
+			} finally {
+				other.repo.cleanup();
+			}
+		});
+
+		it('accepts a search/replace that empties the whole message and stores a single space', async () => {
+			const other = await createLinearRepo();
+			try {
+				const ui = new FakeUI({ inputs: ['v0.4', ''], confirms: [true] });
+				await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v04], 'findReplace');
+
+				assert.equal(ui.messages.length, 0, `no error is shown: ${ui.transcript}`);
+				assert.equal(await other.repo.ctx.git.rawMessage(await other.repo.sha('main')), ' ');
+			} finally {
+				other.repo.cleanup();
+			}
+		});
+
+		it('clips long messages in the prompts and dialogs but keeps the full text editable', async () => {
+			const other = await createLinearRepo();
+			try {
+				const long = `${'x'.repeat(400)}`;
+				await other.repo.commit(long, { 'long.txt': 'l\n' });
+				const tip = await other.repo.sha('main');
+
+				const ui = new FakeUI({ inputs: ['short now'], confirms: [true] });
+				await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [tip], 'replace');
+
+				const prompt = ui.inputCalls[0]!.prompt;
+				assert.ok(prompt.length < 200, `the prompt preview is clipped (length ${prompt.length})`);
+				assert.ok(prompt.includes('…'), 'the clip is marked with an ellipsis');
+				assert.ok(!prompt.includes('x'.repeat(150)), 'the prompt does not carry the whole message');
+				assert.equal(ui.inputCalls[0]!.value, long, 'the input value still holds the full message for editing');
+
+				const detail = ui.confirmCalls[0]!.options!.detail!;
+				for (const line of detail.split('\n')) {
+					assert.ok(line.length <= 200, `every dialog line stays short (length ${line.length}): ${line.slice(0, 60)}`);
+				}
+				assert.match(ui.askCalls[0]!.message, /short now/);
+			} finally {
+				other.repo.cleanup();
+			}
+		});
 	});
-});
 
 describe('controller - menu argument shapes', () => {
 	const shapes: [string, (sha: string, repo: TempRepo) => unknown[]][] = [
@@ -1143,6 +1213,43 @@ describe('controller - squash flows', () => {
 
 			assert.equal(await repo.branchSha('main'), shas.v04, 'undo restored the original tip');
 			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.3', 'v0.2', 'v0.1']);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('accepts an empty combined message and stores a single space (no "cannot be empty" warning)', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: [''], confirms: [true], asks: [undefined] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+
+			assert.equal(ui.messages.length, 0, `no warning is shown: ${ui.transcript}`);
+			const tip = await repo.sha('main');
+			assert.equal(await repo.ctx.git.rawMessage(tip), ' ');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps the squash confirmation on one screen for many commits', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			for (let i = 0; i < 14; i++) {
+				await repo.commit(`commit number ${i} with a subject that goes on and on and on`, { [`f${i}.txt`]: `${i}\n` });
+			}
+			const shas = (await repo.log('main')).map((line) => line.sha);
+			const selected = shas.slice(0, 12).map((sha) => ({ gecoKind: 'commit', sha, repoPath: repo.dir }));
+			const ui = new FakeUI({ inputs: ['one commit'], confirms: [true], asks: [undefined] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [selected[0], selected.slice(1)]);
+
+			const detail = ui.confirmCalls[0]!.options!.detail!;
+			const lines = detail.split('\n');
+			assert.ok(lines.length < 20, `the dialog lists at most ten commits by name (got ${lines.length} lines)`);
+			assert.match(detail, /\.\.\. and 2 more/);
+			for (const line of lines) {
+				assert.ok(line.length <= 200, `every dialog line stays short (length ${line.length})`);
+			}
 		} finally {
 			repo.cleanup();
 		}

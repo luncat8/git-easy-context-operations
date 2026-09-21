@@ -15,6 +15,7 @@
  */
 import type { RepoContext } from './context';
 import { GecoError } from './errors';
+import { previewSubject } from './reword';
 import { shorten, type BackupBranchResult } from './safety';
 
 export type CheckoutStrategy = 'auto' | 'ff-only' | 'reset-hard' | 'refuse';
@@ -136,7 +137,7 @@ export async function fastForwardBranch(ctx: RepoContext, options: FastForwardOp
 			`"${branch}" cannot be fast-forwarded to ${shorten(to)}: ${behind} commit${behind === 1 ? '' : 's'} on "${branch}" would be left behind.`,
 			[
 				discardedCommits.length > 0
-					? `Left behind:\n${discardedCommits.slice(0, 10).map((c) => `  ${shorten(c.sha)} ${c.subject}`).join('\n')}${discardedCommits.length > 10 ? `\n  ... and ${discardedCommits.length - 10} more` : ''}`
+					? `Left behind:\n${discardedCommits.slice(0, 10).map((c) => `  ${shorten(c.sha)} ${previewSubject(c.subject)}`).join('\n')}${discardedCommits.length > 10 ? `\n  ... and ${discardedCommits.length - 10} more` : ''}`
 					: '',
 				'Run the operation again with force to move the branch anyway - the commits stay reachable through the backup branch.',
 			].filter(Boolean).join('\n'),

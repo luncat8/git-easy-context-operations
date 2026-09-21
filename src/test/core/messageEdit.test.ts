@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { applyMessageEdit, messageSubject, normalizeMessage, splitMessage } from '../../core/reword';
+import { applyMessageEdit, messageSubject, normalizeMessage, previewSubject, splitMessage, PREVIEW_MAX_LENGTH } from '../../core/reword';
 import { GecoError } from '../../core/errors';
 
 describe('normalizeMessage', () => {
@@ -152,6 +152,51 @@ describe('applyMessageEdit - findReplace', () => {
 			applyMessageEdit('v0.2 WIP add new button', { mode: 'findReplace', find: 'WIP ', text: '' }),
 			'v0.2 add new button',
 		);
+	});
+
+	test('deleting the whole message stores a single space instead of failing', () => {
+		assert.equal(applyMessageEdit('temp', { mode: 'findReplace', find: 'temp', text: '' }), ' ');
+		assert.equal(applyMessageEdit('temp', { mode: 'findReplace', find: 'temp', text: '  ' }), ' ');
+		assert.equal(
+			applyMessageEdit('temp', { mode: 'findReplace', find: 'temp', text: '', subjectOnly: false }),
+			' ',
+		);
+		assert.equal(
+			// Whole-message mode keeps text around the match: only the word goes.
+			applyMessageEdit('temp\n\nbody', { mode: 'findReplace', find: 'temp', text: '', subjectOnly: false }),
+			'body',
+		);
+	});
+
+	test('emptying the subject lets the body stand alone', () => {
+		assert.equal(
+			applyMessageEdit('temp\n\nbody', { mode: 'findReplace', find: 'temp', text: '' }),
+			'body',
+		);
+	});
+});
+
+describe('previewSubject', () => {
+	test('collapses a multi-line message to one line', () => {
+		assert.equal(previewSubject('subject\n\nbody line\nmore'), 'subject body line more');
+	});
+
+	test('clips a long message with an ellipsis', () => {
+		const long = 'x'.repeat(500);
+		const preview = previewSubject(long);
+		assert.equal(preview.length, PREVIEW_MAX_LENGTH);
+		assert.ok(preview.endsWith('…'));
+		assert.equal(preview, `${'x'.repeat(PREVIEW_MAX_LENGTH - 1)}…`);
+	});
+
+	test('keeps short text and honours a custom cap', () => {
+		assert.equal(previewSubject('short'), 'short');
+		assert.equal(previewSubject('abcdefghij', 5), 'abcd…');
+	});
+
+	test('blank input stays blank', () => {
+		assert.equal(previewSubject(''), '');
+		assert.equal(previewSubject('  \n\t '), '');
 	});
 });
 

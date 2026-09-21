@@ -119,6 +119,27 @@ export function messageSubject(message: string): string {
 	return splitMessage(message).subject;
 }
 
+/**
+ * Hard cap for message previews that are embedded in prompts, dialogs and
+ * notifications: a long commit message must not stretch the input box or the
+ * confirmation dialog past the screen.
+ */
+export const PREVIEW_MAX_LENGTH = 120;
+
+/**
+ * A short one-line preview of a commit message for UI text: every whitespace
+ * run (including newlines) collapses to a single space and text longer than
+ * `max` is clipped with an ellipsis. Use it whenever a message is *shown*;
+ * the full text still lives in the commit and in the output-channel log.
+ */
+export function previewSubject(message: string, max = PREVIEW_MAX_LENGTH): string {
+	const oneLine = normalizeMessage(message).replace(/\s+/g, ' ').trim();
+	if (oneLine.length <= max) {
+		return oneLine;
+	}
+	return `${oneLine.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
+}
+
 function oneLine(text: string): string {
 	return normalizeMessage(text)
 		.split('\n')
@@ -168,9 +189,13 @@ export function applyMessageEdit(original: string, edit: MessageEdit): string {
 			}
 			const replaced = scope.split(find).join(edit.text);
 			if (wholeMessage) {
-				return normalizeMessage(replaced);
+				// A blank result is accepted and stored as one space, exactly
+				// like `replace` - useful for temporary commits.
+				return normalizeMessage(replaced) || ' ';
 			}
-			return body ? normalizeMessage(`${replaced}\n\n${body}`) : normalizeMessage(replaced);
+			// Replacing the whole subject with whitespace lets the body stand
+			// alone; only a message that ends up blank becomes a single space.
+			return body ? (normalizeMessage(`${replaced}\n\n${body}`) || ' ') : (normalizeMessage(replaced) || ' ');
 		}
 
 		default: {
@@ -256,7 +281,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 			await git.updateRef('HEAD', newTarget, { oldValue: targetSha, message: `geco reword ${shorten(targetSha)}` });
 			await safety.record({
 				kind: 'reword',
-				summary: `Renamed the message of ${shorten(targetSha)} (detached HEAD): "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}"`,
+				summary: `Renamed the message of ${shorten(targetSha)} (detached HEAD): "${previewSubject(oldMessage)}" -> "${previewSubject(newMessage)}"`,
 				undo: {
 					type: 'refs',
 					refs: [{ ref: 'HEAD', restoreTo: targetSha, expected: newTarget }],
@@ -328,7 +353,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 
 		await safety.record({
 			kind: 'reword',
-			summary: `Renamed the message of ${shorten(targetSha)} on ${branchName}: "${messageSubject(oldMessage)}" -> "${messageSubject(newMessage)}" (${rewritten.length} commit${rewritten.length === 1 ? '' : 's'} rewritten)`,
+			summary: `Renamed the message of ${shorten(targetSha)} on ${branchName}: "${previewSubject(oldMessage)}" -> "${previewSubject(newMessage)}" (${rewritten.length} commit${rewritten.length === 1 ? '' : 's'} rewritten)`,
 			undo: {
 				type: 'refs',
 				refs: [{ ref: branchRef, restoreTo: branchSha, expected: newTip }],

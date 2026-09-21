@@ -21,7 +21,7 @@
 import type { RepoContext } from './context';
 import { GecoError } from './errors';
 import type { CommitInfo, Git } from './git';
-import { messageSubject, normalizeMessage } from './reword';
+import { messageSubject, normalizeMessage, previewSubject } from './reword';
 import { discardRecoveryRef, isSignedCommit, rewriteCommit } from './rewrite';
 import { shorten, type JournalEntry } from './safety';
 
@@ -187,7 +187,7 @@ async function requireUnbrokenRun(git: Git, ordered: readonly string[]): Promise
 	}
 	const missing = run.filter((sha) => !selected.has(sha));
 	if (missing.length > 0) {
-		const names = await Promise.all(missing.slice(0, 5).map(async (sha) => `${shorten(sha)} (${messageSubject(await git.rawMessage(sha))})`));
+		const names = await Promise.all(missing.slice(0, 5).map(async (sha) => `${shorten(sha)} (${previewSubject(await git.rawMessage(sha))})`));
 		throw new GecoError(
 			'not-a-chain',
 			`The selection has a gap: ${missing.length === 1 ? '1 commit' : `${missing.length} commits`} between them ${missing.length === 1 ? 'is' : 'are'} not selected.`,
@@ -240,10 +240,12 @@ export async function squashCommits(ctx: RepoContext, options: SquashOptions): P
 	const newestInfo = infos[infos.length - 1]!;
 
 	const defaultMessage = composeSquashMessage(infos.map((info) => info.message));
-	const message = options.message !== undefined ? normalizeMessage(options.message) : defaultMessage;
-	if (!message) {
-		throw new GecoError('nothing-to-do', 'The combined commit would have an empty message - type one.');
-	}
+	// A blank combined message is allowed and stored as one space, exactly
+	// like Rename Commit Message does - useful when the squashed commits
+	// were temporary markers.
+	const message = options.message !== undefined
+		? (normalizeMessage(options.message) || ' ')
+		: (defaultMessage || ' ');
 
 	const preserveCommitterDate = options.preserveCommitterDate ?? settings.preserveCommitterDateOnReword;
 	const createBackup = options.createBackup !== false;
@@ -324,7 +326,7 @@ export async function squashCommits(ctx: RepoContext, options: SquashOptions): P
 		const signed = await Promise.all(ordered.map((sha) => isSignedCommit(git, sha)));
 		const journal = await safety.record({
 			kind: 'squash',
-			summary: `Squashed ${ordered.length} commits into ${shorten(combined)} on ${branchName} ("${messageSubject(message)}")`,
+			summary: `Squashed ${ordered.length} commits into ${shorten(combined)} on ${branchName} ("${previewSubject(message)}")`,
 			undo: {
 				type: 'refs',
 				refs: [{ ref: branchRef, restoreTo: branchSha, expected: newTip }],

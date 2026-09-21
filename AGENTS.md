@@ -37,8 +37,8 @@ npm run package
 
 ## Versioning and Build Rules
 
-- **Up / bump the version on every build** (e.g. `0.4.0` -> `0.4.1` -> `0.4.2`):
-  - Always bump the `"version"` field in `package.json` (and `package-lock.json`) before creating a build.
+- **Up / bump the version on every big commit** (e.g. `0.4.0` -> `0.4.1` -> `0.4.2`):
+  - bump the `"version"` field in `package.json` (and `package-lock.json`).
   - Update all references to the `.vsix` filenames in `README.md`, `AGENTS.md`, and `CHANGELOG.md` to match the new version.
   - **Purpose**: This ensures the user can inspect the version number in VS Code's Extensions view to verify whether the newly built extension is actually installed or if an older build is still cached/active.
 - **VSIX Output Location**:

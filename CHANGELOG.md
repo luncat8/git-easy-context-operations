@@ -4,6 +4,32 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.6
+
+### Fixed
+
+- **A long commit message no longer stretches the prompts and dialogs past the
+  screen.** Every place a commit message is *shown* - the "New commit message
+  (currently ...)" prompt of Rename Commit Message, the Append / Search and
+  Replace prompts, the rename, squash, fast-forward and branch-deletion
+  confirmation dialogs, the result notifications and the undo journal entries -
+  now embeds a one-line preview clipped at 120 characters with an ellipsis
+  instead of the full text. The editable input of Rename still carries the
+  complete message, and the output-channel log keeps the full old/new subjects;
+  only the visible previews are shortened. Confirmation dialogs that list many
+  commits (squash, branch deletion, fast-forward left-behind lists) also cap
+  the list at ten named commits plus "... and N more".
+
+- **Blank commit messages are accepted everywhere, stored as a single space.**
+  Rename Commit Message already did this (0.4.3), but the sibling paths still
+  refused: **Squash** answered *A commit message cannot be empty.* for an
+  empty/whitespace combined message, and **Search and Replace in Commit
+  Message** failed with *The new commit message is empty.* when the replace
+  step emptied the message. Both now store one space instead - useful for
+  temporary commits that should stay quiet - and repeating a blank rename stays
+  a reported no-op. Squashing commits whose messages are all blank also
+  produces the single space instead of an error.
+
 ## 0.4.5
 
 ### Fixed

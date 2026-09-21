@@ -12,6 +12,7 @@
  */
 import type { RepoContext } from './context';
 import { GecoError } from './errors';
+import { previewSubject } from './reword';
 import { shorten, type RemoteRefRestore } from './safety';
 
 /**
@@ -291,7 +292,7 @@ export async function deleteBranch(ctx: RepoContext, options: DeleteBranchOption
 		throw new GecoError(
 			'unmerged-branch',
 			`"${name}" has ${inspection.unmergedCommits} commit${inspection.unmergedCommits === 1 ? '' : 's'} that ${inspection.upstream ? `${inspection.upstream} does not have` : 'HEAD does not have'}.`,
-			`${inspection.unmerged.map((c) => `  ${shorten(c.sha)} ${c.subject}`).join('\n')}\nDelete it anyway and these commits are only reachable through the journal / reflog.`,
+			`${inspection.unmerged.slice(0, 10).map((c) => `  ${shorten(c.sha)} ${previewSubject(c.subject)}`).join('\n')}${inspection.unmerged.length > 10 ? `\n  ... and ${inspection.unmerged.length - 10} more` : ''}\nDelete it anyway and these commits are only reachable through the journal / reflog.`,
 		);
 	}
 

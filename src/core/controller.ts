@@ -16,6 +16,7 @@ import {
 	findRewriteBranch,
 	messageSubject,
 	normalizeMessage,
+	previewSubject,
 	rewordCommitMessage,
 	type MessageEdit,
 	type RewordResult,
@@ -183,8 +184,8 @@ export class Controller {
 					confirmLabel: 'Rename',
 					destructive: true,
 					detail: [
-						`"${messageSubject(oldMessage)}"`,
-						`   -> "${messageSubject(newMessage)}"`,
+						`"${previewSubject(oldMessage)}"`,
+						`   -> "${previewSubject(newMessage)}"`,
 						'',
 						`${total} commit${total === 1 ? '' : 's'} get a new SHA${descendants > 0 ? ` (${info.shortSha} plus ${descendants} after it)` : ''}. Trees, parents and author dates are kept.`,
 						`Recovery point: ${this.settings.backupRefPrefix}... , restore it with "Git Easy Ops: Undo Last Operation".`,
@@ -210,19 +211,24 @@ export class Controller {
 		if (flow === 'replace') {
 			const value = await this.ui.input({
 				title: `Rename ${info.shortSha}`,
-				prompt: `New commit message (currently "${info.subject}")`,
+				// Only a clipped preview goes into the prompt - the full message
+				// stays in the (editable) input value - so a long commit message
+				// cannot stretch the input box past the screen.
+				prompt: `New commit message (currently "${previewSubject(info.message)}")`,
 				value: info.message,
 			});
 			if (value === undefined) {
 				return undefined;
 			}
+			// An empty or whitespace-only replacement is accepted and stored as
+			// a single space - handy for temporary commits that should stay quiet.
 			return { message: value };
 		}
 
 		if (flow === 'append') {
 			const value = await this.ui.input({
 				title: `Append to ${info.shortSha}`,
-				prompt: `Append to "${info.subject}"`,
+				prompt: `Append to "${previewSubject(info.message)}"`,
 				value: '',
 				placeholder: 'add new button',
 			});
@@ -250,7 +256,7 @@ export class Controller {
 		}
 		const replaceWith = await this.ui.input({
 			title: `Search and replace in ${info.shortSha}`,
-			prompt: `Replace "${find}" with`,
+			prompt: `Replace "${previewSubject(find)}" with`,
 			value: find,
 		});
 		if (replaceWith === undefined) {
@@ -307,7 +313,7 @@ export class Controller {
 		}
 		actions.push(ACTIONS.undo);
 
-		const message = `Renamed the message of ${shorten(result.newTargetSha)} on ${where}: "${messageSubject(result.newMessage)}"`
+		const message = `Renamed the message of ${shorten(result.newTargetSha)} on ${where}: "${previewSubject(result.newMessage)}"`
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
@@ -390,7 +396,7 @@ export class Controller {
 
 			const typed = await this.ui.input({
 				title: `Squash into ${info.shortSha}`,
-				prompt: `How many commits before "${info.subject}" should be squashed into it?`,
+				prompt: `How many commits before "${previewSubject(info.message)}" should be squashed into it?`,
 				value: String(Math.min(3, depth)),
 				placeholder: `1 - ${Math.min(50, depth)}`,
 				validate: (value) => (parseSquashCount(value) === undefined ? 'Enter a whole number between 1 and 50.' : undefined),
@@ -432,21 +438,24 @@ export class Controller {
 		if (typed === undefined) {
 			return;
 		}
-		const message = normalizeMessage(typed);
-		if (!message) {
-			await this.ui.message('warn', 'A commit message cannot be empty.');
-			return;
-		}
+		// A blank combined message is accepted and stored as one space, the
+		// same way Rename Commit Message stores one - squashing temporary
+		// commits should be able to stay quiet too.
+		const message = normalizeMessage(typed) || ' ';
 
 		const descendants = await ctx.git.countCommits(`${newest.sha}..refs/heads/${branch}`);
 		const upstream = await ctx.git.upstream(branch);
 		if (this.settings.confirmDestructiveOperations) {
+			// Keep the dialog on one screen: clip every subject and list at
+			// most ten commits by name.
+			const listed = infos.slice(0, 10);
 			const confirmed = await this.ui.confirm(`Squash ${infos.length} commits into one on ${branch}?`, {
 				confirmLabel: 'Squash',
 				destructive: true,
 				detail: [
-					...infos.map((info) => `${info.shortSha}  ${info.subject}`),
-					`   -> one commit: "${messageSubject(message)}"`,
+					...listed.map((info) => `${info.shortSha}  ${previewSubject(info.message)}`),
+					infos.length > listed.length ? `... and ${infos.length - listed.length} more` : '',
+					`   -> one commit: "${previewSubject(message)}"`,
 					'',
 					`${infos.length} commits become 1${descendants > 0 ? `; the ${descendants} commit${descendants === 1 ? '' : 's'} after them are replayed with new SHAs` : ''}. The combined commit keeps the tree of ${newest.shortSha}, so the working tree does not change.`,
 					oldest.parents.length > 1 ? `${oldest.shortSha} is a merge commit: only its first parent is kept.` : '',
@@ -493,7 +502,7 @@ export class Controller {
 		}
 		actions.push(ACTIONS.undo);
 
-		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${messageSubject(result.message)}"`
+		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${previewSubject(result.message)}"`
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
 		const chosen = await this.ui.ask(message, { actions });
@@ -583,7 +592,7 @@ export class Controller {
 					const choice = await this.ui.choose(`Move ${branch} to ${targetInfo.shortSha}?`, {
 						detail: [
 							`${branch}: ${shorten(from)} -> ${shorten(target)}`,
-							`"${targetInfo.subject}"`,
+							`"${previewSubject(targetInfo.message)}"`,
 							'',
 							`Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`,
 							`The old tip is kept on branch "${actualBackupName}".`,
@@ -606,7 +615,7 @@ export class Controller {
 						destructive: !isFastForward,
 						detail: [
 							`${branch}: ${shorten(from)} -> ${shorten(target)}`,
-							`"${targetInfo.subject}"`,
+							`"${previewSubject(targetInfo.message)}"`,
 							'',
 							isFastForward
 								? `Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`
@@ -1772,7 +1781,7 @@ export class Controller {
 							`"${branch}" points at ${shorten(inspection.sha)}.`,
 							inspection.upstream ? `It tracks ${inspection.upstream}.` : 'It has no remote branch.',
 							inspection.unmergedCommits > 0
-								? `${inspection.unmergedCommits} commit(s) exist only here: ${inspection.unmerged.map((c) => `${shorten(c.sha)} ${c.subject}`).join('; ')}`
+								? `${inspection.unmergedCommits} commit(s) exist only here: ${inspection.unmerged.slice(0, 10).map((c) => `${shorten(c.sha)} ${previewSubject(c.subject)}`).join('; ')}${inspection.unmerged.length > 10 ? `; ... and ${inspection.unmerged.length - 10} more` : ''}`
 								: 'Every commit on it is reachable from elsewhere.',
 							'Undo recreates the branch (and pushes it back if the remote copy was deleted).',
 						].join('\n'),
@@ -1874,7 +1883,7 @@ export class Controller {
 						description: branch.remote
 							? `remote branch on ${branch.remote.remote} - ${shorten(branch.sha)}`
 							: `${shorten(branch.sha)}${branch.upstream ? ` - tracks ${branch.upstream}` : ''}`,
-						detail: `already contained in ${branch.keptAliveBy.join(', ')}${branch.subject ? ` - ${branch.subject}` : ''}`,
+						detail: `already contained in ${branch.keptAliveBy.join(', ')}${branch.subject ? ` - ${previewSubject(branch.subject)}` : ''}`,
 						value: branch,
 						picked: true,
 					})),
