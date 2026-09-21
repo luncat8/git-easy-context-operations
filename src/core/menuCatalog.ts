@@ -93,13 +93,20 @@ export interface MenuRow {
 	surfaces: readonly MenuSurfaceId[];
 	/** Cannot be hidden - the way back into the editor. Only `geco.customizeMenus`. */
 	required?: boolean;
+	/**
+	 * Hidden out of the box: a fresh install (no stored `geco.hiddenMenuItems`
+	 * at all) starts with the row hidden, and the editor shows it unchecked
+	 * with that note. An explicitly stored list (even `[]`) is authoritative -
+	 * the user can tick the row back on and it stays on.
+	 */
+	defaultHidden?: boolean;
 }
 
 /** One switch per command, across every menu that shows it. */
 export const MENU_ROWS: readonly MenuRow[] = [
-	{ id: 'geco.rewordCommit', label: 'Reword Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	{ id: 'geco.rewordCommit', label: 'Rename Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.rewordCommitAppend', label: 'Append to Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
-	{ id: 'geco.rewordCommitRename', label: 'Rename Text in Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	{ id: 'geco.rewordCommitRename', label: 'Search and Replace in Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'], defaultHidden: true },
 	{ id: 'geco.squashSelectedCommits', label: 'Squash Selected Commits...', surfaces: ['view.commit'] },
 	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.createBranch', label: 'Create Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch'] },

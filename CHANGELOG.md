@@ -4,6 +4,73 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.2
+
+The graphs actually refresh now, fast-forward can clean up after itself in one
+click, and the commit-message items get names that say what they do.
+
+### Fixed
+
+- **The built-in Source Control Graph refreshes again.** The previous fix
+  (0.4.0) made *our own* view repaint after every operation, but the graph most
+  users are looking at is the **built-in Source Control Graph**, which belongs
+  to the `vscode.git` extension and only redraws when *that* extension
+  re-syncs its state - our own `onDidChangeTreeData` cannot touch it. After
+  every operation (and every undo, force push, ...) the extension now asks the
+  git extension to re-sync the open repository (`git.refresh` with the
+  repository root as the hint, so it never pops a repository picker), and a
+  watcher on the repository's **common git directory** picks up changes made
+  elsewhere - another window, the terminal, a colleague's push - which also
+  covers operations journaled by other windows (the journal lives in that
+  directory). Bursts are coalesced (~150 ms), and every refresh is logged to
+  the *Git Easy Ops* output channel with its reason, so a stale graph is no
+  longer a mystery: the log shows whether a refresh happened and why.
+- **Branch badges under an expanded commit are re-queried from git.** The
+  badges (and their context menus) were read from the row's ref snapshot,
+  which was painted when the row was first fetched - a branch created or
+  deleted in the meantime showed up stale until the row itself was repainted.
+  Expanding a commit row now asks the controller for the branches at that sha
+  (falling back to the snapshot if the query fails).
+
+### Added
+
+- **Fast-forward cleans up after itself.** When the move is a true
+  fast-forward, the confirmation is now a three-button dialog -
+  **Cancel | Move | Move and remove "old"** - so the result the user usually
+  wants (branch moved *and* the redundant backup gone) is one click. The
+  removal is only offered when it cannot possibly lose anything: the move must
+  be a true fast-forward (the old tip has no commit of its own), and the backup
+  branch must be a *new* one (a reused or pre-existing branch keeps its own
+  commits). The actual removal goes through the same re-verifying,
+  independently journaled path as **Remove Redundant Branches...** - one
+  **Undo** brings the backup back without touching the move, and a second
+  **Undo** rolls the move back. Diverged moves keep the old two-button
+  confirmation (the backup would carry real commits).
+
+### Changed
+
+- **"Reword Commit Message..." is now "Rename Commit Message..."** - the
+  command id (`geco.rewordCommit`) is unchanged, so no menu configuration or
+  keybinding breaks; the confirmations, prompts, progress and journal summaries
+  say *rename* now ("Renamed the message of …").
+- **"Rename Text in Commit Message..." is now "Search and Replace in Commit
+  Message..."** - the same find/replace operation under a name that
+  describes it. It is also **hidden by default** (the box in
+  **Customize Context Menus...** starts unchecked, marked *hidden by
+  default*); ticking it keeps it, and an explicit `geco.hiddenMenuItems: []`
+  means "show everything". The command id (`geco.rewordCommitRename`) is
+  unchanged.
+- **`geco.hiddenMenuItems` no longer declares a manifest default.** An absent
+  value means "the built-in defaults apply" (the default-hidden rows hidden);
+  a stored value - even `[]` - is authoritative, so re-enabling a row can
+  never be silently reverted by a settings default.
+- **"Reset Hidden Menu Items" is now "Restore Default Menu Items"** and
+  restores the built-in defaults (clearing the stored list in every scope
+  where one exists) instead of forcing everything visible.
+- **VSIX Output Location**: artifacts are named
+  `dist/git-easy-context-operations-0.4.2.vsix` /
+  `dist/git-easy-context-operations-0.4.2+graph.vsix`.
+
 ## 0.4.1
 
 ### Added

@@ -57,6 +57,27 @@ export function splitUnknownIds(hidden: readonly string[], rows: readonly MenuRo
 	return { known, unknown };
 }
 
+/** The ids hidden out of the box (rows flagged `defaultHidden` in the catalogue). */
+export function defaultHiddenIds(rows: readonly MenuRow[] = MENU_ROWS): string[] {
+	return rows.filter((row) => row.defaultHidden).map((row) => row.id);
+}
+
+/**
+ * The hidden list a *stored* setting value means:
+ *
+ * - `undefined` - never stored (fresh install, or the user reset): the
+ *   catalogue default applies (the `defaultHidden` rows are hidden);
+ * - any array - authoritative, exactly as stored, even `[]`, which means
+ *   "show everything, including the default-hidden rows".
+ *
+ * The vscode layer therefore stores the setting as `undefined` whenever the
+ * current choice equals the default, so the manifest needs no `default` at
+ * all (a manifest default would silently re-hide a row the user re-enabled).
+ */
+export function effectiveHiddenList(stored: readonly string[] | undefined, rows: readonly MenuRow[] = MENU_ROWS): string[] {
+	return stored === undefined ? defaultHiddenIds(rows) : [...stored];
+}
+
 /** Rows the user hid, in catalogue order (skipping required and unknown ids). */
 export function hiddenRows(hidden: readonly string[], rows: readonly MenuRow[] = MENU_ROWS): MenuRow[] {
 	const hiddenSet = new Set(hidden);

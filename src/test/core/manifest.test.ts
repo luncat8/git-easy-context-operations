@@ -361,7 +361,15 @@ describe('manifest - views and configuration', () => {
 			const property = properties[configKey];
 			assert.ok(property, `${configKey} is missing`);
 			const expected = DEFAULT_SETTINGS[key];
-			assert.deepEqual(property.default, expected, `${configKey} default`);
+			if (configKey === 'geco.hiddenMenuItems') {
+				// No manifest default on purpose: an absent value means "the
+				// catalogue defaults apply" (default-hidden rows hidden). A
+				// manifest `default: []` would instead mean "show everything"
+				// and could silently re-hide a row the user re-enabled.
+				assert.equal(property.default, undefined, `${configKey} must not carry a manifest default`);
+			} else {
+				assert.deepEqual(property.default, expected, `${configKey} default`);
+			}
 			if (property.enum) {
 				assert.ok(property.enum.includes(expected as never), `${configKey} default is not in its enum`);
 			}

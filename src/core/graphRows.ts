@@ -78,7 +78,7 @@ export function buildGraphRows(
 	return commits.map((commit, index) => {
 		const laneRow = lanes[index]!;
 		const atCommit = (bySha.get(commit.sha) ?? []).slice().sort(sortRefs);
-		const refs = atCommit.filter((ref) => ref.kind === 'branch').map(toRefRow);
+		const refs = refRowsAt(atCommit, commit.sha);
 		const refsLabel = atCommit
 			.map((ref) => (ref.isHead ? `${ref.name} (HEAD)` : ref.name))
 			.join(', ');
@@ -97,6 +97,16 @@ export function buildGraphRows(
 			tooltip: commitTooltip(commit, refsLabel, now),
 		};
 	});
+}
+
+/**
+ * The local-branch badges of one commit, straight from a ref list: the rows
+ * the tree view expands under a commit, re-queried from git so a stale element
+ * can never show a branch that was deleted (or a missing one that was created)
+ * in the meantime.
+ */
+export function refRowsAt(refs: readonly RefInfo[], sha: string): GraphRefRow[] {
+	return refs.filter((ref) => ref.kind === 'branch' && ref.sha === sha).map(toRefRow);
 }
 
 function toRefRow(ref: RefInfo): GraphRefRow {

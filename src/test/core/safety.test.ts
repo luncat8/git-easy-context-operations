@@ -24,7 +24,7 @@ describe('safety - journal', () => {
 
 			const entry = await safety.record({
 				kind: 'reword',
-				summary: 'Reworded abc1234 on main',
+				summary: 'Renamed the message of abc1234 on main',
 				undo: { type: 'refs', refs: [{ ref: 'refs/heads/main', restoreTo: shas.v04, expected: shas.v04 }] },
 			});
 			assert.ok(fs.existsSync(file));
