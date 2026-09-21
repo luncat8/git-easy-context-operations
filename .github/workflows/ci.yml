@@ -19,6 +19,16 @@ jobs:
 
       - run: npm ci
 
+      # The "real git-filter-repo" suite skips itself when the tool is missing;
+      # installing it here is what makes the rewrite arguments get checked
+      # against the real tool instead of only against the fake runner.
+      - name: Install git-filter-repo
+        run: |
+          python3 -m pip install git-filter-repo \
+            || python3 -m pip install --break-system-packages git-filter-repo \
+            || echo "::warning::git-filter-repo could not be installed - that suite will skip"
+          git filter-repo --version || true
+
       - name: Type-check
         run: npm run check-types
 

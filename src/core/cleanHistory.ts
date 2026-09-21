@@ -104,6 +104,27 @@ export interface CommandsOptions {
 	filterRepoCommand?: readonly string[];
 	/** Refs the backup bundle should cover (empty = `--all`; hidden refs are not covered by `--all`). */
 	bundleRefs?: readonly string[];
+	/**
+	 * The refs the rewrite covers, as full ref names (`refs/heads/main`,
+	 * `refs/remotes/origin/x`, `refs/tags/v1`). Only these are handed to
+	 * `--refs`, so anything else - the recovery points under `refs/geco/` -
+	 * keeps pointing at the commits it recorded.
+	 *
+	 * The names have to be *ref names*: `git-filter-repo` parses `--refs` with
+	 * argparse and stops collecting at the first token that looks like an
+	 * option, so the `--branches --remotes --tags` flags `git log`/`rev-list`
+	 * take are rejected outright (`error: argument --refs: expected at least
+	 * one argument`, exit 2) and nothing gets rewritten. They are also not
+	 * expanded by a shell here, so globs (`refs/heads/*`) would be silently
+	 * ignored - which rewrites *every* ref, recovery points included.
+	 *
+	 * Empty (or longer than {@link MAX_EXPLICIT_FILTER_REPO_REFS}) means no
+	 * `--refs` limit: everything is rewritten, and {@link
+	 * CleanHistoryCommands.recoveryRefsProtected} says so.
+	 */
+	rewriteRefs?: readonly string[];
+	/** Overrides {@link MAX_EXPLICIT_FILTER_REPO_REFS} (tests, tight platforms). */
+	maxRewriteRefs?: number;
 }
 
 export interface CleanHistoryCommands {
@@ -117,6 +138,13 @@ export interface CleanHistoryCommands {
 	after: string[][];
 	/** Refs the rewrite leaves alone (empty = no `--refs` limit, everything is rewritten). */
 	refsToKeep: string[];
+	/**
+	 * True when the `--refs` limit is in place, i.e. the refs in {@link
+	 * refsToKeep} survive the rewrite and **Undo** keeps working. False when
+	 * the rewrite covers every ref - only possible with a warning, because
+	 * filter-repo repacks at the end and the old objects are gone afterwards.
+	 */
+	recoveryRefsProtected: boolean;
 	/** Remotes that have to be re-added after the rewrite. */
 	droppedRemotes: { name: string; url: string }[];
 	/** The script as one copy-pasteable block. */
@@ -138,6 +166,13 @@ export const HISTORY_REF_SELECTION = ['--branches', '--remotes', '--tags'] as co
 
 /** Above this many refs the bundle falls back to `--all` (argument list limits). */
 export const MAX_EXPLICIT_BUNDLE_REFS = 500;
+
+/**
+ * Above this many refs the rewrite drops the `--refs` limit instead of
+ * listing them (argument list limits: Windows caps a command line at 32 KiB,
+ * and a repository with a few thousand tags would blow through that).
+ */
+export const MAX_EXPLICIT_FILTER_REPO_REFS = 500;
 
 /** Above this many objects the (best-effort) size analysis is skipped. */
 export const MAX_OBJECTS_TO_SIZE = 300_000;
@@ -450,10 +485,15 @@ export function buildCommands(options: CommandsOptions): CleanHistoryCommands {
 		'--replace-refs',
 		'delete-no-add',
 	];
-	if (refsToKeep.length > 0) {
-		// Only rewrite the public refs: the recovery points under refs/geco/
-		// must keep pointing at the commits they recorded, or Undo breaks.
-		filterRepoArgs.push('--refs', ...HISTORY_REF_SELECTION);
+	const rewriteRefs = sanitizeRewriteRefs(options.rewriteRefs);
+	const limit = options.maxRewriteRefs ?? MAX_EXPLICIT_FILTER_REPO_REFS;
+	const recoveryRefsProtected = refsToKeep.length > 0 && rewriteRefs.length > 0 && rewriteRefs.length <= limit;
+	if (recoveryRefsProtected) {
+		// Only rewrite the public refs, by name: the recovery points under
+		// refs/geco/ must keep pointing at the commits they recorded, or Undo
+		// breaks. They cannot be excluded any other way - filter-repo has no
+		// "everything except", and `--refs` takes ref names, not rev-list flags.
+		filterRepoArgs.push('--refs', ...rewriteRefs);
 	}
 	if (options.forceFilterRepo !== false) {
 		// filter-repo insists on a fresh clone unless told otherwise.
@@ -471,8 +511,8 @@ export function buildCommands(options: CommandsOptions): CleanHistoryCommands {
 	}
 
 	all.push(
-		refsToKeep.length > 0
-			? `# ${step++}. Remove every dead path from the public refs${keptPrefix(refsToKeep) ? ` (everything under ${keptPrefix(refsToKeep)}/ is left alone)` : ''}.`
+		recoveryRefsProtected
+			? `# ${step++}. Remove every dead path from the ${rewriteRefs.length} public ref(s)${keptPrefix(refsToKeep) ? ` (everything under ${keptPrefix(refsToKeep)}/ is left alone)` : ''}.`
 			: `# ${step++}. Remove every dead path from all refs.`,
 		shellCommand(filterRepoArgs),
 	);
@@ -529,7 +569,20 @@ export function buildCommands(options: CommandsOptions): CleanHistoryCommands {
 		all.push('# No remote is configured - nothing to push.');
 	}
 
-	return { all, bundle: bundleCommand, filterRepo: filterRepoArgs, after, refsToKeep, droppedRemotes, script: `${all.join('\n')}\n` };
+	return { all, bundle: bundleCommand, filterRepo: filterRepoArgs, after, refsToKeep, recoveryRefsProtected, droppedRemotes, script: `${all.join('\n')}\n` };
+}
+
+/**
+ * The ref names that may be handed to `git-filter-repo --refs`, deduped and in
+ * `git for-each-ref` order. Anything that is not a plain ref name is dropped:
+ * a token starting with `-` would end argparse's argument collection (that is
+ * the bug that made every cleanup fail with "argument --refs: expected at
+ * least one argument"), and a glob would be passed through to `git rev-list`
+ * unexpanded, which rev-list rejects - filter-repo ignores that failure and
+ * then rewrites *every* ref, recovery points included.
+ */
+export function sanitizeRewriteRefs(refs: readonly string[] | undefined): string[] {
+	return [...new Set((refs ?? []).filter((ref) => /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(ref)))];
 }
 
 /** `git bundle create <file> <refs>` arguments - every ref, or `--all` when there are too many. */

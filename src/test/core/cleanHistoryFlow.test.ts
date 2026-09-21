@@ -436,7 +436,12 @@ describe('controller - cleanHistory flows', () => {
 
 			// The rewrite was limited to the public refs...
 			assert.ok(fake.calls[1]!.includes('--refs'), 'the recovery refs are excluded');
-			assert.equal(fake.calls[1]![fake.calls[1]!.indexOf('--refs') + 1], '--branches');
+			assert.equal(fake.calls[1]![fake.calls[1]!.indexOf('--refs') + 1], 'refs/heads/main', 'named, not a rev-list flag');
+			assert.ok(
+				!fake.calls[1]!.some((arg) => arg.startsWith('-') && arg !== '--invert-paths' && arg !== '--paths-from-file'
+					&& arg !== '--replace-refs' && arg !== '--refs' && arg !== '--force'),
+				'git-filter-repo only gets flags it knows',
+			);
 			// ...and the bundle covered them, so they are recoverable.
 			const bundle = path.join(repo.root, bundlesIn(repo.root)[0]!);
 			const list = await repo.git(['bundle', 'list-heads', bundle]);

@@ -2,8 +2,17 @@
 
 ## Build
 
-By default you only need the graph build - it is a superset of the publishable build
-(the same extension, plus the proposed-API menus):
+The one-command way (Linux, macOS, Windows) - installs what is missing, builds
+both `.vsix` files into `dist/`, and leaves no proposed-API manifest behind:
+
+```bash
+python3 build.py            # python build.py on Windows
+python3 build.py --install  # ...and install the graph build into VS Code
+python3 build.py --tests    # run the suite first
+```
+
+Or with npm. By default you only need the graph build - it is a superset of the
+publishable build (the same extension, plus the proposed-API menus):
 
 ```bash
 npm install
@@ -33,4 +42,4 @@ npm run package
   - Update all references to the `.vsix` filenames in `README.md`, `AGENTS.md`, and `CHANGELOG.md` to match the new version.
   - **Purpose**: This ensures the user can inspect the version number in VS Code's Extensions view to verify whether the newly built extension is actually installed or if an older build is still cached/active.
 - **VSIX Output Location**:
-  - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/git-easy-context-operations-0.4.3+graph.vsix`).
+  - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/...vsix`).

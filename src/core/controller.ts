@@ -1169,6 +1169,11 @@ export class Controller {
 			}
 
 			const confirmation = describeCleanConfirmation(analysis, facts, { bundleFile: plan.bundleFile, pathsFile });
+			if (facts.recoveryRefs.length > 0 && !plan.commands.recoveryRefsProtected) {
+				confirmation.detail +=
+					`\n\nToo many refs to list them all: the ${facts.recoveryRefs.length} recovery point(s) under ${this.settings.backupRefPrefix}\n`
+					+ 'are rewritten too, so Undo of earlier operations stops working. The bundle is the way back.';
+			}
 			if (this.settings.confirmDestructiveOperations) {
 				const confirmed = await this.ui.confirm(confirmation.message, {
 					confirmLabel: 'Clean History',
@@ -1206,25 +1211,36 @@ export class Controller {
 		// has to include the hidden recovery refs - `--all` skips them, and they
 		// are the Undo of every earlier operation.
 		const bundleFile = defaultBundleFile(root);
-		const bundleRefs = [
+		const publicRefs = [
 			...new Set([
 				...(await ctx.git.refsUnder('refs/heads')).map((ref) => ref.name),
 				...(await ctx.git.refsUnder('refs/remotes')).map((ref) => ref.name),
 				...(await ctx.git.refsUnder('refs/tags')).map((ref) => ref.name),
-				...facts.recoveryRefs,
 			]),
 		];
+		const bundleRefs = [...new Set([...publicRefs, ...facts.recoveryRefs])];
 		const commands = buildCommands({
 			pathsFile,
 			bundleFile,
 			bundleRefs,
 			refsToKeep: facts.recoveryRefs,
+			// The rewrite is limited by *name*: `git-filter-repo --refs` takes
+			// ref names, not the `--branches --remotes --tags` flags the scan
+			// uses (see CommandsOptions.rewriteRefs).
+			rewriteRefs: publicRefs,
 			droppedRemotes: facts.remotes,
 			forceFilterRepo: true,
 			// pip --user installs put `git-filter-repo` on PATH without git
 			// finding it as a subcommand - the probe remembers which form works.
 			filterRepoCommand: probe.command,
 		});
+		if (facts.recoveryRefs.length > 0 && !commands.recoveryRefsProtected) {
+			this.ui.log(
+				`The rewrite cannot be limited to the ${publicRefs.length} public refs (too many to list) - `
+				+ `the ${facts.recoveryRefs.length} recovery point(s) under ${this.settings.backupRefPrefix} are rewritten too, `
+				+ 'so "Undo Last Operation" stops working for earlier operations. The backup bundle still holds them.',
+			);
+		}
 
 		return {
 			analysis,

@@ -4,6 +4,51 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.4
+
+### Fixed
+
+- **Clean History (Remove Dead Paths)... now actually rewrites the history.**
+  On every repository that had a Git Easy Ops recovery point under `refs/geco/`
+  - i.e. after any reword, squash, branch or fast-forward operation - the
+  rewrite died with *git filter-repo failed - the history was not rewritten.*
+  The command handed `git-filter-repo` the ref selection
+  `--refs --branches --remotes --tags`, but `--refs` is parsed by argparse,
+  which stops collecting values at the first token that looks like an option:
+  `git-filter-repo` answered `error: argument --refs: expected at least one
+  argument` and exited 2, before touching anything. `--refs` takes **ref
+  names**, not rev-list flags, so the plan now lists the public refs by name
+  (`refs/heads/...`, `refs/remotes/...`, `refs/tags/...`) - the recovery points
+  stay out of the rewrite exactly as intended, and **Undo** keeps working.
+  Repositories without any recovery point were unaffected (they never passed
+  `--refs` at all), which is why the failure looked random.
+- **Glob patterns are rejected as ref names too.** `--refs 'refs/heads/*'` is
+  handed to `git rev-list` unexpanded, which rev-list refuses - and
+  `git-filter-repo` ignores that failure and then rewrites *every* ref,
+  recovery points included. Ref names are now validated before they are used.
+- When a repository has more public refs than fit on a command line (500, the
+  same limit the backup bundle already used), the `--refs` limit is dropped
+  instead of silently producing a broken command: the confirmation dialog and
+  the output log say that the recovery points are rewritten too, so Undo of
+  earlier operations stops working and the backup bundle is the way back.
+
+### Added
+
+- `build.py` - one cross-platform command (Linux, macOS, Windows) that checks
+  for Python, git and Node.js, installs the npm packages when they are missing
+  (and Node.js itself with `--install-node`), then builds both `.vsix` files
+  into `dist/`. `--install` installs the graph build, `--tests` runs the suite
+  first, `--clean` starts from scratch. It verifies on the way out that
+  `package.json` declares no `enabledApiProposals`, so a crash halfway through
+  the graph build cannot leave an unpublishable manifest behind.
+- A test that runs the **real** `git-filter-repo` (skipped when the tool is not
+  installed; CI installs it) and checks that the dead paths are gone while the
+  recovery refs still point where they did. The fake runner used everywhere
+  else accepts any argv, so it could never have caught this.
+- The long reference (every command, menu surface, setting and known limit)
+  moved out of `README.md` into `docs/DETAILS.md`; the README is the short
+  version the Marketplace listing shows.
+
 ## 0.4.3
 
 - Rename the menu customization panel to **Git Easy Ops Menu Editor**.

@@ -14,6 +14,7 @@ import {
 	buildCommands,
 	cleanWarnings,
 	collectCleanFacts,
+	deadPathsFileFor,
 	deadPathSizes,
 	describeCleanConfirmation,
 	diffDeadPaths,
@@ -22,6 +23,7 @@ import {
 	keptPrefix,
 	parsePathList,
 	shellCommand,
+	sanitizeRewriteRefs,
 	unquoteGitPath,
 	writeDeadPathsFile,
 	type CleanFacts,
@@ -154,14 +156,16 @@ describe('cleanHistory - pure helpers', () => {
 			pathsFile: '/tmp/dead.txt',
 			bundleFile: '/tmp/backup.bundle',
 			refsToKeep: ['refs/geco/reword/main/x'],
+			rewriteRefs: ['refs/heads/main', 'refs/remotes/origin/main', 'refs/tags/v1'],
 			droppedRemotes: [{ name: 'origin', url: 'https://example.com/r.git' }],
 			forceFilterRepo: true,
 		});
 		assert.deepEqual(commands.bundle, ['git', 'bundle', 'create', '/tmp/backup.bundle', '--all']);
 		assert.deepEqual(commands.filterRepo, [
 			'git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'delete-no-add',
-			'--refs', '--branches', '--remotes', '--tags', '--force',
+			'--refs', 'refs/heads/main', 'refs/remotes/origin/main', 'refs/tags/v1', '--force',
 		]);
+		assert.equal(commands.recoveryRefsProtected, true, 'the recovery refs are left out of the rewrite');
 		assert.ok(commands.all.indexOf('# 1. Backup - the rewrite cannot be undone by git afterwards.') >= 0, 'the backup comes first');
 		assert.ok(commands.script.includes('git remote add origin'), 'the removed remote is re-added');
 		assert.ok(commands.script.includes('--force-with-lease'), 'publishing uses the lease, not a blind --force');
@@ -175,6 +179,52 @@ describe('cleanHistory - pure helpers', () => {
 		assert.deepEqual(plain.filterRepo, ['git', 'filter-repo', '--invert-paths', '--paths-from-file', '/tmp/dead.txt', '--replace-refs', 'delete-no-add', '--force']);
 		assert.equal(plain.bundle, undefined);
 		assert.ok(plain.script.includes('No remote is configured'), 'nothing to push is said, not guessed');
+	});
+
+	it('hands --refs ref names only: git-filter-repo rejects the rev-list flags', () => {
+		// `git-filter-repo` parses `--refs` with argparse, which stops collecting
+		// at the first token that looks like an option. `--refs --branches
+		// --remotes --tags` therefore died with
+		//   git-filter-repo: error: argument --refs: expected at least one argument
+		// (exit 2) - the "the history was not rewritten" error every repository
+		// with a recovery point ran into.
+		const commands = buildCommands({
+			pathsFile: '/tmp/dead.txt',
+			refsToKeep: ['refs/geco/reword/main/x'],
+			rewriteRefs: ['refs/heads/main', 'refs/remotes/origin/main'],
+		});
+		const afterRefs = commands.filterRepo.slice(commands.filterRepo.indexOf('--refs') + 1);
+		// Every token between `--refs` and the next flag is a value argparse
+		// collects - a `-` there ends the list and filter-repo exits 2.
+		const values = afterRefs.slice(0, afterRefs.findIndex((value) => value.startsWith('-')));
+		assert.equal(values.length, 2, 'both refs are collected as values');
+		for (const value of values) {
+			assert.ok(!value.startsWith('-'), `"${value}" would end argparse's argument collection`);
+		}
+		assert.deepEqual(afterRefs, ['refs/heads/main', 'refs/remotes/origin/main', '--force']);
+		assert.ok(!commands.filterRepo.includes('--branches'), 'no rev-list flag reaches filter-repo');
+		assert.ok(!commands.filterRepo.includes('*'), 'no glob either: rev-list does not expand it');
+	});
+
+	it('drops non-ref tokens, and the --refs limit when the ref list is too long', () => {
+		assert.deepEqual(
+			sanitizeRewriteRefs(['refs/heads/main', 'refs/heads/main', '--branches', 'refs/heads/*', '', 'refs/tags/v1']),
+			['refs/heads/main', 'refs/tags/v1'],
+		);
+
+		const tooMany = buildCommands({
+			pathsFile: '/tmp/dead.txt',
+			refsToKeep: ['refs/geco/a'],
+			rewriteRefs: ['refs/heads/a', 'refs/heads/b', 'refs/heads/c'],
+			maxRewriteRefs: 2,
+		});
+		assert.ok(!tooMany.filterRepo.includes('--refs'), 'nothing is listed, so everything is rewritten');
+		assert.equal(tooMany.recoveryRefsProtected, false, '...and the caller is told Undo will not survive');
+
+		// With recovery refs but no public refs at all there is nothing to limit.
+		const noPublic = buildCommands({ pathsFile: '/tmp/dead.txt', refsToKeep: ['refs/geco/a'] });
+		assert.ok(!noPublic.filterRepo.includes('--refs'));
+		assert.equal(noPublic.recoveryRefsProtected, false);
 	});
 
 });
@@ -311,9 +361,13 @@ describe('cleanHistory - scanning real repositories', () => {
 			const facts = await collectCleanFacts(withRefs.ctx, DEFAULT_SETTINGS.backupRefPrefix);
 			assert.deepEqual(facts.recoveryRefs, ['refs/geco/reword/main/20260919T120000Z-abcdef1234']);
 
-			const commands = buildCommands({ pathsFile: '/tmp/dead.txt', refsToKeep: facts.recoveryRefs });
+			const publicRefs = (await withRefs.git(['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes', 'refs/tags']))
+				.stdout.split('\n').filter(Boolean);
+			const commands = buildCommands({ pathsFile: '/tmp/dead.txt', refsToKeep: facts.recoveryRefs, rewriteRefs: publicRefs });
 			assert.ok(commands.filterRepo.includes('--refs'), 'the rewrite is limited to the public refs');
-			assert.equal(commands.filterRepo[commands.filterRepo.indexOf('--refs') + 1], '--branches');
+			assert.equal(commands.filterRepo[commands.filterRepo.indexOf('--refs') + 1], 'refs/heads/main', 'by name, not by rev-list flag');
+			assert.ok(!commands.filterRepo.includes(facts.recoveryRefs[0]!), 'the recovery ref is not in the list');
+			assert.equal(commands.recoveryRefsProtected, true);
 			assert.match(formatCleanReport(analysis, facts), /recovery point/);
 		} finally {
 			withRefs.cleanup();
@@ -386,5 +440,83 @@ describe('cleanHistory - scanning real repositories', () => {
 		assert.match(cleanWarnings({ historicalPaths: [], alivePaths: [], deadPaths: ['x'], quotedPaths: false }, busy).join('\n'), /worktree/);
 		await repo.gitOk(['worktree', 'remove', '--force', worktreeDir]);
 		await repo.gitOk(['stash', 'clear']);
+	});
+});
+
+/**
+ * The rewrite against the *real* `git-filter-repo`, not a stand-in: the fake
+ * runner in `cleanHistoryFlow.test.ts` accepts any argv, so it could never
+ * notice that `git-filter-repo` rejects the arguments it is given. This suite
+ * is skipped when the tool is not installed (see the CI job that installs it).
+ */
+describe('cleanHistory - the real git-filter-repo', () => {
+	let repo: TempRepo;
+	let available = false;
+
+	before(async () => {
+		repo = await createTempRepo();
+		available = (await repo.git(['filter-repo', '--version'])).exitCode === 0;
+		if (!available) {
+			repo.cleanup();
+		}
+	});
+	after(() => {
+		if (available) {
+			repo.cleanup();
+		}
+	});
+
+	it('removes the dead paths and leaves the recovery refs where they were', async (t) => {
+		if (!available) {
+			t.skip('git-filter-repo is not installed');
+			return;
+		}
+		const real = await createTempRepo();
+		try {
+			const v1 = await real.commit('v1', { 'keep.txt': 'keep\n', 'gone.bin': 'x'.repeat(512) });
+			await real.commit('v2', { 'keep.txt': 'keep2\n' });
+			await real.gitOk(['rm', '--quiet', 'gone.bin']);
+			await real.commit('v3 drop it');
+			await real.gitOk(['tag', 'release']); // a tag on the *newest* commit - a tag on v1 would keep gone.bin alive
+			// What every reword/squash/branch operation leaves behind.
+			await real.gitOk(['update-ref', 'refs/geco/reword/main/20260919T120000Z-abcdef1234', v1]);
+			// A remote-tracking ref, so the rewrite covers refs/remotes too.
+			const bare = path.join(real.root, 'remote.git');
+			fs.mkdirSync(bare, { recursive: true });
+			await real.git(['init', '--quiet', '--bare', bare]);
+			await real.gitOk(['remote', 'add', 'origin', bare]);
+			await real.gitOk(['push', '--quiet', 'origin', 'main']);
+			await real.gitOk(['fetch', '--quiet', 'origin']);
+
+			const analysis = await analyzeDeadPaths(real.ctx, { sizeAnalysis: false });
+			assert.deepEqual(analysis.deadPaths, ['gone.bin']);
+
+			const facts = await collectCleanFacts(real.ctx, DEFAULT_SETTINGS.backupRefPrefix);
+			const publicRefs = (await real.git(['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes', 'refs/tags']))
+				.stdout.split('\n').filter(Boolean);
+			assert.ok(publicRefs.includes('refs/heads/main') && publicRefs.includes('refs/remotes/origin/main'));
+
+			const pathsFile = await deadPathsFileFor(real.ctx);
+			await writeDeadPathsFile(pathsFile, analysis.deadPaths);
+			const commands = buildCommands({ pathsFile, refsToKeep: facts.recoveryRefs, rewriteRefs: publicRefs });
+			assert.equal(commands.recoveryRefsProtected, true);
+
+			const run = await real.git(commands.filterRepo.slice(1)); // `git` is the exec
+			assert.equal(run.exitCode, 0, `git filter-repo: ${run.stderr.trim() || run.stdout.trim()}`);
+
+			const remaining = (await real.git(['log', '--branches', '--remotes', '--tags', '--name-only', '--pretty=format:']))
+				.stdout.split('\n').filter(Boolean);
+			assert.ok(!remaining.includes('gone.bin'), 'the dead path is gone from every public ref');
+			assert.ok(remaining.includes('keep.txt'), 'the live path survived');
+
+			assert.equal(
+				await real.gitOk(['rev-parse', 'refs/geco/reword/main/20260919T120000Z-abcdef1234']),
+				v1,
+				'the recovery point still points at the commit it recorded, so Undo keeps working',
+			);
+			assert.equal(await real.git(['rev-parse', '--verify', '--quiet', v1]).then((r) => r.exitCode), 0, 'and that commit still exists');
+		} finally {
+			real.cleanup();
+		}
 	});
 });
