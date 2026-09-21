@@ -1269,3 +1269,15 @@ describe('controller - squash flows', () => {
 		}
 	});
 });
+
+for (const message of ['', ' ', '  \n\t']) {
+ it(`controller accepts blank rename ${JSON.stringify(message)}`, async () => {
+  const { repo } = await createLinearRepo();
+  try {
+   const ui = new FakeUI({ inputs: [message] });
+   await controllerFor(ui, repo).rewordCommit(repo.dir, [await repo.sha('main')], 'replace');
+   assert.equal(await repo.ctx.git.rawMessage('main'), ' ');
+   assert.equal(ui.confirmCalls.length, 1);
+  } finally { repo.cleanup(); }
+ });
+}

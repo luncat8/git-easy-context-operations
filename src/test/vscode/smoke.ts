@@ -44,6 +44,7 @@ const EXPECTED_COMMANDS = [
 	'geco.enableGraphMenu',
 	'geco.customizeMenus',
 	'geco.menuResetAll',
+	'geco.menuCopyItemName',
 ];
 
 export async function run(): Promise<void> {
@@ -52,6 +53,7 @@ export async function run(): Promise<void> {
 		['the extension activates', testActivation],
 		['every contributed command is registered', testCommands],
 		['refresh works without a repository', testRefresh],
+		['menu item names can be copied', testCopyMenuItemName],
 		['a command reaches git and copies a sha', testCopySha],
 	];
 
@@ -157,4 +159,16 @@ function gitEnv(dir: string): NodeJS.ProcessEnv {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function testCopyMenuItemName(): Promise<void> {
+ const previous = await vscode.env.clipboard.readText();
+ try {
+  await vscode.commands.executeCommand('geco.menuCopyItemName', {
+   nodeKind: 'row', label: 'Rename Commit Message...',
+  });
+  assert.equal(await vscode.env.clipboard.readText(), 'Rename Commit Message...');
+  await vscode.commands.executeCommand('geco.menuCopyItemName');
+  assert.equal(await vscode.env.clipboard.readText(), 'Rename Commit Message...');
+ } finally { await vscode.env.clipboard.writeText(previous); }
 }

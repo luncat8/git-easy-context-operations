@@ -98,7 +98,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.2+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.3+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -157,7 +157,7 @@ grants the proposals listed in `enabledApiProposals`.
 
 ### Customize Context Menus...
 
-`Git Easy Ops: Customize Context Menus...` reveals the hidden **"Git Easy Ops Menus"**
+`Git Easy Ops: Customize Context Menus...` reveals the hidden **"Git Easy Ops Menu Editor"**
 view in the Source Control sidebar: one collapsible surface per real menu, one
 checkbox per command. It is a plain native tree - no webview, nothing loaded
 until you open it.
@@ -188,12 +188,12 @@ no toolchain needed:
 
 ```bash
 # the everyday build: sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.2.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.2.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.3.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.3.vsix
 
 # the graph flavour: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.2+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.2+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.3+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.3+graph.vsix
 ```
 
 For the graph flavour, allow the proposed API once - inside the editor run **Git
@@ -205,7 +205,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.2.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.3.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
@@ -318,3 +318,33 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
+### Blank temporary commit messages
+
+**Rename Commit Message...** accepts empty or whitespace-only input and stores
+one space. Escape still cancels. As with any rename, affected commit SHAs change;
+recovery points and Undo Last Operation remain available.
+
+In **Git Easy Ops Menu Editor**, right-click an action and choose **Copy item
+name** to copy its displayed title for a chat or bug report.
+
+### Release channels
+
+Keep the default manifest free of proposed APIs for Marketplace publication.
+The `+graph` VSIX is an experimental, manually installed alternative for users
+who want the built-in Source Control Graph menus. Proposed APIs may change;
+do not publish that flavor to the Marketplace (including as a pre-release).
+See [VS Code's proposed API policy](https://code.visualstudio.com/api/advanced-topics/using-proposed-api).
+
+Before the first Marketplace release:
+
+1. Run `npm ci`, `npm test`, and the VS Code smoke test
+   (`xvfb-run -a npm run test:vscode` on Linux with Xvfb installed).
+2. Manually check the Menu Editor, clipboard action, blank commit rename and
+   undo, in both flavors. Test the declared minimum VS Code version as well.
+3. Bump the version before a new build, then package the stable flavor with
+   `npm run package`. Check its VSIX contents and Marketplace listing text.
+4. Sign in to the Marketplace publisher management page, create/verify the
+   `luncat8` publisher, and upload the stable VSIX. Keep credentials out of Git.
+5. Distribute the separately built `npm run package:graph` VSIX through a
+   GitHub release, with the proposed-API opt-in instructions above.

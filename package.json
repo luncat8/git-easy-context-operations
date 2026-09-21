@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Ops",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "publisher": "luncat8",
   "license": "MIT",
   "private": true,
@@ -199,6 +199,12 @@
         "title": "Restore Default Menu Items",
         "category": "Git Easy Ops",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "geco.menuCopyItemName",
+        "title": "Copy item name",
+        "category": "Git Easy Ops",
+        "icon": "$(copy)"
       }
     ],
     "submenus": [
@@ -217,6 +223,10 @@
       "commandPalette": [
         {
           "command": "geco.refresh",
+          "when": "false"
+        },
+        {
+          "command": "geco.menuCopyItemName",
           "when": "false"
         }
       ],
@@ -432,6 +442,11 @@
           "command": "geco.customizeMenus",
           "when": "view == geco.history && viewItem == geco.group.graph",
           "group": "9_customize@2"
+        },
+        {
+          "command": "geco.menuCopyItemName",
+          "when": "view == geco.menuEditor && viewItem == geco.menuRow",
+          "group": "1_copy@1"
         }
       ],
       "geco.commitSubmenu": [
@@ -611,8 +626,8 @@
         },
         {
           "id": "geco.menuEditor",
-          "name": "Git Easy Ops Menus",
-          "contextualTitle": "Git Easy Ops Menus",
+          "name": "Git Easy Ops Menu Editor",
+          "contextualTitle": "Git Easy Ops Menu Editor",
           "visibility": "hidden"
         }
       ]

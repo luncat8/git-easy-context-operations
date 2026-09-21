@@ -20,3 +20,7 @@ tsconfig.json
 arena.json
 .claude/**
 .kilo/**
+
+# Contributor-only documents
+AGENTS.md
+0.3-plan-interactive-menu-editor.md

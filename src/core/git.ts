@@ -295,12 +295,13 @@ export class Git {
 	}
 
 	/**
-	 * The raw commit message (`%B`). Used when replaying commits so that the
+	 * The raw commit object message. Used when replaying commits so that the
 	 * message of untouched descendants survives byte-for-byte.
 	 */
 	async rawMessage(rev: string): Promise<string> {
 		const sha = await this.resolveCommit(rev);
-		return this.ok(['log', '-1', '--format=%B', '--no-show-signature', sha]);
+		const object = await this.raw(['cat-file', 'commit', sha]);
+		return object.slice(object.indexOf('\n\n') + 2);
 	}
 
 	// ------------------------------------------------------------------- refs

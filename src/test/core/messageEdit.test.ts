@@ -58,11 +58,10 @@ describe('applyMessageEdit - replace', () => {
 		);
 	});
 
-	test('rejects an empty message', () => {
-		assert.throws(
-			() => applyMessageEdit('old', { mode: 'replace', text: '   \n  ' }),
-			(err: unknown) => err instanceof GecoError && err.code === 'nothing-to-do',
-		);
+	test('uses one space for empty replacement messages', () => {
+		for (const text of ['', ' ', '   \n  ']) {
+			assert.equal(applyMessageEdit('old', { mode: 'replace', text }), ' ');
+		}
 	});
 });
 

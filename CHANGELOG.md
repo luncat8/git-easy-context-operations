@@ -4,6 +4,13 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.3
+
+- Rename the menu customization panel to **Git Easy Ops Menu Editor**.
+- Add **Copy item name** to the context menu of its action rows.
+- Accept empty or whitespace-only Rename Commit Message input, storing a single
+  space. Cancelling still does nothing; repeated blank renames are no-ops.
+
 ## 0.4.2
 
 The graphs actually refresh now, fast-forward can clean up after itself in one
@@ -68,8 +75,8 @@ click, and the commit-message items get names that say what they do.
   restores the built-in defaults (clearing the stored list in every scope
   where one exists) instead of forcing everything visible.
 - **VSIX Output Location**: artifacts are named
-  `dist/git-easy-context-operations-0.4.2.vsix` /
-  `dist/git-easy-context-operations-0.4.2+graph.vsix`.
+  `dist/git-easy-context-operations-0.4.3.vsix` /
+  `dist/git-easy-context-operations-0.4.3+graph.vsix`.
 
 ## 0.4.1
 

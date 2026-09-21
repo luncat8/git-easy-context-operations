@@ -14,7 +14,7 @@ import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, 
 import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
 import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
-import { MenuEditorProvider, commandTitlesFromManifest } from './vscode/menuEditorTree';
+import { MenuEditorProvider, commandTitlesFromManifest, type MenuEditorNode } from './vscode/menuEditorTree';
 import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
@@ -110,7 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(treeView);
 
 	// --- Customize Context Menus -------------------------------------------
-	// The hidden "Git Easy Ops Menus" view plus the context-key state machine.
+	// The hidden "Git Easy Ops Menu Editor" view plus the context-key state machine.
 	// Applied right on activation and re-applied whenever the setting changes
 	// (also from another window or Settings Sync) - every window converges.
 	const applyMenus = () => {
@@ -271,6 +271,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		// editor is about the menus, not about git), reveals the hidden view.
 		vscode.commands.registerCommand('geco.customizeMenus', async () => {
 			await vscode.commands.executeCommand(`${MENU_EDITOR_VIEW_ID}.focus`);
+		}),
+		vscode.commands.registerCommand('geco.menuCopyItemName', async (node?: MenuEditorNode) => {
+			if (node?.nodeKind !== 'row') return;
+			const label = typeof node.label === 'string' ? node.label : node.label?.label;
+			if (label) await vscode.env.clipboard.writeText(label);
 		}),
 		vscode.commands.registerCommand('geco.menuResetAll', async () => {
 			// "Default" is the *absence* of a stored value, and a workspace

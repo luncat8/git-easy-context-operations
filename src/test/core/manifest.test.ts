@@ -158,7 +158,7 @@ describe('manifest - menus', () => {
 		assert.ok(when.some((w) => /viewItem =~ \/\^geco\\\.commit/.test(w)), 'no commit item menu');
 		assert.ok(when.some((w) => /viewItem =~ \/\^geco\\\.branch/.test(w)), 'no branch item menu');
 		for (const entry of itemContext) {
-			assert.match(entry.when ?? '', /^view == geco\.history && /, 'item menus must be scoped to our view');
+			assert.match(entry.when ?? '', /^view == geco\.(history|menuEditor) && /, 'item menus must be scoped to our view');
 		}
 	});
 

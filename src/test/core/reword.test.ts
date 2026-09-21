@@ -416,3 +416,17 @@ describe('rewordCommitMessage - repeated operations', () => {
 		assert.equal(await repo.branchSha('main'), shas.v04);
 	});
 });
+
+for (const message of ['', ' ', '  \n\t ']) {
+ test(`blank replacement ${JSON.stringify(message)} preserves a single space`, async () => {
+  const before = await repo.log('main');
+  const result = await rewordCommitMessage(repo.ctx, { commit: shas.v02, message });
+  assert.equal(result.newMessage, ' ');
+  assert.equal(await repo.ctx.git.rawMessage(result.newTargetSha), ' ');
+  const after = await repo.log('main');
+  assert.deepEqual(after.map(c => c.tree), before.map(c => c.tree));
+  assert.equal(await repo.ctx.git.rawMessage(after[0].sha), await repo.ctx.git.rawMessage(before[0].sha));
+  const again = await rewordCommitMessage(repo.ctx, { commit: result.newTargetSha, message });
+  assert.equal(again.noChange, true);
+ });
+}

@@ -33,4 +33,4 @@ npm run package
   - Update all references to the `.vsix` filenames in `README.md`, `AGENTS.md`, and `CHANGELOG.md` to match the new version.
   - **Purpose**: This ensures the user can inspect the version number in VS Code's Extensions view to verify whether the newly built extension is actually installed or if an older build is still cached/active.
 - **VSIX Output Location**:
-  - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/git-easy-context-operations-0.4.2+graph.vsix`).
+  - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/git-easy-context-operations-0.4.3+graph.vsix`).

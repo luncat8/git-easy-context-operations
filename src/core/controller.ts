@@ -168,8 +168,8 @@ export class Controller {
 			if (!edit) {
 				return;
 			}
-			const newMessage = edit.message !== undefined ? normalizeMessage(edit.message) : applyMessageEdit(oldMessage, edit.edit!);
-			if (normalizeMessage(oldMessage) === newMessage) {
+			const newMessage = edit.message !== undefined ? (normalizeMessage(edit.message) || ' ') : applyMessageEdit(oldMessage, edit.edit!);
+			if (normalizeMessage(oldMessage) === normalizeMessage(newMessage)) {
 				await this.ui.message('info', `The message of ${info.shortSha} is unchanged - nothing was rewritten.`);
 				return;
 			}
@@ -214,10 +214,6 @@ export class Controller {
 				value: info.message,
 			});
 			if (value === undefined) {
-				return undefined;
-			}
-			if (!value.trim()) {
-				await this.ui.message('warn', 'A commit message cannot be empty.');
 				return undefined;
 			}
 			return { message: value };

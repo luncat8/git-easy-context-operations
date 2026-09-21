@@ -1,5 +1,5 @@
 /**
- * The "Git Easy Ops Menus" editor - a native checkbox tree, one node per
+ * The "Git Easy Ops Menu Editor" editor - a native checkbox tree, one node per
  * surface, one checkbox per menu row.
  *
  * This is Plan B of `0.3-plan-interactive-menu-editor.md`: rendered entirely
@@ -149,6 +149,7 @@ export class MenuEditorProvider implements vscode.TreeDataProvider<MenuEditorNod
 			const hiddenHere = isHidden(hidden, row);
 			const node = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None) as MenuRowNode;
 			node.nodeKind = 'row';
+			node.contextValue = 'geco.menuRow';
 			node.row = row;
 			node.surface = surface.id;
 			node.id = `row:${surface.id}:${row.id}`;

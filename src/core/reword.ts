@@ -137,11 +137,7 @@ export function applyMessageEdit(original: string, edit: MessageEdit): string {
 
 	switch (edit.mode) {
 		case 'replace': {
-			const next = normalizeMessage(edit.text);
-			if (!next) {
-				throw new GecoError('nothing-to-do', 'The new commit message is empty.');
-			}
-			return next;
+			return normalizeMessage(edit.text) || ' ';
 		}
 
 		case 'append':
@@ -211,7 +207,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 	const targetSha = await git.resolveCommit(options.commit);
 	const oldMessage = await git.rawMessage(targetSha);
 	const newMessage = options.message !== undefined
-		? normalizeMessage(options.message)
+		? (normalizeMessage(options.message) || ' ')
 		: applyMessageEdit(oldMessage, options.edit!);
 
 	if (!newMessage) {
@@ -237,7 +233,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 		signatureDropped: await isSignedCommit(git, targetSha),
 	};
 
-	if (normalizeMessage(oldMessage) === newMessage) {
+	if (normalizeMessage(oldMessage) === normalizeMessage(newMessage)) {
 		return { ...base, noChange: true, rewritten: [] };
 	}
 
