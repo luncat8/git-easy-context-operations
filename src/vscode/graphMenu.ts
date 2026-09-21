@@ -80,7 +80,7 @@ export function describeInstalledBuild(
 		// Code reads its own product.json from.
 		productPath: productJsonPath(appRoot),
 		cliCommand: cliCommandFor(appName),
-		graphVsixName: `${manifest.name ?? 'git-easy-context-operations'}-${manifest.version ?? '0.0.0'}+graph.vsix`,
+		graphVsixName: `dist/${manifest.name ?? 'git-easy-context-operations'}-${manifest.version ?? '0.0.0'}+graph.vsix`,
 	};
 }
 

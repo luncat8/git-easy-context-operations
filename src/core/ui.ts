@@ -95,6 +95,7 @@ export const ACTIONS = {
 	enableGraphMenu: 'How to Enable the Graph Menu',
 	copyCommands: 'Copy Commands',
 	dropRecoveryPoints: 'Drop Recovery Points',
+	removeWorktrees: 'Remove Linked Worktrees',
 } as const;
 
 export type ActionLabel = typeof ACTIONS[keyof typeof ACTIONS];

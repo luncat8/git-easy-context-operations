@@ -109,7 +109,7 @@ function turnOn() {
 	console.log(`Graph menu enabled in ${path.relative(ROOT, MANIFEST)}.`);
 	console.log('Build and install the graph build, then allow the proposal - no command line needed:');
 	console.log('  npm run package');
-	console.log(`  code --install-extension ${manifest.name}-${manifest.version}.vsix`);
+	console.log(`  code --install-extension dist/${manifest.name}-${manifest.version}.vsix`);
 	console.log('  - or, without touching any command line, inside the editor run');
 	console.log('    "Git Easy Ops: Enable Source Control Graph Menu..." and pick product.json.');
 	console.log('Run "npm run graph-menu:off" before publishing - VS Code rejects a');
