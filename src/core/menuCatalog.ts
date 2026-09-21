@@ -135,7 +135,10 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.commit', 'view.branch', 'view.title', 'submenu.commit', 'submenu.branch', 'graph.commit', 'graph.title'] },
 	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title'] },
 	{ id: 'geco.showBackups', label: 'Show Backups and Recovery Points', surfaces: ['view.title'] },
-	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title', 'graph.title'] },
+	// Only on our own view's toolbar: the built-in Source Control Graph
+	// caption already carries its own refresh button, and a second one there
+	// would be a duplicate (see `scripts/apply-graph-menu.mjs`).
+	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title'] },
 	{ id: 'geco.explainMenus', label: "Why Don't I See the Menus?", surfaces: ['view.title', 'graph.title'] },
 	{
 		id: 'geco.customizeMenus',

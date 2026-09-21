@@ -4,6 +4,38 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.5
+
+### Fixed
+
+- **The Source Control Graph caption no longer shows two refresh buttons.**
+  The `+graph` build contributed `geco.refresh` to the graph toolbar
+  (`scm/history/title`) on top of the refresh button the built-in graph
+  already has - two identical icons for the same action. The graph toolbar
+  now only adds what the built-in caption lacks (**Clean History**,
+  **Remove Redundant Branches**, **Why Don't I See the Menus?**). The
+  built-in refresh button keeps working as before, and every Git Easy Ops
+  operation already asks the git extension to re-sync its state, so the
+  second button was never doing anything the first one does not. The
+  extension's own view toolbar keeps **Refresh** - that caption has no
+  built-in equivalent.
+- **The rebuilt artifacts carry the "Git Easy Ops Menu Editor" panel name end
+  to end.** The committed `dist/` bundle predated the 0.4.3 rename (its
+  source map still carried the old "Git Easy Ops Menus" title), and
+  reinstalling the same 0.4.4 version can leave the previously installed
+  copy in place. `dist/extension.js` and both `.vsix` files are rebuilt from
+  the current sources, and the version number moves on so VS Code replaces
+  the installed 0.4.4 instead of skipping a same-version install. The old
+  `0.4.4` artifacts are removed from `dist/`.
+
+### Added
+
+- **Extension icon** (`resources/icon.png`, 128×128) - a white branch-and-bolt
+  glyph on an indigo tile - so the extension carries a face in the Extensions
+  list and on the Marketplace. The second proposed candidate (a white
+  fast-forward commit chain with a check on a teal tile) is kept in
+  `archive/icons/icon-candidate-b-commit-chain.png`, out of the `.vsix`.
+
 ## 0.4.4
 
 ### Fixed

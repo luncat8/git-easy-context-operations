@@ -72,14 +72,18 @@ const GRAPH_MENUS = {
 	'scm/historyItemRef/context': [
 		{ command: 'geco.renameBranch', when: `${BRANCH_WHEN} && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)`, group: '2_branch@3' },
 	],
+	// Deliberately NO refresh here: the built-in graph caption already has its
+	// own refresh button, and a second one for the same action reads as a bug.
+	// (Our own view's toolbar keeps `geco.refresh` - that caption has no
+	// built-in equivalent.) Every Git Easy Ops operation also asks the git
+	// extension to re-sync its state, so the built-in button is enough.
 	'scm/history/title': [
-		{ command: 'geco.refresh', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.refresh)', group: 'navigation@90' },
 		// The whole-graph operation gets the toolbar of the built-in graph too:
 		// it is not about one commit, so it never joins the per-commit menu.
-		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@91' },
+		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@90' },
 		// Same idea, one level down: not about a commit either, it prunes the
 		// branch names the graph shows once their commits live elsewhere.
-		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@92' },
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@91' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };
