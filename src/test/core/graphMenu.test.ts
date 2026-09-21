@@ -178,7 +178,7 @@ describe('graph menu - diagnosis', () => {
 		argvPath: '/home/user/.vscode/argv.json',
 		productPath: '/opt/vscode/resources/app/product.json',
 		cliCommand: 'code',
-		graphVsixName: 'git-easy-context-operations-0.2.0+graph.vsix',
+		graphVsixName: 'dist/git-easy-context-operations-0.2.0+graph.vsix',
 		...overrides,
 	});
 
@@ -232,7 +232,7 @@ describe('graph menu - diagnosis', () => {
 		assert.equal(status.ready, false);
 		assert.equal(status.allowedInArgv, true);
 		assert.match(status.steps.join('\n'), /npm run package:graph/);
-		assert.match(status.steps.join('\n'), /code --install-extension git-easy-context-operations-0\.2\.0\+graph\.vsix/);
+		assert.match(status.steps.join('\n'), /code --install-extension dist\/git-easy-context-operations-0\.2\.0\+graph\.vsix/);
 		assert.doesNotMatch(status.steps.join('\n'), /enable-proposed-api"\]: /, 'argv.json is already fine');
 	});
 
@@ -319,7 +319,7 @@ describe('controller - enableGraphMenu', () => {
 		argvPath: '/home/user/.vscode/argv.json',
 		productPath: '/opt/vscode/resources/app/product.json',
 		cliCommand: 'code',
-		graphVsixName: 'git-easy-context-operations-0.2.0+graph.vsix',
+		graphVsixName: 'dist/git-easy-context-operations-0.2.0+graph.vsix',
 	};
 
 	async function controllerWith(ui: FakeUI) {

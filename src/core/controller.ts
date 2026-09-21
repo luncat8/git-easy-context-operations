@@ -9,7 +9,7 @@
 import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
-import { ACTIONS, type QuickPickChoice, type UI } from './ui';
+import { ACTIONS, type ActionLabel, type QuickPickChoice, type UI } from './ui';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -1022,7 +1022,7 @@ export class Controller {
 				report('listing every path any commit ever touched');
 				return analyzeDeadPaths(ctx);
 			});
-			const facts = await collectCleanFacts(ctx, this.settings.backupRefPrefix);
+			let facts = await collectCleanFacts(ctx, this.settings.backupRefPrefix);
 			if (analysis.deadPaths.length === 0) {
 				this.ui.log(
 					[
@@ -1052,17 +1052,55 @@ export class Controller {
 
 			// filter-repo refuses a dirty tree and linked worktrees anyway - say
 			// so *before* a multi-gigabyte bundle is written for nothing.
-			const blockers = blockingCleanReasons(facts);
+			let blockers = blockingCleanReasons(facts);
 			if (blockers.length > 0) {
-				this.ui.log(`Clean history refused:\n${blockers.map((reason) => `  ! ${reason}`).join('\n')}`);
+				const actions: ActionLabel[] = [];
+				if (facts.extraWorktrees.length > 0) {
+					actions.push(ACTIONS.removeWorktrees);
+				}
+				actions.push(ACTIONS.openLog);
+
 				const chosen = await this.ui.ask(`Cannot rewrite this history yet - ${blockers.length} thing(s) have to go first.`, {
 					detail: blockers.join('\n'),
-					actions: [ACTIONS.openLog],
+					actions,
 				});
-				if (chosen === ACTIONS.openLog) {
-					await this.ui.showOutput?.();
+
+				if (chosen === ACTIONS.removeWorktrees) {
+					for (const wt of facts.extraWorktrees) {
+						try {
+							await ctx.git.worktreeRemove(wt, { force: true });
+							this.ui.log(`Removed linked worktree: ${wt}`);
+						} catch (err) {
+							this.ui.log(`Failed to remove worktree "${wt}": ${err instanceof Error ? err.message : String(err)}`);
+						}
+					}
+					try {
+						await ctx.git.worktreePrune();
+					} catch (err) {
+						this.ui.log(`Failed to prune worktrees: ${err instanceof Error ? err.message : String(err)}`);
+					}
+
+					facts = await collectCleanFacts(ctx, this.settings.backupRefPrefix);
+					plan = await this.buildCleanPlan(ctx, { root, pathsFile, analysis, facts });
+					blockers = blockingCleanReasons(facts);
+					if (blockers.length > 0) {
+						this.ui.log(`Clean history refused:\n${blockers.map((reason) => `  ! ${reason}`).join('\n')}`);
+						const remaining = await this.ui.ask(`Cannot rewrite this history yet - ${blockers.length} thing(s) have to go first.`, {
+							detail: blockers.join('\n'),
+							actions: [ACTIONS.openLog],
+						});
+						if (remaining === ACTIONS.openLog) {
+							await this.ui.showOutput?.();
+						}
+						return;
+					}
+				} else {
+					this.ui.log(`Clean history refused:\n${blockers.map((reason) => `  ! ${reason}`).join('\n')}`);
+					if (chosen === ACTIONS.openLog) {
+						await this.ui.showOutput?.();
+					}
+					return;
 				}
-				return;
 			}
 
 			const confirmation = describeCleanConfirmation(analysis, facts, { bundleFile: plan.bundleFile, pathsFile });
@@ -2063,8 +2101,8 @@ export class Controller {
 			'to grant the proposed API contribSourceControlHistoryItemMenu to, and the',
 			'Marketplace refuses manifests that ask for it. So it ships as a second build:',
 			'',
-			'  1. npm run package:graph              # builds <name>-<version>+graph.vsix',
-			'  2. code --install-extension <that file>',
+			'  1. npm run package:graph              # builds dist/<name>-<version>+graph.vsix',
+			'  2. code --install-extension dist/<that file>',
 			'  3. allow the proposal for the extension id - either in product.json',
 			'       "extensionEnabledApiProposals": { "luncat8.git-easy-context-operations":',
 			'         ["contribSourceControlHistoryItemMenu", "contribSourceControlHistoryTitleMenu"] }',

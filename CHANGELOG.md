@@ -4,10 +4,24 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
-## Unreleased
+## 0.4.1
+
+### Added
+
+- **Clean History: Remove Linked Worktrees Dialog Option**: When linked worktrees
+  (e.g. automatically created by AI tools like Kilo or other agents) are detected,
+  Clean History no longer halts with a flat refusal. The dialog now offers a
+  **"Remove Linked Worktrees"** option that removes the extra worktrees and prunes
+  metadata on the spot, then automatically proceeds with the clean history flow.
 
 ### Changed
 
+- **VSIX Output Location**: Both standard and `+graph` `.vsix` packages are now
+  output to `dist/` (e.g. `dist/git-easy-context-operations-0.4.1+graph.vsix`)
+  instead of the repository root, keeping the root directory clean.
+- **Build Versioning Rule**: Added rule to `AGENTS.md` to ensure the extension
+  version is bumped on every build so users can inspect the Extensions view and
+  verify that the newly built package is installed.
 - **Remove Redundant Branches... no longer sits on the branch badges of the
   `+graph` build** (`scm/historyItemRef/context`). VS Code expands every entry
   contributed there into a per-ref sub-item of the commit menu, so the cleanup

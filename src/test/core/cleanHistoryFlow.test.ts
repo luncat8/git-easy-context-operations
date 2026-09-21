@@ -203,8 +203,32 @@ describe('controller - cleanHistory flows', () => {
 			await controllerFor(ui, repo, fakeFilterRepo(repo).runner).cleanHistory(repo.dir);
 
 			assert.match(ui.askCalls[0]!.options.detail ?? '', /Linked worktrees: .*linked/);
+			assert.deepEqual(ui.askCalls[0]!.options.actions, [ACTIONS.removeWorktrees, ACTIONS.openLog]);
 			assert.deepEqual(bundlesIn(repo.root), []);
 			await repo.gitOk(['worktree', 'remove', '--force', worktree]);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('removes linked worktrees on request and proceeds with clean history', async () => {
+		const repo = await repoWithDeadPath();
+		try {
+			const worktree = path.join(repo.root, 'linked');
+			await repo.gitOk(['worktree', 'add', '--quiet', worktree, '-b', 'wt']);
+			const fake = fakeFilterRepo(repo);
+			const ui = new FakeUI({
+				asks: [ACTIONS.removeWorktrees],
+				confirms: [true],
+			});
+			await controllerFor(ui, repo, fake.runner).cleanHistory(repo.dir);
+
+			assert.equal((await repo.worktrees()).length, 1);
+			assert.equal(fs.existsSync(worktree), false);
+			assert.equal(fake.calls.length, 3);
+			assert.deepEqual(fake.calls[0], ['git', 'filter-repo', '--version']);
+			assert.deepEqual(fake.calls[1], ['git', 'filter-repo', '--version']);
+			assert.ok(fake.calls[2]!.includes('--paths-from-file'));
 		} finally {
 			repo.cleanup();
 		}

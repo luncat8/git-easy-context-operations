@@ -25,7 +25,7 @@ const cli = process.argv.find((arg) => arg.startsWith('--cli='))?.slice('--cli='
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const extensionId = `${manifest.publisher}.${manifest.name}`;
-const outFile = path.join(ROOT, `${manifest.name}-${manifest.version}+graph.vsix`);
+const outFile = path.join(ROOT, 'dist', `${manifest.name}-${manifest.version}+graph.vsix`);
 
 function run(command, args, label) {
 	console.log(`\n== ${label}`);
@@ -101,5 +101,5 @@ Without the grant, "Git Easy Ops" in the Source Control sidebar always works -
 its Graph group shows the same commits, refs and operations.
 
 To go back to the publishable build:
-     ${cli} --install-extension ${manifest.name}-${manifest.version}.vsix
+     ${cli} --install-extension dist/${manifest.name}-${manifest.version}.vsix
 `);
