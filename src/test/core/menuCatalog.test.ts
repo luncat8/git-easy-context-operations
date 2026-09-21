@@ -231,21 +231,24 @@ describe('menu order - Remove Redundant Branches... follows Create Branch...', (
 		}
 	});
 
-	it('sits in the built-in branch group of the graph rows, right after git.branch', () => {
+	it('sits in the built-in branch group of the graph commit row - and never on a ref badge', () => {
 		// git.branch ("Create Branch...") is 2_branch@2 in the built-in graph, so
 		// the next slot of that group is what "last, right after Create Branch..."
-		// means there. The repo badge has our rename at 2_branch@3 already.
+		// means there.
 		const entries = graphEntries();
 		const commitRow = entries.find((entry) => entry.key === 'scm/historyItem/context' && entry.command === 'geco.removeRedundantBranches');
-		assert.ok(commitRow, 'the graph commit row carries the cleanup too');
+		assert.ok(commitRow, 'the graph commit row carries the cleanup');
 		assert.equal(commitRow!.group, '2_branch@3');
 
+		// The per-ref badge menu must NOT carry the cleanup: VS Code expands
+		// every entry there into "Remove Redundant Branches... > <branch>", and
+		// a sub-item naming the selected branch reads as "this branch gets
+		// deleted" - the opposite of a whole-graph sweep. Rename stays (it is
+		// genuinely about the one ref).
 		const refRow = entries.find((entry) => entry.key === 'scm/historyItemRef/context' && entry.command === 'geco.removeRedundantBranches');
-		assert.ok(refRow, 'the graph branch badge carries the cleanup too');
-		assert.equal(groupName(refRow!.group), '2_branch');
+		assert.equal(refRow, undefined, 'the cleanup must not sit on the ref badge (it would expand into per-branch sub-items)');
 		const rename = entries.find((entry) => entry.key === 'scm/historyItemRef/context' && entry.command === 'geco.renameBranch');
 		assert.ok(rename, 'rename is still on the badge');
-		assert.ok(orderOf(refRow!.group) > orderOf(rename!.group), 'the cleanup must be the last entry of that group');
 	});
 });
 

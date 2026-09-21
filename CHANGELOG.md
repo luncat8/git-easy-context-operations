@@ -4,6 +4,28 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **Remove Redundant Branches... no longer sits on the branch badges of the
+  `+graph` build** (`scm/historyItemRef/context`). VS Code expands every entry
+  contributed there into a per-ref sub-item of the commit menu, so the cleanup
+  showed up as *Remove Redundant Branches... › main*, one sub-item per branch
+  of the clicked commit - which reads as "this branch gets deleted", the exact
+  opposite of what the command does. It remains one flat entry on the graph
+  commit rows, the graph toolbar, and every sidebar/ submenu surface it had
+  before; **Rename Branch...** stays on the badge (it genuinely is about that
+  one branch).
+- **The checkbox list is now the confirmation.** The flow is: one click, the
+  list of redundant branches with checkboxes (all pre-ticked, each entry
+  naming the ref that already holds its commits), untick anything you want to
+  keep, OK removes exactly the ticked names. The extra modal confirmation that
+  repeated the same list afterwards is gone; only a UI without checkbox
+  pickers falls back to it as its gate. The safety rails are unchanged - every
+  tip is re-verified right before deletion, and one **Undo** restores the
+  whole batch.
+
 ## 0.4.0
 
 The sidebar stops going stale, and the branch names a fast-forward leaves

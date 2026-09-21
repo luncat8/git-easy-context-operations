@@ -20,6 +20,15 @@ function controllerFor(ui: FakeUI, repo: TempRepo, settings: Settings = DEFAULT_
 	return new Controller({ ui, settings, exec: repo.exec, onRepositoryChanged });
 }
 
+/**
+ * A UI without the checkbox picker (`pickMany` is optional on the {@link UI}
+ * contract): the flow must fall back to the whole list with the modal
+ * confirmation as its only gate.
+ */
+class NoCheckboxFakeUI extends FakeUI {
+	override pickMany = undefined as never;
+}
+
 /** main at v0.4, plus `old` at v0.2 (what a fast-forward leaves behind). */
 async function repoWithLeftover(): Promise<{ repo: TempRepo; shas: Record<string, string> }> {
 	const { repo, shas } = await createLinearRepo();
@@ -41,11 +50,8 @@ describe('controller - remove redundant branches flow', () => {
 			assert.equal(pick!.items[0]!.picked, true, 'redundant branches are pre-ticked');
 			assert.match(pick!.items[0]!.detail!, /already contained in main/);
 
-			// The modal confirmation states the safety property in plain words.
-			assert.equal(ui.confirmCalls.length, 1);
-			assert.match(ui.confirmCalls[0]!.message, /Delete the redundant branch "old"\?/);
-			assert.match(ui.confirmCalls[0]!.options!.detail!, /No commit is lost/);
-			assert.equal(ui.confirmCalls[0]!.options!.destructive, true);
+			// The checkbox list is the confirmation: OK removes, no second gate.
+			assert.equal(ui.confirmCalls.length, 0, `no modal after the checkbox list: ${ui.transcript}`);
 
 			assert.equal(await repo.hasBranch('old'), false);
 			assert.equal(await repo.sha('main'), shas.v04, 'main is untouched');
@@ -81,7 +87,7 @@ describe('controller - remove redundant branches flow', () => {
 
 			assert.equal(await repo.hasBranch('older'), false);
 			assert.equal(await repo.branchSha('old'), shas.v02, 'the unticked branch survives');
-			assert.match(ui.confirmCalls[0]!.message, /Delete the redundant branch "older"\?/);
+			assert.equal(ui.confirmCalls.length, 0, 'the checkbox list is the confirmation - no second gate');
 		} finally {
 			repo.cleanup();
 		}
@@ -101,11 +107,17 @@ describe('controller - remove redundant branches flow', () => {
 		}
 	});
 
-	it('does nothing when the confirmation is declined', async () => {
+	it('falls back to the modal confirmation on a UI without checkboxes - and does nothing when it is declined', async () => {
 		const { repo, shas } = await repoWithLeftover();
 		try {
-			const ui = new FakeUI({ confirms: false });
+			const ui = new NoCheckboxFakeUI({ confirms: false });
 			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+
+			assert.equal(ui.multiPickCalls.length, 0, 'this UI has no checkbox picker');
+			assert.equal(ui.confirmCalls.length, 1, 'without the checkbox list the modal is the gate');
+			assert.match(ui.confirmCalls[0]!.message, /Delete the redundant branch "old"\?/);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /No commit is lost/);
+			assert.equal(ui.confirmCalls[0]!.options!.destructive, true);
 
 			assert.equal(await repo.branchSha('old'), shas.v02);
 			assert.deepEqual(await repo.ctx.safety.readJournal(), []);
@@ -177,7 +189,8 @@ describe('controller - remove redundant branches flow, remote branches', () => {
 
 			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), false, 'the local tracking ref is gone');
 			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'the branch itself stays on the remote');
-			assert.match(ui.confirmCalls[0]!.options!.detail!, /stay on the remote, only the local remote-tracking refs go/);
+			assert.equal(ui.confirmCalls.length, 0, 'the checkbox list is the confirmation - no second gate');
+			assert.match(ui.askCalls[0]!.options.detail!, /Only the local remote-tracking refs were removed/);
 			assert.match(ui.allLogs(), /redundant: origin\/fix\/x .* \[remote branch on origin\]/);
 		} finally {
 			repo.cleanup();
@@ -192,7 +205,8 @@ describe('controller - remove redundant branches flow, remote branches', () => {
 
 			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), undefined, 'the branch is gone from the remote');
 			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), false);
-			assert.match(ui.confirmCalls[0]!.options!.detail!, /deleted on origin as well/);
+			assert.equal(ui.confirmCalls.length, 0, 'the checkbox list is the confirmation - no second gate');
+			assert.match(ui.askCalls[0]!.options.detail!, /deleted on the remote too/);
 			assert.match(ui.askCalls[0]!.message, /Removed the redundant branch "origin\/fix\/x"/);
 			assert.match(ui.allLogs(), /The remote branch was deleted on the remote too/);
 		} finally {

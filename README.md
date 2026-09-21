@@ -116,7 +116,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 | Group (next to the built-in items) | What this build adds |
 |------------------------------------|----------------------|
 | *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reword Commit Message...**, **Append to...**, **Rename Text in...** |
-| *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`); the same entry sits on a branch badge (`scm/historyItemRef/context`, behind **Rename Branch...**) |
+| *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`). Deliberately **not** on the branch badges - see below. |
 | after *Compare* (`6_patch`) | **Apply Patch at Proper Base...**, **Find Proper Base for Patch...** |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
@@ -128,8 +128,15 @@ so this build does not repeat them. The one thing git has no counterpart for is
 renaming a branch, which is why **Rename Branch... › main** appears on the ref
 badge itself (`scm/historyItemRef/context`: VS Code only accepts plain commands
 there and builds the per-ref entry itself, exactly like *Checkout › main* and
-*Delete Branch › main*). **Remove Redundant Branches...** is the second entry on
-that badge, last in the branch group.
+*Delete Branch › main*).
+
+**Remove Redundant Branches...** is deliberately *not* on those badges: VS Code
+would expand the entry per ref into sub-items like *Remove Redundant Branches... ›
+main*, and a sub-item carrying the selected branch name reads as "this branch
+gets deleted" - the opposite of a whole-graph cleanup whose list of victims only
+exists after the scan. It sits flat on the commit row and on the graph toolbar
+instead; clicking it shows the redundant branches as a checkbox list, all
+pre-ticked, and OK removes exactly the ticked ones.
 
 The built-in graph cannot select several rows, so use **Squash with Previous
 Commits...** there - it asks for the number of commits before the one you clicked.

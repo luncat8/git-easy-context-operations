@@ -1696,8 +1696,11 @@ export class Controller {
 	 * Redundant means: every commit of the branch is already reachable from
 	 * another branch, tag or remote-tracking branch, so removing it changes
 	 * nothing about the files - only the list of names gets shorter. The user
-	 * sees exactly what would go (and what is kept, with the reason) before
-	 * anything happens, and one Undo brings the whole batch back.
+	 * sees exactly what would go before anything happens: one checkbox list,
+	 * every entry pre-ticked and naming the ref that already holds its commits -
+	 * untick what should stay, press OK and exactly the ticked names go. No
+	 * second gate after that (only a UI without checkboxes falls back to the
+	 * modal confirmation). One Undo brings the whole batch back.
 	 *
 	 * Remote-tracking branches are part of that list: a branch that was merged on
 	 * the remote (`origin/fix/x` while `origin/main` holds every commit of it)
@@ -1738,9 +1741,13 @@ export class Controller {
 
 			// Pre-selected, but every branch can be unticked: "redundant" is a
 			// fact about the history, whether a name is still wanted is not.
-			// A UI without checkboxes falls back to the whole list (the modal
-			// confirmation below is then the only gate, and it lists them all).
+			// The checkbox list *is* the confirmation - the user reviews exactly
+			// what would go (each entry naming the ref that already holds it),
+			// unticks anything to keep, and OK removes exactly the ticked names.
+			// A UI without checkboxes falls back to the whole list, in which case
+			// the modal confirmation below is the only gate (and lists them all).
 			let chosen = scan.redundant;
+			let reviewedInCheckboxList = false;
 			if (this.ui.pickMany) {
 				const picked = await this.ui.pickMany(
 					scan.redundant.map((branch) => ({
@@ -1762,6 +1769,7 @@ export class Controller {
 					return;
 				}
 				chosen = picked;
+				reviewedInCheckboxList = true;
 			}
 			if (chosen.length === 0) {
 				this.ui.log('Remove redundant branches: nothing was selected.');
@@ -1791,7 +1799,10 @@ export class Controller {
 				deleteRemote = scope;
 			}
 
-			if (this.settings.confirmDestructiveOperations) {
+			// The checkbox list already reviewed the exact victim list, so a
+			// second modal would only repeat it; only the checkbox-less fallback
+			// needs the modal as its gate.
+			if (!reviewedInCheckboxList && this.settings.confirmDestructiveOperations) {
 				const confirmed = await this.ui.confirm(
 					chosen.length === 1 ? `Delete the redundant branch "${chosen[0]!.name}"?` : `Delete ${chosen.length} redundant branches?`,
 					{

@@ -118,9 +118,14 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.deleteBranch', label: 'Delete Branch...', surfaces: ['view.branch', 'submenu.branch'] },
 	// The cleanup sits everywhere a commit row shows branch items (it is about
 	// the branch names of the whole graph, not about the clicked commit), and on
-	// branch rows / graph ref badges. On every one of those surfaces it is the
-	// **last** entry of the branch group, right after *Create Branch...*.
-	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.commit', 'view.branch', 'view.title', 'submenu.commit', 'submenu.branch', 'graph.commit', 'graph.ref', 'graph.title'] },
+	// branch rows. On every one of those surfaces it is the **last** entry of
+	// the branch group, right after *Create Branch...*. It is deliberately NOT
+	// on the graph's per-ref badges (`graph.ref`): VS Code expands every entry
+	// there into a "Remove Redundant Branches... > <branch>" sub-item, and a
+	// sub-item carrying the selected branch name reads as "this branch gets
+	// deleted" - the opposite of a whole-graph sweep whose list of victims only
+	// exists after the scan. One flat entry, one click, then the checkbox list.
+	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.commit', 'view.branch', 'view.title', 'submenu.commit', 'submenu.branch', 'graph.commit', 'graph.title'] },
 	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title'] },
 	{ id: 'geco.showBackups', label: 'Show Backups and Recovery Points', surfaces: ['view.title'] },
 	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title', 'graph.title'] },

@@ -60,10 +60,17 @@ const GRAPH_MENUS = {
 	// delete are already git's own items on that row (`1_checkout@1`,
 	// `2_branch@2`), and fast-forwarding the ref to the very commit it points at
 	// would do nothing, so this build adds **rename** (git has no rename in the
-	// graph at all) and the branch cleanup, last in that branch group.
+	// graph at all).
+	//
+	// The branch cleanup is deliberately NOT here: VS Code would expand it into
+	// one "Remove Redundant Branches... > <branch>" entry per ref badge, and a
+	// sub-item carrying the *selected* branch name reads as "this branch gets
+	// deleted" - the exact opposite of what the command does. It is a
+	// whole-graph sweep whose target list is only known after the scan, so it
+	// lives flat on the commit row menu and on the graph toolbar instead;
+	// clicking it opens the checkbox list of what actually goes.
 	'scm/historyItemRef/context': [
 		{ command: 'geco.renameBranch', when: `${BRANCH_WHEN} && (!geco.menuFilter || geco.menuVisible.geco.renameBranch)`, group: '2_branch@3' },
-		{ command: 'geco.removeRedundantBranches', when: `${BRANCH_WHEN} && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)`, group: '2_branch@4' },
 	],
 	'scm/history/title': [
 		{ command: 'geco.refresh', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.refresh)', group: 'navigation@90' },
