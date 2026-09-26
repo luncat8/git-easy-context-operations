@@ -4,6 +4,19 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.7
+
+### Improved
+
+- **Fast-forward can now finish the cleanup workflow.** Choose “Move and clean up
+  redundant branches…” to move the default branch, check it out when the worktree
+  is clean, and review the branch names made redundant by the move. Local branch
+  deletion remains undoable; remote branch deletion is separately opted into.
+  When deleting remote duplicates, the action offers to make an ordinary push of
+  the updated default branch first (when it has an upstream). This replaces the
+  manual checkout / sync / local cleanup steps without silently deleting remote
+  refs or force-pushing.
+
 ## 0.4.6
 
 ### Fixed

@@ -73,7 +73,7 @@ export class VsCodeUI implements UI {
 
 	/**
 	 * A modal dialog with several buttons - the shape the fast-forward flow
-	 * wants: Cancel | Move | Move and remove the redundant old branch.
+	 * wants: cancel, clean up redundant refs, move only, or remove the old backup.
 	 * Dismissing the dialog (Esc) resolves to `undefined`.
 	 */
 	async choose(message: string, options: ChooseOptions): Promise<string | undefined> {

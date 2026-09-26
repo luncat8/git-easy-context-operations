@@ -372,23 +372,22 @@ describe('controller - fast-forward flows', () => {
 			await repo.checkout('main');
 			const from = await repo.sha('main');
 
-			const ui = new FakeUI();
+			const ui = new FakeUI({ choices: ['move'] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
 
 			assert.equal(await repo.sha('main'), target);
 			assert.equal(await repo.sha('old'), from);
 			assert.equal(ui.pickCalls.length, 0, ui.transcript);
-			// A true fast-forward gets the three-button dialog; the unscripted
-			// fake UI clicks the primary button ("Move"), so the backup stays.
+			// Choosing the conservative Move option keeps the backup branch.
 			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
 			assert.equal(ui.confirmCalls.length, 0, 'the dialog replaces the old two-button confirm');
 			assert.match(ui.chooseCalls[0]!.message, /Move main to [0-9a-f]{7}\?/);
 			assert.deepEqual(
 				ui.chooseCalls[0]!.options.choices.map((choice) => choice.label),
-				['Cancel', 'Move', 'Move and remove "old"'],
-				'Cancel | Ok | Ok and remove redundant old branch',
+				['Cancel', 'Move and clean up redundant branches…', 'Move', 'Move and remove "old"'],
+				'Cancel | clean up redundant branches | Move | remove redundant backup',
 			);
-			assert.equal(ui.chooseCalls[0]!.options.choices[1]!.primary, true, 'Move is the default action');
+			assert.equal(ui.chooseCalls[0]!.options.choices[1]!.primary, true, 'the cleanup flow is the default action');
 			assert.match(ui.chooseCalls[0]!.options.detail!, /Fast-forward: 1 commit is added, nothing is lost\./);
 			assert.match(ui.chooseCalls[0]!.options.detail!, /kept on branch "old"/);
 			assert.match(ui.askCalls[0]!.message, /main now points at/);
@@ -407,7 +406,7 @@ describe('controller - fast-forward flows', () => {
 			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
 			await repo.checkout('main');
 
-			const ui = new FakeUI({ picks: ['main'], inputs: ['archive'] });
+			const ui = new FakeUI({ picks: ['main'], inputs: ['archive'], choices: ['move'] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: true });
 
 			assert.equal(ui.pickCalls[0]!.options!.title, 'Fast-forward which branch?');
@@ -495,6 +494,53 @@ describe('controller - fast-forward flows', () => {
 		}
 	});
 
+	it('checks out the moved default branch and removes the now-redundant feature branch in one flow', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			const oldMain = await repo.sha('main');
+
+			const ui = new FakeUI({ choices: ['move-clean'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.sha('main'), target);
+			assert.equal(await repo.api.headBranch(), 'main');
+			assert.equal(await repo.hasBranch('feature'), false, 'the duplicate feature name is removed');
+			assert.equal(await repo.hasBranch('old'), false, 'the redundant old-main backup is removed too');
+			assert.equal(await repo.sha('HEAD'), target);
+			assert.match(ui.allLogs(), /Checked out main after moving it/);
+			assert.match(ui.allLogs(), /Fast-forward cleanup removed 1 redundant branch/);
+			assert.equal(oldMain.length, 40, 'the old tip remains an ancestor, not a lost commit');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('publishes the moved default branch before deleting a redundant remote feature branch', async () => {
+		const { repo } = await createLinearRepo();
+		let remoteDir: string | undefined;
+		try {
+			remoteDir = await repo.addBareRemote('origin', ['main']);
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.gitOk(['push', '--quiet', '-u', 'origin', 'feature']);
+
+			const ui = new FakeUI({ choices: ['move-clean'], picks: ['Push main'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.api.headBranch(), 'main');
+			assert.equal(await repo.hasBranch('feature'), false);
+			assert.equal(await repo.hasRef('refs/remotes/origin/feature'), false);
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'main'), target, 'main is published with a normal push');
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'feature'), undefined, 'remote duplicate is deleted');
+			assert.match(ui.allLogs(), /Pushed main to origin\/main before remote cleanup/);
+			assert.match(ui.allLogs(), /deleted on the remote too/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
 	it('moves and removes the redundant backup when the user picks the third button', async () => {
 		const { repo } = await createLinearRepo();
 		try {
@@ -557,7 +603,7 @@ describe('controller - fast-forward flows', () => {
 			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
 
 			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
-			assert.equal(ui.chooseCalls[0]!.options.choices[2]!.label, 'Move and remove "old-2"');
+			assert.equal(ui.chooseCalls[0]!.options.choices[3]!.label, 'Move and remove "old-2"');
 			assert.equal(await repo.hasBranch('old-2'), false, 'the newly created backup was removed');
 			assert.equal(await repo.sha('old'), shas.v03, 'the pre-existing branch is untouched');
 			assert.equal(await repo.sha('main'), target);
@@ -1166,7 +1212,7 @@ describe('controller - backups, undo and information', () => {
 			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
 			await repo.checkout('main');
 
-			const ui = new FakeUI();
+			const ui = new FakeUI({ choices: ['move'] });
 			await controllerFor(ui, repo, settings).fastForward(repo.dir, [target], { askBranch: false });
 
 			assert.equal(await repo.sha('previous'), shas.v04);

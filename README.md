@@ -16,7 +16,10 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   message, not just the last one.
 
 - **Fast-forward `main`** - onto any commit, with the old tip parked on a backup
-  branch first; one click removes that backup again when it is redundant.
+  branch first. The default cleanup flow checks out `main` when the worktree is
+  clean, reviews local/remote branch names made redundant by the move, and can
+  publish `main` with a normal push before deleting selected remote duplicates.
+  The plain **Move** option is still available when you want no cleanup.
 - **Branch work** - create / rename / check out / delete, from a commit row or a
   branch row, including what should happen to the remote branch it tracks.
 - **Remove redundant branches** - one click deletes the names whose every commit

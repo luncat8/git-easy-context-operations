@@ -583,6 +583,7 @@ export class Controller {
 			const canRemoveBackup = isFastForward && !backupTakenAtFrom;
 
 			let removeBackup = false;
+			let cleanRedundantAfterMove = false;
 			if (this.settings.confirmDestructiveOperations) {
 				if (canRemoveBackup && this.ui.choose) {
 					// The clean-up the user usually wants in one step: move
@@ -597,10 +598,13 @@ export class Controller {
 							`Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`,
 							`The old tip is kept on branch "${actualBackupName}".`,
 							`"${actualBackupName}" is redundant: every commit of it is already on ${branch}, so removing it loses nothing.`,
+							'',
+							`The cleanup option checks out ${branch} if the worktree is clean, then lets you review redundant branch names. Remote deletion and a normal push are separately confirmed.`,
 						].join('\n'),
 						choices: [
 							{ label: 'Cancel', value: 'cancel' },
-							{ label: 'Move', value: 'move', primary: true },
+							{ label: 'Move and clean up redundant branches…', value: 'move-clean', primary: true },
+							{ label: 'Move', value: 'move' },
 							{ label: `Move and remove "${actualBackupName}"`, value: 'move-remove' },
 						],
 					});
@@ -608,7 +612,8 @@ export class Controller {
 						this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
 						return;
 					}
-					removeBackup = choice === 'move-remove';
+					removeBackup = choice === 'move-remove' || choice === 'move-clean';
+					cleanRedundantAfterMove = choice === 'move-clean';
 				} else {
 					const confirmed = await this.ui.confirm(`Move ${branch} to ${targetInfo.shortSha}?`, {
 						confirmLabel: isFastForward ? 'Move' : 'Move anyway',
@@ -675,8 +680,100 @@ export class Controller {
 				}
 			}
 
+			if (cleanRedundantAfterMove && !result.alreadyAtTarget) {
+				// Leave the user on the branch that now owns the new history before
+				// scanning for duplicate names. This makes the former feature branch
+				// eligible for cleanup, while dirty worktrees are never disturbed.
+				const current = await ctx.git.headBranch();
+				if (current !== result.branch) {
+					if (await ctx.git.isDirty({ includeUntracked: true })) {
+						this.ui.log(`Kept the current checkout (${current ?? 'detached HEAD'}): the worktree has uncommitted changes.`);
+					} else {
+						await ctx.git.checkout(result.branch);
+						await ctx.safety.record({
+							kind: 'branch',
+							summary: `Checked out ${result.branch} after fast-forward cleanup`,
+							undo: { type: 'refs', refs: [], checkoutRef: current },
+						});
+						this.ui.log(`Checked out ${result.branch} after moving it to the selected commit.`);
+					}
+				}
+				await this.cleanupRedundantAfterFastForward(ctx, result);
+			}
+
 			await this.reportFastForward(ctx, result, cwd, removedBackup);
 		});
+	}
+
+	/** Review and remove branches made redundant by the just-completed move. */
+	private async cleanupRedundantAfterFastForward(ctx: RepoContext, result: FastForwardResult): Promise<void> {
+		const scan = await findRedundantBranches(ctx);
+		if (scan.redundant.length === 0) {
+			this.ui.log(`No redundant branches to clean up after moving ${result.branch}.`);
+			return;
+		}
+
+		const picked = this.ui.pickMany
+			? await this.ui.pickMany(scan.redundant.map((branch) => ({
+				label: branch.name,
+				description: `already in ${branch.keptAliveBy.join(', ')}${branch.remote ? ` · remote ${branch.remote.remote}` : ''}`,
+				detail: `${shorten(branch.sha)} ${branch.subject}`,
+				value: branch,
+				picked: true,
+			})), {
+				title: 'Remove branches made redundant by the fast-forward?',
+				placeholder: 'Only selected branch names are removed; commits are kept',
+			})
+			: scan.redundant;
+		if (!picked || picked.length === 0) {
+			this.ui.log('Fast-forward cleanup skipped; no redundant branches were selected.');
+			return;
+		}
+
+		const remoteChosen = picked.filter((branch) => branch.remote);
+		let deleteRemote = false;
+		if (remoteChosen.length > 0) {
+			const upstream = await ctx.git.upstream(result.branch);
+			const canPublishAndDelete = Boolean(upstream && remoteChosen.every((branch) => branch.remote!.remote === upstream.remote));
+			const options: { label: string; description?: string; value: boolean }[] = [
+				{ label: 'Remove locally only', description: 'leave the branches on the server', value: false },
+			];
+			if (upstream && canPublishAndDelete) {
+				options.push({
+					label: `Push ${result.branch} to ${upstream.remote}/${upstream.branch}, then remove remotely`,
+					description: 'ordinary fast-forward push; remote branch deletions use a lease',
+					value: true,
+				});
+			} else if (upstream) {
+				this.ui.log(`Selected remote branches are not all on ${upstream.remote}; leaving server refs alone to avoid deleting commits before publishing them there.`);
+			}
+			const scope = await this.ui.pick<boolean>(options, {
+				title: 'How should redundant remote branches be removed?',
+				placeholder: remoteChosen.map((branch) => branch.name).join(', '),
+			});
+			if (scope === undefined) {
+				this.ui.log('Fast-forward cleanup cancelled; branches were kept.');
+				return;
+			}
+			deleteRemote = scope;
+			if (deleteRemote && upstream) {
+				const pushed = await ctx.git.push([upstream.remote, `${result.branch}:refs/heads/${upstream.branch}`]);
+				if (pushed.exitCode !== 0) {
+					this.ui.log(`Could not push ${result.branch} to ${upstream.remote}/${upstream.branch}; no branches were cleaned up. ${pushed.stderr.trim()}`);
+					return;
+				}
+				this.ui.log(`Pushed ${result.branch} to ${upstream.remote}/${upstream.branch} before remote cleanup.`);
+			}
+		}
+
+		const removal = await this.ui.withProgress('Cleaning up redundant branches', () =>
+			deleteRedundantBranches(ctx, picked, { deleteRemote }),
+		);
+		this.ui.log([
+			`Fast-forward cleanup removed ${removal.deleted.length} redundant branch(es): ${removal.deleted.map((branch) => branch.name).join(', ') || '(none)'}`,
+			...removal.skipped.map((entry) => `  kept ${entry.name}: ${entry.reason}`),
+			...removal.notes.map((note) => `  ${note}`),
+		].join('\n'));
 	}
 
 	private async askForForce(error: GecoError, branch: string, target: string): Promise<boolean> {
