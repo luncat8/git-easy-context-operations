@@ -23,6 +23,15 @@ const VIEW_ID = 'geco.history';
 const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
 const GRAPH_HINT_KEY = 'geco.graphMenuHintShown';
 
+/**
+ * Files inside the git directory that no refresh may react to: plain
+ * `git status` writes the index, staging and every commit dialog write the
+ * message drafts, and the git extension does both on its own. None of them
+ * can change what a commit graph shows, and reacting to them would bounce a
+ * refresh straight back into the extension that wrote them.
+ */
+const IGNORED_GIT_FILES = new Set(['index', 'index.lock', 'COMMIT_EDITMSG', 'COMMIT_EDITMSG.lock', 'MERGE_MSG', 'SQUASH_MSG']);
+
 interface Runtime {
 	settings: Settings;
 	exec: GitExec;
@@ -55,34 +64,88 @@ export function activate(context: vscode.ExtensionContext): void {
 	 *    fast-forward or a deleted branch can leave the built-in graph stale
 	 *    even though our own view is current.
 	 *
-	 * Bursts are debounced, so a journal write plus the command finishing
-	 * plus a watcher tick collapse into one repaint, and every burst is
-	 * logged - open the "Git Easy Ops" output channel to see whether (and
-	 * why) a refresh happened.
+	 * Asking for that re-sync is not free: `git.refresh` is a write operation
+	 * for the git extension (it re-reads status, refs, remotes, submodules and
+	 * worktrees), so the Source Control view shows its progress bar and the
+	 * repository counts as busy until the scan is done. A burst therefore only
+	 * asks for it when something can really have changed the repository - the
+	 * `reSync` flag - and never for the commands that only read: copying a SHA
+	 * or the web link, showing the backups, the menu editor. Only one re-sync
+	 * is ever in flight: a burst that arrives while the git extension is still
+	 * busy queues exactly one follow-up run instead of stacking, so the
+	 * Source Control progress cannot be kept alive by our own bursts.
+	 *
+	 * Bursts are coalesced, so a journal write plus the command finishing plus
+	 * a watcher tick collapse into one repaint; a later reason that does need
+	 * the re-sync upgrades the pending burst instead of being swallowed. Every
+	 * burst is logged - open the "Git Easy Ops" output channel to see whether
+	 * (and why) a refresh happened.
 	 */
 	let refreshBurst: ReturnType<typeof setTimeout> | undefined;
-	const scheduleRefresh = (reason: string) => {
+	let refreshBurstReSync = false;
+	let reSyncInFlight = false;
+	let reSyncQueued = false;
+
+	/** Ask the git extension to re-sync the repository our view shows. */
+	const reSyncBuiltInGraph = (): void => {
+		if (!activeRepo) {
+			return;
+		}
+		const known = (gitApi?.repositories ?? []).some((repo) => repo.rootUri.fsPath === activeRepo);
+		if (!known) {
+			// The git extension does not know this repository (it is not in a
+			// workspace folder it detected): there is no built-in graph for it
+			// to refresh, and asking git.refresh would open a picker.
+			return;
+		}
+		if (reSyncInFlight) {
+			reSyncQueued = true;
+			output.appendLine('the built-in git state is still being re-synced - queued one more');
+			return;
+		}
+		reSyncInFlight = true;
+		const startedAt = Date.now();
+		output.appendLine(`refreshing the built-in git state of ${activeRepo} (git.refresh)`);
+		void Promise.resolve(vscode.commands.executeCommand('git.refresh', activeRepo))
+			.then(
+				() => {
+					// The duration is logged on purpose: "the Source Control
+					// progress bar does not go away" is answered by this line
+					// either arriving late or not arriving at all.
+					output.appendLine(`the built-in git state of ${activeRepo} is current again (${Date.now() - startedAt} ms)`);
+				},
+				(error: unknown) => {
+					output.appendLine(`git.refresh failed after ${Date.now() - startedAt} ms: ${error instanceof Error ? error.message : String(error)}`);
+				},
+			)
+			.then(() => {
+				reSyncInFlight = false;
+				if (reSyncQueued) {
+					reSyncQueued = false;
+					reSyncBuiltInGraph();
+				}
+			});
+	};
+
+	/**
+	 * Repaint our own view on every change; ask the git extension to re-sync
+	 * only when `reSync` says the git state can have changed.
+	 */
+	const scheduleRefresh = (reason: string, reSync = false) => {
+		refreshBurstReSync = refreshBurstReSync || reSync;
 		if (refreshBurst) {
+			output.appendLine(`refresh already scheduled: ${reason}`);
 			return;
 		}
 		output.appendLine(`refresh scheduled: ${reason}`);
 		refreshBurst = setTimeout(() => {
 			refreshBurst = undefined;
+			const reSyncNow = refreshBurstReSync;
+			refreshBurstReSync = false;
 			tree?.refresh();
-			if (!activeRepo) {
-				return;
+			if (reSyncNow) {
+				reSyncBuiltInGraph();
 			}
-			const known = (gitApi?.repositories ?? []).some((repo) => repo.rootUri.fsPath === activeRepo);
-			if (!known) {
-				// The git extension does not know this repository (it is not in
-				// a workspace folder it detected): there is no built-in graph
-				// for it to refresh, and asking git.refresh would open a picker.
-				return;
-			}
-			output.appendLine(`refreshing the built-in git state of ${activeRepo} (git.refresh)`);
-			void Promise.resolve(vscode.commands.executeCommand('git.refresh', activeRepo)).catch((error: unknown) => {
-				output.appendLine(`git.refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-			});
 		}, 150);
 	};
 
@@ -92,7 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// operation (and every undo) schedules a burst, so the graph a squash
 	// just rewrote is current before the result notification is even
 	// dismissed, and so is the branch list after a cleanup.
-	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository'));
+	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true));
 
 	const createdTree = new GecoHistoryProvider({
 		controller: () => runtime.controller,
@@ -159,27 +222,46 @@ export function activate(context: vscode.ExtensionContext): void {
 	 * (it watches the repository's git directory); this mirrors that for our
 	 * view. The journal file lives in the common git directory, so the same
 	 * watcher also catches operations journaled by *other windows*.
+	 *
+	 * Only entries that can mean "history changed" are reported (see
+	 * {@link IGNORED_GIT_FILES}): reacting to the index would bounce a refresh
+	 * straight back into the git extension, whose own scans are what wrote it.
 	 */
 	let repoWatcher: vscode.FileSystemWatcher | undefined;
 	let watchedDir: string | undefined;
 	const watchRepository = async (repoPath: string | undefined): Promise<void> => {
-		if (repoWatcher) {
-			repoWatcher.dispose();
-			repoWatcher = undefined;
-			watchedDir = undefined;
-		}
 		if (!repoPath) {
+			if (repoWatcher) {
+				repoWatcher.dispose();
+				repoWatcher = undefined;
+				watchedDir = undefined;
+			}
 			return;
 		}
 		try {
 			const commonDir = await runtime.controller.contextFor(repoPath).git.commonDir();
-			if (commonDir === watchedDir) {
+			if (commonDir === watchedDir && repoWatcher) {
+				// Already watching exactly this directory: keep the watcher and
+				// its subscription instead of tearing it down and pushing a new
+				// one on every manual refresh.
 				return;
 			}
+			if (repoWatcher) {
+				repoWatcher.dispose();
+				repoWatcher = undefined;
+				watchedDir = undefined;
+			}
 			const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(commonDir), '**'));
-			watcher.onDidChange(() => scheduleRefresh('the repository changed on disk'));
-			watcher.onDidCreate(() => scheduleRefresh('the repository changed on disk'));
-			watcher.onDidDelete(() => scheduleRefresh('the repository changed on disk'));
+			const onRepositoryFile = (uri: vscode.Uri) => {
+				const name = path.basename(uri.fsPath);
+				if (IGNORED_GIT_FILES.has(name)) {
+					return;
+				}
+				scheduleRefresh(`the repository changed on disk (${name})`, true);
+			};
+			watcher.onDidChange(onRepositoryFile);
+			watcher.onDidCreate(onRepositoryFile);
+			watcher.onDidDelete(onRepositoryFile);
 			context.subscriptions.push(watcher);
 			repoWatcher = watcher;
 			watchedDir = commonDir;
@@ -193,13 +275,23 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (repoPath && repoPath !== activeRepo) {
 			activeRepo = repoPath;
 			setRepoContext();
-			scheduleRefresh('the active repository changed');
+			scheduleRefresh('the active repository changed', true);
 			void watchRepository(repoPath);
 		}
 	};
 	void watchRepository(activeRepo);
 
-	/** Resolve the repository, run an operation, then refresh both graphs. */
+	/**
+	 * Resolve the repository, run an operation, then repaint our own view.
+	 *
+	 * The command wrapper deliberately does *not* ask the git extension to
+	 * re-sync: a command may have read only (Copy SHA, Copy Repository Web
+	 * Link, Show Backups, the menu editor) and re-syncing anyway would show the
+	 * Source Control progress bar and scan the repository for nothing. What a
+	 * command did change is reported by the controller's change hook (a
+	 * journal write, an undo) and by the watcher on the git directory, both of
+	 * which ask for the re-sync themselves.
+	 */
 	const run = async (operation: (cwd: string, args: unknown[]) => Promise<void>, ...args: unknown[]) => {
 		const flat = (args.flat() as unknown[]).filter((arg) => arg !== undefined);
 		// A tree node knows its own repository; anything else comes from the editor.
@@ -255,7 +347,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			activeRepo = repositoryPaths(gitApi)[0] ?? activeRepo;
 			setRepoContext();
 			void watchRepository(activeRepo);
-			scheduleRefresh('manual refresh');
+			scheduleRefresh('manual refresh', true);
 		}),
 		vscode.commands.registerCommand('geco.explainMenus', async () => {
 			await runtime.controller.explainMenus();
@@ -333,7 +425,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!affectsGeco(event)) {
 				return;
 			}
-			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository'));
+			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true));
 			output.appendLine('Settings reloaded.');
 			scheduleRefresh('settings changed');
 			// Hidden-menu items changed here or in another window: converge.

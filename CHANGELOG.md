@@ -4,6 +4,34 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.9
+
+### Fixed
+
+- **A command that only reads no longer starts a scan of the Source Control
+  view.** Every Git Easy Ops command used to ask the built-in git extension to
+  re-sync the repository, so pressing **Copy Repository Web Link** (or **Copy
+  Commit SHA**, **Show Backups**, **Why Don't I See the Menus?**, ...) made the
+  Source Control view show its progress bar and the repository count as busy
+  while the git extension re-scanned status, refs, remotes, submodules and
+  worktrees - for nothing, because nothing had changed. The re-sync now only
+  happens when something really can have changed the repository: a journaled
+  operation, an undo, or a change on disk. A command that did change something
+  still reaches the built-in graph through those two paths, and the command
+  wrapper repaints the *Git Easy Ops* view as before.
+- **Re-syncs can no longer stack.** At most one `git.refresh` runs at a time; a
+  burst that arrives while the git extension is still busy queues exactly one
+  follow-up run instead of issuing another one right away, so our own bursts
+  cannot keep the Source Control progress bar alive. The *Git Easy Ops* output
+  channel now logs how long each re-sync took ("... is current again (n ms)") -
+  that is the line to look at when the bar does not go away.
+- **The watcher ignores what a plain `git status` writes.** Reacting to
+  `.git/index` (and to the message drafts `COMMIT_EDITMSG`, `MERGE_MSG`,
+  `SQUASH_MSG`) sent a refresh straight back into the git extension, whose own
+  scans are what wrote those files. Only entries that can mean "history
+  changed" schedule a refresh now, and a manual **Refresh** keeps the existing
+  watcher instead of tearing it down and creating a new one.
+
 ## 0.4.8
 
 ### Fixed

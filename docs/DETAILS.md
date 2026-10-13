@@ -107,12 +107,17 @@ without any proposed API.
   a proposed API (see below). The view **reloads itself** whenever an operation
   changes the repository - including the *Undo* you pick in the notification
   afterwards - so what you see is never one squash behind. The *built-in*
-  Source Control Graph is refreshed too: after every operation the extension
-  asks the git extension to re-sync its state (`git.refresh` for the open
-  repository), and a watcher on the repository's git directory picks up changes
-  made elsewhere (another window, the terminal, a colleague's push). Every
-  refresh - and why it happened - is logged in the *Git Easy Ops* output
-  channel. Branch badges under an expanded commit are re-queried from git
+  Source Control Graph is refreshed too: whenever something can have changed
+  the repository (a journaled operation, an undo, a change on disk) the
+  extension asks the git extension to re-sync its state (`git.refresh` for the
+  open repository, at most one at a time), and a watcher on the repository's
+  git directory picks up changes made elsewhere (another window, the terminal, a
+  colleague's push - it ignores the index and the message drafts, which a plain
+  `git status` writes). Commands that only read (**Copy SHA**, **Copy
+  Repository Web Link**, **Show Backups**, the menu editor) do not start that
+  re-sync, so they cannot make the Source Control view scan and show its
+  progress bar. Every refresh - and why it happened - is logged in the *Git
+  Easy Ops* output channel, including how long a re-sync took. Branch badges under an expanded commit are re-queried from git
   when the row is expanded, so a branch created or deleted elsewhere never
   shows up stale.
 - **The same view** also lists all branches and the recovery points/journal.
