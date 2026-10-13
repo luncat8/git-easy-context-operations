@@ -55,6 +55,7 @@ import { addProposedApi } from './argvJson';
 import { addProductProposals } from './productJson';
 import { buildGraphRows, refRowsAt, type GraphCommitRow, type GraphRefRow } from './graphRows';
 import { shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
+import { remoteToWebUrl } from './webLink';
 import {
 	analyzeDeadPaths,
 	blockingCleanReasons,
@@ -707,7 +708,9 @@ export class Controller {
 
 	/** Review and remove branches made redundant by the just-completed move. */
 	private async cleanupRedundantAfterFastForward(ctx: RepoContext, result: FastForwardResult): Promise<void> {
-		const scan = await findRedundantBranches(ctx);
+		// Only branches on the history of the moved tip are offered: a side branch
+		// that merely shares a commit with another ref is not part of this line.
+		const scan = await findRedundantBranches(ctx, { ancestorOf: result.to });
 		if (scan.redundant.length === 0) {
 			this.ui.log(`No redundant branches to clean up after moving ${result.branch}.`);
 			return;
@@ -2263,6 +2266,37 @@ export class Controller {
 			}
 			await this.ui.copy(target);
 			await this.ui.message('info', `Copied ${shorten(target)} to the clipboard.`);
+		});
+	}
+
+	/**
+	 * "Copy Repository Web Link" - the browsable address of the repository,
+	 * built from `origin` (or the first remote that has a web address).
+	 */
+	async copyRepositoryWebLink(cwd: string): Promise<void> {
+		await this.guard('Copy repository web link', async () => {
+			const ctx = this.contextFor(cwd);
+			await ctx.git.requireRepository();
+			const names = await ctx.git.remotes();
+			const ordered = [...names.filter((name) => name === 'origin'), ...names.filter((name) => name !== 'origin')];
+			let found: { remote: string; url: string } | undefined;
+			for (const name of ordered) {
+				const remoteUrl = (await ctx.git.tryRun(['remote', 'get-url', name]))?.trim() ?? '';
+				const web = remoteToWebUrl(remoteUrl);
+				if (web) {
+					found = { remote: name, url: web };
+					break;
+				}
+			}
+			if (!found) {
+				throw new GecoError(
+					'no-remote',
+					names.length === 0 ? 'This repository has no remote, so there is no web link.' : 'None of the remotes has a web address (https or ssh to a host).',
+					names.length === 0 ? 'Add one with `git remote add origin <url>`.' : `Remotes: ${names.join(', ')}.`,
+				);
+			}
+			await this.ui.copy(found.url);
+			await this.ui.message('info', `Copied the web link of ${found.remote}: ${found.url}`);
 		});
 	}
 

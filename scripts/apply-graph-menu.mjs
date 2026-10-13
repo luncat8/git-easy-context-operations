@@ -84,6 +84,8 @@ const GRAPH_MENUS = {
 		// Same idea, one level down: not about a commit either, it prunes the
 		// branch names the graph shows once their commits live elsewhere.
 		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@91' },
+		// Repository-wide, like Clean History: the link to the repo on the web.
+		{ command: 'geco.copyRepositoryWebLink', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyRepositoryWebLink)', group: 'navigation@92' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };

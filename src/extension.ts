@@ -242,6 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.showBackups', async (cwd) => runtime.controller.showBackups(cwd)],
 		['geco.cleanHistory', async (cwd) => runtime.controller.cleanHistory(cwd)],
 		['geco.copyCommitSha', async (cwd, args) => runtime.controller.copyCommitSha(cwd, args)],
+		['geco.copyRepositoryWebLink', async (cwd) => runtime.controller.copyRepositoryWebLink(cwd)],
 	];
 
 	for (const [id, operation] of commands) {

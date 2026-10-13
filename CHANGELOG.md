@@ -4,6 +4,25 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.8
+
+### Fixed
+
+- **The fast-forward cleanup offers only branches on the moved line.** After
+  “Move and clean up redundant branches…”, the checkbox list used to include any
+  branch whose commits were held by another ref - including side branches off
+  the line that merely shared a commit with another name. It now only offers
+  branches whose tip is on the history of the new default-branch tip (what the
+  fast-forward just moved onto). Side branches are never listed there. The
+  general “Remove Redundant Branches...” command is unchanged.
+
+### Added
+
+- **Copy Repository Web Link** - a button on the Source Control Graph caption
+  (graph build) that copies the web address of the repository, built from
+  `origin` (or the first remote with a web address). Credentials in the remote
+  URL are never copied.
+
 ## 0.4.7
 
 ### Improved

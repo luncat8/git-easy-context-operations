@@ -140,6 +140,9 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// would be a duplicate (see `scripts/apply-graph-menu.mjs`).
 	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title'] },
 	{ id: 'geco.explainMenus', label: "Why Don't I See the Menus?", surfaces: ['view.title', 'graph.title'] },
+	// Caption of the built-in Source Control Graph: a repository-wide link, so it
+	// sits on the graph toolbar next to Clean History, not on any commit row.
+	{ id: 'geco.copyRepositoryWebLink', label: 'Copy Repository Web Link', surfaces: ['graph.title'] },
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',

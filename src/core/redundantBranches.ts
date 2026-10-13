@@ -89,6 +89,16 @@ export interface KeptBranch {
 	uniqueCommits: number;
 }
 
+export interface FindRedundantBranchesOptions {
+	/**
+	 * Only offer branches that lie on the history of this commit: a branch is a
+	 * candidate when its tip is an ancestor of it (or the commit itself). Used
+	 * after a fast-forward, so the cleanup only touches the line that was just
+	 * moved and never a side branch that merely shares a commit with another ref.
+	 */
+	ancestorOf?: string;
+}
+
 export interface RedundantBranchScan {
 	/** Local branches first, then remote-tracking branches. */
 	redundant: RedundantBranch[];
@@ -109,9 +119,10 @@ export interface RedundantBranchScan {
  * so a remote branch is only offered when something *outside* the batch holds
  * its commits.
  */
-export async function findRedundantBranches(ctx: RepoContext): Promise<RedundantBranchScan> {
+export async function findRedundantBranches(ctx: RepoContext, options: FindRedundantBranchesOptions = {}): Promise<RedundantBranchScan> {
 	const { git } = ctx;
 	await git.requireRepository();
+	const ancestorOf = options.ancestorOf;
 
 	const branches = await git.branches();
 	const protectedNames = await protectedBranchNames(ctx, branches);
@@ -126,6 +137,11 @@ export async function findRedundantBranches(ctx: RepoContext): Promise<Redundant
 
 	for (const branch of candidates) {
 		const ownRef = `refs/heads/${branch.name}`;
+		// Off the line of history in question: not a candidate at all (and not a
+		// \"kept\" branch either - it is simply outside this cleanup).
+		if (ancestorOf && !(await git.isAncestor(branch.sha, ancestorOf))) {
+			continue;
+		}
 		// Every ref whose history includes this tip - including the branch itself.
 		const containing = await git.listRefs(HISTORY_REF_PATTERNS, { contains: branch.sha });
 		const keepers = containing
@@ -152,7 +168,7 @@ export async function findRedundantBranches(ctx: RepoContext): Promise<Redundant
 		});
 	}
 
-	const remoteCandidates = await redundantRemoteBranches(ctx, branches, doomed);
+	const remoteCandidates = await redundantRemoteBranches(ctx, branches, doomed, ancestorOf);
 	redundant.push(...remoteCandidates);
 
 	// Report only the refs that actually survive the batch: a branch scanned
@@ -193,6 +209,7 @@ async function redundantRemoteBranches(
 	ctx: RepoContext,
 	branches: readonly RefInfo[],
 	doomed: Set<string>,
+	ancestorOf?: string,
 ): Promise<RedundantBranch[]> {
 	const { git } = ctx;
 	const remotes = await git.remotes();
@@ -218,6 +235,10 @@ async function redundantRemoteBranches(
 			continue;
 		}
 		if (head && parsed.branch === head) {
+			continue;
+		}
+		// Only the line of history in question (see `ancestorOf`).
+		if (ancestorOf && !(await git.isAncestor(ref.sha, ancestorOf))) {
 			continue;
 		}
 		// In use: a local branch that is not going anywhere tracks this name.

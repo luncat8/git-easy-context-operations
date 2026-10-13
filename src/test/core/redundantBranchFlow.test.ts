@@ -331,3 +331,34 @@ describe('controller - the view is refreshed when the graph changes', () => {
 		}
 	});
 });
+
+describe('controller - fast-forward cleanup offers only the line that was moved', () => {
+	it('never offers a side branch, even one that duplicates another side branch', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			// A side line off v0.2 with two names on its tip - redundant against
+			// each other, but NOT on main's history, so they must not be offered.
+			await repo.gitOk(['checkout', '--quiet', '-b', 'side', shas.v02]);
+			const sideTip = await repo.commit('side work', { 's.txt': 's\n' });
+			await repo.gitOk(['branch', 'side-dup', sideTip]);
+			await repo.checkout('main');
+
+			// The fast-forward target: a feature commit on top of main, plus a
+			// leftover `old` backup at v0.2 - both on the moved line.
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			await repo.gitOk(['branch', 'old', shas.v02]);
+
+			const ui = new FakeUI({ choices: ['move-clean'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			const offered = ui.multiPickCalls.flatMap((call) => call.items.map((item) => item.label));
+			assert.deepEqual(offered.sort(), ['feature', 'old'], `only branches on main's line are offered: ${ui.allLogs()}`);
+			assert.equal(await repo.hasBranch('side'), true, 'side kept');
+			assert.equal(await repo.hasBranch('side-dup'), true, 'side-dup kept');
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
