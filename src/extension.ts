@@ -11,6 +11,7 @@ import { Controller, type RewordFlow } from './core/controller';
 import { createGitExec, createProcessExec, type GitExec } from './core/gitRunner';
 import type { Settings } from './core/config';
 import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, defaultHiddenIds, effectiveHiddenList, parseHiddenItems } from './core/menuVisibility';
+import { reportWithoutWaiting } from './core/ui';
 import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
 import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
@@ -271,11 +272,20 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	/**
+	 * Our view follows the repository the user is working in; the git extension
+	 * does not need to be told about that. Switching the repository our view
+	 * shows changes nothing in git, so this only repaints - asking the git
+	 * extension to re-sync here would put the Source Control view's progress
+	 * bar on the screen for a plain editor/window focus change (a read-only
+	 * command like *Copy Repository Web Link* runs through here when it is the
+	 * first thing that touches another repository).
+	 */
 	const rememberRepo = (repoPath: string | undefined) => {
 		if (repoPath && repoPath !== activeRepo) {
 			activeRepo = repoPath;
 			setRepoContext();
-			scheduleRefresh('the active repository changed', true);
+			scheduleRefresh('the active repository changed');
 			void watchRepository(repoPath);
 		}
 	};
@@ -385,7 +395,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			output.appendLine(`${HIDDEN_MENU_ITEMS_FULL_KEY} -> default (no stored list)`);
 			applyMenus();
 			menuEditor.refresh();
-			await vscode.window.showInformationMessage('Git Easy Ops: the menu items were restored to their defaults.');
+			// Not awaited: a notification only resolves when it goes away, and
+			// the command is done the moment the list is written (see
+			// `reportWithoutWaiting`). This one is in the menu editor's
+			// toolbar, where a pending command is merely pointless - in the
+			// Source Control Graph it would be a progress indicator.
+			reportWithoutWaiting(() => vscode.window.showInformationMessage('Git Easy Ops: the menu items were restored to their defaults.'));
 		}),
 	);
 

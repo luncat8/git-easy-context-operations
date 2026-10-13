@@ -4,6 +4,53 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.10
+
+### Fixed
+
+- **"Copy Repository Web Link" no longer leaves a progress bar running.** The
+  0.4.9 change removed the `git.refresh` that every command used to trigger -
+  that was real, but it was not the spinner the report was about. VS Code
+  resolves the promise of a **non-modal notification when the notification goes
+  away**, not when it is shown: 10 s for an info message, 12 s for a warning,
+  15 s for an error, never while the mouse hovers it or the window is
+  unfocused, and with *Do Not Disturb* on it is only placed in the notification
+  centre and never closes by itself. `message()` awaited that promise, so the
+  **command** stayed pending long after the link was on the clipboard - and an
+  action started from the built-in **Source Control Graph** runs under a
+  progress indicator that lasts exactly as long as the command's promise (VS
+  Code wraps every action of that view in `withProgress`). A message is a
+  report, not a question: it is logged, shown and done with
+  (`reportWithoutWaiting`), and only the messages whose *answer* the flow needs
+  (`ask`, the notification with buttons) are still awaited. Every command that
+  merely reports - Copy SHA, Copy Repository Web Link, Show Backups, Why Don't I
+  See the Menus?, the menu editor - now finishes when its work does, so the
+  graph's spinner stops with it.
+- **Noticing a different repository no longer re-scans git.** The hook that
+  follows the repository a command ran in (`rememberRepo`, also driven by the
+  active editor) asked the git extension to re-sync whenever the repository our
+  own view shows changed - a full `git.refresh` (status, refs, remotes,
+  submodules, worktrees) for a change that exists only in our view, e.g. the
+  first *Copy Repository Web Link* in a window with several repositories open,
+  or switching to a file of another repository. Nothing about that can have
+  changed git state, so only the repaint is scheduled now.
+- **The menu editor's "reset" notification is not waited for** either - same
+  rule, same reason (its command lives on a view toolbar, where a pending
+  command is only pointless rather than visible).
+
+### Tests
+
+- `reportWithoutWaiting` is covered by the headless suite (a notification that
+  never settles must not hold a command back, and a failing one must not
+  surface as an unhandled rejection), and the VS Code integration smoke test
+  runs the real command and fails if its promise does not settle with the work
+  instead of with the notification.
+
+### Changed
+
+- `dist/` carries the current build (0.4.10) and the previous release (0.4.9);
+  the superseded 0.4.7 / 0.4.8 artifacts are gone.
+
 ## 0.4.9
 
 ### Fixed

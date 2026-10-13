@@ -2,6 +2,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import type { AskOptions, ChooseOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../core/ui';
+import { reportWithoutWaiting } from '../core/ui';
 
 export class VsCodeUI implements UI {
 	constructor(private readonly output: vscode.OutputChannel) {}
@@ -87,20 +88,37 @@ export class VsCodeUI implements UI {
 
 	async ask(message: string, options: AskOptions): Promise<string | undefined> {
 		if (options.actions.length === 0) {
-			await vscode.window.showInformationMessage(message, { modal: false, detail: options.detail });
+			// No buttons means no answer to wait for - a report, not a
+			// question, so it follows the rule of {@link reportWithoutWaiting}
+			// even though the caller awaits it (flows whose follow-up list can
+			// end up empty, e.g. a fast-forward with nothing to clean up).
+			reportWithoutWaiting(() => vscode.window.showInformationMessage(message, { modal: false, detail: options.detail }));
 			return undefined;
 		}
+		// This one *is* awaited: the answer is what the caller asked for, and
+		// VS Code can only hand it over through this promise (dismissing the
+		// notification resolves `undefined`, i.e. "no follow-up action").
 		return vscode.window.showInformationMessage(message, { modal: false, detail: options.detail }, ...options.actions);
 	}
 
+	/**
+	 * Report a message. Logged first, then shown - and *not* awaited: VS Code
+	 * resolves the promise of a non-modal notification when the notification
+	 * goes away (10 s for an info message, 12 s for a warning, 15 s for an
+	 * error, and never while the mouse hovers it or the window is unfocused).
+	 * Awaiting it kept the whole command pending, and the Source Control Graph
+	 * draws a progress indicator for exactly as long as a command of its
+	 * caption is running - the "endless progress" after *Copy Repository Web
+	 * Link*. See {@link reportWithoutWaiting}.
+	 */
 	async message(kind: MessageKind, message: string, detail?: string): Promise<void> {
 		this.log(detail ? `${message}\n${detail}` : message);
 		if (kind === 'error') {
-			await vscode.window.showErrorMessage(message, { modal: false, detail });
+			reportWithoutWaiting(() => vscode.window.showErrorMessage(message, { modal: false, detail }));
 		} else if (kind === 'warn') {
-			await vscode.window.showWarningMessage(message, { modal: false, detail });
+			reportWithoutWaiting(() => vscode.window.showWarningMessage(message, { modal: false, detail }));
 		} else {
-			await vscode.window.showInformationMessage(message, { modal: false, detail });
+			reportWithoutWaiting(() => vscode.window.showInformationMessage(message, { modal: false, detail }));
 		}
 	}
 
