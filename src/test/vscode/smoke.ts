@@ -39,6 +39,7 @@ const EXPECTED_COMMANDS = [
 	'geco.showBackups',
 	'geco.cleanHistory',
 	'geco.copyCommitSha',
+	'geco.copyRepositoryWebLink',
 	'geco.refresh',
 	'geco.explainMenus',
 	'geco.enableGraphMenu',
@@ -55,6 +56,7 @@ export async function run(): Promise<void> {
 		['refresh works without a repository', testRefresh],
 		['menu item names can be copied', testCopyMenuItemName],
 		['a command reaches git and copies a sha', testCopySha],
+		['a command does not wait for its own notification', testCommandDoesNotWaitForItsNotification],
 	];
 
 	const failures: string[] = [];
@@ -141,6 +143,68 @@ async function testCopySha(): Promise<void> {
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+}
+
+/**
+ * The command ends with an info notification, and VS Code resolves the promise
+ * of a *non-modal* notification only when the notification goes away - 10 s for
+ * an info toast, and never while the mouse hovers it or the window is
+ * unfocused. Everything that awaits it stays pending for that long, and an
+ * action started from the built-in **Source Control Graph** runs under a
+ * progress indicator that lasts exactly as long as the command's promise (VS
+ * Code wraps every action of that view in `withProgress`). Awaiting the
+ * notification is therefore what left the graph spinning after "Copy
+ * Repository Web Link" had already copied the link.
+ *
+ * The progress indicator itself cannot be inspected from here; the promise it
+ * is tied to can. The deadline is below the 10 s the toast would live, so a
+ * command that waits for its own notification fails this check instead of
+ * passing it slowly.
+ */
+async function testCommandDoesNotWaitForItsNotification(): Promise<void> {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'geco-vscode-'));
+	try {
+		const git = (args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: gitEnv(dir) });
+		fs.mkdirSync(path.join(dir, 'home'));
+		git(['init', '--quiet', '--initial-branch=main']);
+		git(['config', 'user.name', 'VS Code Test']);
+		git(['config', 'user.email', 'test@example.com']);
+		git(['remote', 'add', 'origin', 'git@github.com:luncat8/git-easy-context-operations.git']);
+		fs.writeFileSync(path.join(dir, 'a.txt'), 'a\n', 'utf8');
+		git(['add', '-A']);
+		git(['commit', '--quiet', '-m', 'v0.1']);
+
+		await vscode.env.clipboard.writeText('');
+		await withDeadline(
+			vscode.commands.executeCommand('geco.copyRepositoryWebLink', { repoPath: dir }),
+			8000,
+			'geco.copyRepositoryWebLink',
+		);
+		assert.equal(
+			await vscode.env.clipboard.readText(),
+			'https://github.com/luncat8/git-easy-context-operations',
+			'the web link of the origin remote is on the clipboard',
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+/** Resolves to the value, or rejects after `ms` - never hangs the test run. */
+function withDeadline<T>(promise: Thenable<T>, ms: number, what: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${what} did not finish within ${ms} ms`)), ms);
+		promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error) => {
+				clearTimeout(timer);
+				reject(error);
+			},
+		);
+	});
 }
 
 function gitEnv(dir: string): NodeJS.ProcessEnv {

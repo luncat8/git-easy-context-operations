@@ -87,8 +87,17 @@ export interface UI {
 	 * without it makes the caller fall back to a plain confirm.
 	 */
 	choose?(message: string, options: ChooseOptions): Promise<string | undefined>;
-	/** A message with optional action buttons; resolves to the chosen action. */
+	/**
+	 * A message with optional action buttons; resolves to the chosen action.
+	 * Without any action it is a plain report: it must not wait for the
+	 * notification to be dismissed either.
+	 */
 	ask(message: string, options: AskOptions): Promise<string | undefined>;
+	/**
+	 * Show a message. The promise must resolve as soon as the message has been
+	 * handed to the UI - *not* when the user dismisses it (see
+	 * {@link reportWithoutWaiting}, which is what the VS Code adapter uses).
+	 */
 	message(kind: MessageKind, message: string, detail?: string): Promise<void>;
 	log(message: string): void;
 	withProgress<R>(title: string, task: (report: (message: string) => void) => Promise<R>): Promise<R>;
@@ -99,6 +108,44 @@ export interface UI {
 	openPath?(path: string): Promise<void>;
 	/** Optional: reveal the extension's output channel. */
 	showOutput?(): Promise<void>;
+}
+
+/**
+ * Hand a message to the UI and return at once.
+ *
+ * This is the one rule the adapter has to follow for {@link UI.message}:
+ * *never await a notification*.
+ *
+ * `showInformationMessage` / `showWarningMessage` / `showErrorMessage` resolve
+ * **when the notification goes away**, not when it is shown. VS Code keeps a
+ * non-modal toast on screen for 10 s (info), 12 s (warning) or 15 s (error),
+ * and never hides it while the mouse hovers it or while the window is
+ * unfocused - so the promise can stay pending for minutes. Everything that
+ * waits for it stays pending too:
+ *
+ *  - the *command* only finishes then (it is listed as running the whole time);
+ *  - an action started from the built-in **Source Control Graph** runs under a
+ *    progress indicator that lasts exactly as long as the command's promise -
+ *    VS Code wraps every action of that view in `withProgress` - which is how
+ *    pressing **Copy Repository Web Link** in the graph caption left a spinner
+ *    running in the graph long after the link was on the clipboard.
+ *
+ * A message is a report, not a question (`ask` is the question, and it is meant
+ * to wait for an answer): show it and move on. Nothing is lost either way - the
+ * same text goes to the output channel.
+ *
+ * A UI that cannot show the message (or throws while doing it) must never fail
+ * the operation that already succeeded, so both paths are swallowed.
+ */
+export function reportWithoutWaiting(show: () => PromiseLike<unknown> | undefined | void): void {
+	try {
+		const shown = show();
+		if (shown && typeof shown.then === 'function') {
+			void Promise.resolve(shown).then(undefined, () => undefined);
+		}
+	} catch {
+		// A message that cannot be shown is not worth failing a finished command.
+	}
 }
 
 /** Follow-up action labels used across the flows. */

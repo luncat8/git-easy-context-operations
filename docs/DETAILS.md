@@ -5,10 +5,10 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.5.vsix
+code --install-extension dist/git-easy-context-operations-0.4.10.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.5+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) For the `+graph` build,
@@ -107,12 +107,24 @@ without any proposed API.
   a proposed API (see below). The view **reloads itself** whenever an operation
   changes the repository - including the *Undo* you pick in the notification
   afterwards - so what you see is never one squash behind. The *built-in*
-  Source Control Graph is refreshed too: after every operation the extension
-  asks the git extension to re-sync its state (`git.refresh` for the open
-  repository), and a watcher on the repository's git directory picks up changes
-  made elsewhere (another window, the terminal, a colleague's push). Every
-  refresh - and why it happened - is logged in the *Git Easy Ops* output
-  channel. Branch badges under an expanded commit are re-queried from git
+  Source Control Graph is refreshed too: whenever something can have changed
+  the repository (a journaled operation, an undo, a change on disk) the
+  extension asks the git extension to re-sync its state (`git.refresh` for the
+  open repository, at most one at a time), and a watcher on the repository's
+  git directory picks up changes made elsewhere (another window, the terminal, a
+  colleague's push - it ignores the index and the message drafts, which a plain
+  `git status` writes). Commands that only read (**Copy SHA**, **Copy
+  Repository Web Link**, **Show Backups**, the menu editor) do not start that
+  re-sync, so they cannot make the Source Control view scan and show its
+  progress bar - and neither does noticing that the command ran in another
+  repository than the view showed. Every refresh - and why it happened - is
+  logged in the *Git Easy Ops* output channel, including how long a re-sync
+  took. Nothing a command *reports* is waited for either: a notification in VS
+  Code resolves its promise only when it goes away (10 s for an info message,
+  and the Source Control Graph draws progress for as long as a command of its
+  caption runs), so messages are shown and the command is done - only `ask`
+  (the notification with buttons) waits, because its answer is the point.
+  Branch badges under an expanded commit are re-queried from git
   when the row is expanded, so a branch created or deleted elsewhere never
   shows up stale.
 - **The same view** also lists all branches and the recovery points/journal.
@@ -141,7 +153,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.5+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.10+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -231,12 +243,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.5.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.5.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.10.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.10.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.5+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.5+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -248,7 +260,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.5.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.10.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
