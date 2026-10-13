@@ -5,10 +5,10 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.10.vsix
+code --install-extension dist/git-easy-context-operations-0.4.11.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.11+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) For the `+graph` build,
@@ -84,6 +84,8 @@ Repository: https://github.com/luncat8/git-easy-context-operations
 
 | 8 | **Clean History (Remove Dead Paths)...** | The whole-graph operation: scans every branch, tag, remote-tracking branch *and* HEAD for paths that exist only in old commits, shows them with the size they still occupy, writes a `git bundle` backup of every ref, then rewrites the history with `git filter-repo` (recovery points under `refs/geco/` excluded, so **Undo** of earlier operations keeps working). Afterwards it puts the remotes filter-repo removed back, rescans to verify, journals where the bundle is, and offers the force push. Without `git-filter-repo` installed it **offers to install it for you** (pip, Homebrew, or the system package manager when sudo needs no password) and continues the cleanup once the tool is in place - the exact script is the fallback, not the answer. |
 
+| 10 | **Diagnose Push / Sync Trouble...** | Answers "why can I not push or sync?" from the repository itself: an unfinished merge/rebase/cherry-pick (and its conflict markers), a stale `index.lock` left by a killed git process, a branch with no upstream or an upstream that is gone from the server, and - the reported accident - **the same work committed twice**, where a local commit and a commit on the remote carry byte-identical trees under different hashes and `git push` is rejected as non-fast-forward. It says what a push would do, explains why the **Sync** button makes the duplicate case *worse* (its `git pull` half merges the remote copy back in, or stops half-way with a conflict - the "unfinished repository" state), and offers the repairs, one at a time and re-checked after each: abort the unfinished operation, remove the stale lock, rebase onto the remote copy (git drops the already-applied commits itself), point the branch at the remote copy when nothing local is unique (old tip parked on a backup branch first), force push with lease, fetch (with a short timeout, so "the network is down" is an answer instead of a hang), publish. Every repair that touches a ref is journaled - one **Undo** puts it back. See `docs/STUCK-STATES.md` for the reproductions.
+
 | 9 | **Customize Context Menus...** / **Restore Menu Item Defaults** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. One row is hidden *by default* (**Search and Replace in Commit Message...**, shown as "hidden by default" in the editor); everything else is on until you switch it off. Saved in `geco.hiddenMenuItems` (an absent value means the built-in defaults, an explicit `[]` means "show everything"), fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
 
 Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
@@ -138,6 +140,10 @@ without any proposed API.
   both run **Clean History (Remove Dead Paths)...**. The same command is the
   **last** item of a commit row's context menu and of the *Git Easy Ops* submenu,
   for the case where the right-click happens first.
+- **One more repository-wide button**, in the view toolbar next to *Clean
+  History* (and in the built-in graph's toolbar in the `+graph` build):
+  **Diagnose Push / Sync Trouble...** - it is about the repository, not about a
+  commit, so it never sits in a row.
 - **Timeline view** - right-click a commit row of the selected file
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
@@ -153,7 +159,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.10+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.11+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -243,12 +249,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.10.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.10.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.11.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.11.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.10+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.11+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.11+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -260,7 +266,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.10.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.11.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
@@ -303,8 +309,20 @@ do that before publishing).
   and asks; without `git-filter-repo` on `PATH` it touches nothing at all.
 - Patch probing never touches your index or working tree; a failed apply removes
   the worktree and branch it created.
+- Every operation that rewrites or moves refs **refuses to start on top of a
+  half-finished repository**: a merge, rebase, cherry-pick or revert still in
+  progress (and its conflict markers), or an `index.lock` left behind by a
+  killed git process, stops the command with a message that names the state and
+  the way out - *Diagnose Push / Sync Trouble...* can clean it up. The patch
+  flow is exempt from the `git am` (and the `--3way` conflicts) it produces
+  itself, because continuing or aborting them is part of that flow.
+- After a reword, a squash or a forced move that needs a force push, the report
+  says explicitly **not to use VS Code's Sync button** for it: Sync pulls
+  (merges) first and folds the old remote history - including the commits the
+  operation replaced - back into the branch.
 - git runs with `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `LC_ALL=C`, no
-  shell involved, and a 5-minute timeout.
+  shell involved, and a 5-minute timeout (a fetch in the diagnosis uses a short
+  60-second one, so an unreachable remote is reported instead of hanging).
 
 ## Settings
 

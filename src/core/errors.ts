@@ -15,6 +15,7 @@ export type GecoErrorCode =
 	| 'commit-not-on-branch'
 	| 'not-a-chain'
 	| 'dirty-worktree'
+	| 'repo-busy'
 	| 'not-fast-forward'
 	| 'no-remote'
 	| 'ref-exists'

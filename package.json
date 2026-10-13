@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -141,6 +141,12 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "geco.diagnosePushSync",
+        "title": "Diagnose Push / Sync Trouble...",
+        "category": "Git Easy Ops",
+        "icon": "$(pulse)"
+      },
+      {
         "command": "geco.checkoutBranch",
         "title": "Check Out Branch...",
         "category": "Git Easy Ops",
@@ -262,6 +268,11 @@
           "command": "geco.removeRedundantBranches",
           "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
           "group": "1_geco@3"
+        },
+        {
+          "command": "geco.diagnosePushSync",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)",
+          "group": "1_geco@4"
         },
         {
           "command": "geco.explainMenus",

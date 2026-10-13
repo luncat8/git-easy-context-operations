@@ -161,6 +161,28 @@ export class Git {
 		return path.resolve(this.cwd, relative);
 	}
 
+	/**
+	 * `.git` of *this* worktree - where MERGE_HEAD, index.lock and the rebase
+	 * directories of the checked out worktree live (a linked worktree has its
+	 * own, the common dir only holds the shared ones).
+	 */
+	async gitDir(): Promise<string> {
+		const absolute = await this.tryRun(['rev-parse', '--path-format=absolute', '--git-dir']);
+		if (absolute) {
+			return absolute;
+		}
+		return path.resolve(this.cwd, await this.ok(['rev-parse', '--git-dir']));
+	}
+
+	/** Path of a file git keeps in the git dir (`git rev-parse --git-path X`). */
+	async gitPath(name: string): Promise<string> {
+		const reported = await this.tryRun(['rev-parse', '--path-format=absolute', '--git-path', name]);
+		if (reported) {
+			return reported;
+		}
+		return path.resolve(await this.gitDir(), name);
+	}
+
 	// ------------------------------------------------------------------- revs
 
 	async revParse(rev: string): Promise<string | undefined> {
@@ -690,6 +712,76 @@ export class Git {
 
 	async push(args: readonly string[]): Promise<GitExecResult> {
 		return this.run(['push', ...args], { timeoutMs: 600_000 });
+	}
+
+	/**
+	 * `git fetch` - the only network call of the diagnosis. Short timeout on
+	 * purpose: when the connection is down the point is to *say so*, not to
+	 * hang the command for minutes.
+	 */
+	async fetch(remote: string, options?: { prune?: boolean; timeoutMs?: number; refspecs?: readonly string[] }): Promise<GitExecResult> {
+		const args = ['fetch', remote];
+		if (options?.prune) {
+			args.push('--prune');
+		}
+		if (options?.refspecs) {
+			args.push(...options.refspecs);
+		}
+		return this.run(args, { timeoutMs: options?.timeoutMs ?? 60_000 });
+	}
+
+	/**
+	 * `git cherry -v <upstream> <head>`: which commits of `head` are *patch
+	 * equivalent* to one already on the upstream side. This is the check that
+	 * recognizes "the same work committed twice" - the local commit and the
+	 * one on the remote add the identical change, but their hashes differ
+	 * (a different commit time, a different clone, an edit made on GitHub),
+	 * so `git push` sees a non-fast-forward and refuses.
+	 */
+	async cherry(upstream: string, head: string): Promise<{ sha: string; alreadyThere: boolean; subject: string }[]> {
+		const out = await this.tryRun(['cherry', '-v', upstream, head]);
+		if (!out) {
+			return [];
+		}
+		const commits: { sha: string; alreadyThere: boolean; subject: string }[] = [];
+		for (const line of out.split('\n')) {
+			const match = /^([+-])\s+([0-9a-f]{7,64})\s*(.*)$/.exec(line.trim());
+			if (!match) {
+				continue;
+			}
+			commits.push({ sha: match[2]!, alreadyThere: match[1] === '-', subject: match[3] ?? '' });
+		}
+		return commits;
+	}
+
+	/**
+	 * The patch id of a commit: the hash of the change it introduces, ignoring
+	 * parent, author, date and message. Two commits made from the same edit
+	 * have the same patch id even when their commit hashes differ - that is
+	 * what finds the *counterpart* of a duplicated commit on the other side.
+	 */
+	async patchIdOf(rev: string): Promise<string | undefined> {
+		const show = await this.run(['show', '--no-color', '--pretty=format:', '--patch', '--no-renames', rev]);
+		if (show.exitCode !== 0 || !show.stdout.trim()) {
+			return undefined;
+		}
+		const result = await this.run(['patch-id', '--stable'], { input: show.stdout });
+		if (result.exitCode !== 0) {
+			return undefined;
+		}
+		const first = result.stdout.trim().split(/\s+/)[0];
+		return first && /^[0-9a-f]{7,64}$/.test(first) ? first : undefined;
+	}
+
+	// ------------------------------------------------------------ rebase state
+
+	/** Non-interactive `git rebase <target>`; the editor is pinned off. */
+	async rebase(target: string, options?: { timeoutMs?: number }): Promise<GitExecResult> {
+		return this.run(['rebase', target], { env: { GIT_EDITOR: 'true' }, timeoutMs: options?.timeoutMs ?? 300_000 });
+	}
+
+	async rebaseAbort(): Promise<GitExecResult> {
+		return this.run(['rebase', '--abort'], { env: { GIT_EDITOR: 'true' }, timeoutMs: 120_000 });
 	}
 }
 

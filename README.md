@@ -30,6 +30,11 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   overwritten silently.
 - **Apply a patch at its proper base** - finds the commit the patch was made
   against and applies it there, on a new branch or in a separate worktree.
+- **Diagnose push / sync trouble** - one command that says why *Push* or *Sync* is
+  refused (an unfinished merge, the same work committed twice under different
+  hashes, a rewritten branch the remote still has, a stale `index.lock`, a missing
+  upstream), warns that Sync merges the old history back in, and repairs what can
+  be repaired. See [docs/STUCK-STATES.md](docs/STUCK-STATES.md).
 - **Undo** - recovery refs under `refs/geco/`, backup branches and a journal of
   everything the extension did; **Undo Last Operation** rolls it back.
 - **Customize the context menus** - switch every menu item on/off from a native
@@ -53,6 +58,8 @@ declare - so the repository ships a second build for it. *Install* from -graph.v
 
 - Nothing is rewritten without a recovery point, and destructive steps show a
   confirmation with the concrete plan first (`geco.confirmDestructiveOperations`).
+- A repository with a half-finished merge/rebase or a stale lock **stops the
+  operations before they start**, with the reason and the way out.
 - Ref updates are atomic, so a branch someone else moved is never clobbered.
 - **Clean History** is the one operation git itself cannot undo: it refuses a dirty
   tree or a linked worktree up front, insists on a `git bundle` of every ref,

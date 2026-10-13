@@ -9,7 +9,7 @@
 import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
-import { ACTIONS, type ActionLabel, type QuickPickChoice, type UI } from './ui';
+import { ACTIONS, SYNC_BUTTON_WARNING, type ActionLabel, type QuickPickChoice, type UI } from './ui';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -41,6 +41,20 @@ import {
 } from './branch';
 import { deleteRedundantBranches, findRedundantBranches } from './redundantBranches';
 import { forcePush, planForcePush, type ForcePushResult } from './forcePush';
+import {
+	abortUnfinished,
+	assertStartable,
+	fetchRemote,
+	formatAge,
+	formatPushSyncReport,
+	inspectPushSync,
+	moveBranchOntoUpstream,
+	publishBranch,
+	rebaseOntoUpstream,
+	removeLockFiles,
+	type PushSyncRepair,
+	type PushSyncReport,
+} from './pushSync';
 import {
 	applyPatch,
 	findProperBase,
@@ -154,6 +168,7 @@ export class Controller {
 	async rewordCommit(cwd: string, args: readonly unknown[], flow: RewordFlow): Promise<void> {
 		await this.guard('Rename commit', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const target = await this.resolveCommit(ctx, args, 'Rename which commit?');
 			if (!target) {
 				return;
@@ -318,7 +333,7 @@ export class Controller {
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
-		const chosen = await this.ui.ask(message, { actions });
+		const chosen = await this.ui.ask(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined });
 		if (chosen === ACTIONS.forcePush) {
 			await this.forcePush(cwd, [], 'lease');
 		} else if (chosen === ACTIONS.forcePushHard) {
@@ -342,6 +357,7 @@ export class Controller {
 	async squashSelectedCommits(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Squash', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const selection: string[] = [];
 			for (const ref of resolveMenuArgs(args).commitRefs) {
 				const sha = await ctx.git.tryRun(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
@@ -384,6 +400,7 @@ export class Controller {
 	async squashWithPreviousCommits(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Squash', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const target = await this.resolveCommit(ctx, args, 'Squash which commit?');
 			if (!target) {
 				return;
@@ -506,7 +523,7 @@ export class Controller {
 		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${previewSubject(result.message)}"`
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
-		const chosen = await this.ui.ask(message, { actions });
+		const chosen = await this.ui.ask(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined });
 		if (chosen === ACTIONS.forcePush) {
 			await this.forcePush(cwd, [], 'lease');
 		} else if (chosen === ACTIONS.forcePushHard) {
@@ -521,6 +538,7 @@ export class Controller {
 	async fastForward(cwd: string, args: readonly unknown[], options: { askBranch: boolean }): Promise<void> {
 		await this.guard('Fast-forward', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const target = await this.resolveCommit(ctx, args, 'Fast-forward to which commit?');
 			if (!target) {
 				return;
@@ -800,7 +818,7 @@ export class Controller {
 						? `  old tip kept on ${result.backup.name}${result.backup.reused ? ' (reused)' : ''}`
 						: '  no backup branch created',
 				result.discardedCommits.length > 0 ? `  left behind: ${result.discardedCommits.map((c) => `${shorten(c.sha)} ${c.subject}`).join(', ')}` : '',
-				result.needsForcePush ? `  ${result.upstreamRef ?? 'the remote'} now needs a force push` : '',
+				result.needsForcePush ? `  ${result.upstreamRef ?? 'the remote'} now needs a force push - do NOT use VS Code's Sync button, it merges the old history back in` : '',
 				...result.notes.map((note) => `  note: ${note}`),
 			].filter(Boolean).join('\n'),
 		);
@@ -823,7 +841,7 @@ export class Controller {
 			removedBackup
 				? `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}"); the redundant backup "${removedBackup}" was removed - nothing was lost.`
 				: `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}")${result.backup ? `, old tip kept on ${result.backup.name}` : ''}.`,
-			{ actions },
+			{ actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined },
 		);
 		if (chosen === ACTIONS.forcePush) {
 			await this.forcePush(cwd, [], undefined, result.branch);
@@ -834,11 +852,336 @@ export class Controller {
 		}
 	}
 
+	// ------------------------------------------------- feature 4: push / sync
+
+	/**
+	 * "Why can I not push or sync?" - the flow behind
+	 * *Git Easy Ops: Diagnose Push / Sync Trouble...*.
+	 *
+	 * {@link inspectPushSync} recognizes the states (an unfinished merge or
+	 * rebase, the same work committed twice, a rewritten branch the remote still
+	 * has, a stale lock file, a missing upstream). This layer explains them and
+	 * offers the repairs one at a time: after every repair the repository is read
+	 * again, so "abort the unfinished merge" -> "rebase onto the remote copy" ->
+	 * "done" is a single command. Everything that touches a ref is journaled.
+	 */
+	async diagnosePushSync(cwd: string): Promise<void> {
+		await this.guard('Diagnose push / sync', async () => {
+			const ctx = this.contextFor(cwd);
+			await this.runPushSyncDiagnosis(ctx, cwd);
+		});
+	}
+
+	private async runPushSyncDiagnosis(ctx: RepoContext, cwd: string): Promise<void> {
+		let report = await this.inspectPushSyncAndLog(ctx);
+		for (let step = 0; step < 3; step++) {
+			const choices = await this.pushSyncChoices(ctx, report);
+			if (choices.length === 0) {
+				break;
+			}
+			const picked = await this.ui.pick(choices, { title: 'Diagnose Push / Sync Trouble', placeholder: report.verdict });
+			if (picked === undefined) {
+				this.ui.log('Push / sync diagnosis: nothing was changed.');
+				return;
+			}
+			const keepGoing = await this.applyPushSyncRepair(ctx, report, picked, cwd);
+			if (!keepGoing) {
+				return;
+			}
+			report = await this.inspectPushSyncAndLog(ctx);
+			if (picked === 'fetch') {
+				// The fetch changed nothing by itself: the answer is the state it
+				// just read, and the run ends here.
+				break;
+			}
+		}
+		await this.ui.message(report.clean ? 'info' : 'warn', report.verdict, report.clean ? undefined : problemDetail(report));
+	}
+
+	private async inspectPushSyncAndLog(ctx: RepoContext): Promise<PushSyncReport> {
+		const report = await this.ui.withProgress('Checking the repository state', async (progress) => {
+			progress('reading refs, the worktree and the remote-tracking branches');
+			return inspectPushSync(ctx);
+		});
+		this.ui.log(formatPushSyncReport(report));
+		return report;
+	}
+
+	/** The repairs that make sense for *this* state, as picker rows. */
+	private async pushSyncChoices(ctx: RepoContext, report: PushSyncReport): Promise<QuickPickChoice<PushSyncRepair>[]> {
+		const choices: QuickPickChoice<PushSyncRepair>[] = [];
+		const sync = report.sync;
+		const branch = report.branch;
+
+		const operation = report.unfinished[0];
+		if (operation) {
+			choices.push({
+				label: `Abort the unfinished ${operation.label}`,
+				description: `git ${operation.abortArgs.join(' ')} - committed work is kept`,
+				detail: [operation.detail, 'The conflict edits are dropped; the commits that were already made stay.'].join('\n'),
+				value: 'abort-operation',
+			});
+		}
+
+		const lock = report.locks[0];
+		if (lock) {
+			choices.push({
+				label: `Remove the lock file ${lock.name}`,
+				description: `left behind ${formatAge(lock.ageMs)} ago - only when no git operation is running`,
+				detail: [lock.path, 'A git process that was killed (network timeout, VS Code reloaded) never got to delete it.'].join('\n'),
+				value: 'remove-lock',
+			});
+		}
+
+		if (sync && branch) {
+			if (report.repairs.includes('rebase-onto-upstream')) {
+				const unfinished = report.unfinished[0];
+				const dirty = !unfinished && (await ctx.git.isDirty());
+				choices.push({
+					label: `Rebase my ${countOf(sync.localOnly.length, 'commit')} onto ${sync.upstream.ref}`,
+					description: unfinished
+						? `finish or abort the unfinished ${unfinished.label} first`
+						: dirty
+							? 'needs a clean worktree - commit or stash first'
+							: `drops ${countOf(sync.duplicates.length, 'already-there commit')}, replays the rest`,
+					detail: [
+						...sync.localOnly.map((commit) => `${commit.shortSha} ${commit.subject}${commit.alreadyThere ? '   (already on the remote)' : '   (new)'}`),
+						'',
+						'git drops the commits whose change is already on the remote ("skipped previously applied commit") and replays the rest with new SHAs. The tip before the rebase is kept as a recovery point.',
+					].join('\n'),
+					value: 'rebase-onto-upstream',
+				});
+			}
+			if (report.repairs.includes('move-onto-upstream')) {
+				choices.push({
+					label: `Point ${branch} at ${sync.upstream.ref}`,
+					description: 'nothing unique is lost - the old tip is parked on a backup branch first',
+					detail: [
+						`${branch}: ${shorten(sync.head)} -> ${shorten(sync.upstream.sha ?? '')}`,
+						'Every commit the branch has that the remote does not is *already there* (the same change under a different hash), so the branch can simply follow the remote copy - the state "git fetch && git reset --hard" produces, but journaled, with the old tip kept on a backup branch and undoable in one step.',
+					].join('\n'),
+					value: 'move-onto-upstream',
+				});
+			}
+			if (report.repairs.includes('force-push')) {
+				choices.push({
+					label: `Force Push (with lease) to ${sync.upstream.ref}`,
+					description: `${countOf(sync.unique.length, 'commit')} is new - the remote's old copy is replaced`,
+					detail: [
+						'--force-with-lease refuses the push when somebody else pushed since your last fetch, so a colleague cannot be overwritten silently.',
+						`The old history this replaces: ${countOf(sync.behind, 'remote commit')}.`,
+					].join('\n'),
+					value: 'force-push',
+				});
+			}
+		}
+
+		if (report.repairs.includes('fetch')) {
+			choices.push({
+				label: `Fetch ${pickRemote(report.remotes)} and check again`,
+				description: 'needs network - also drops tracking refs that are gone from the server',
+				detail: 'Everything above is based on the last fetch. This tells "the remote is unreachable" apart from "the history diverged".',
+				value: 'fetch',
+			});
+		}
+
+		if (branch && report.repairs.includes('publish')) {
+			const remote = pickRemote(report.remotes);
+			choices.push({
+				label: `Publish ${branch} to ${remote}`,
+				description: `git push -u ${remote} ${branch} - creates the remote branch and the upstream`,
+				value: 'publish',
+			});
+		}
+
+		return choices;
+	}
+
+	/** Run one repair. Returns false when the flow has to stop (cancel/no-op). */
+	private async applyPushSyncRepair(
+		ctx: RepoContext,
+		report: PushSyncReport,
+		repair: PushSyncRepair,
+		cwd: string,
+	): Promise<boolean> {
+		switch (repair) {
+			case 'abort-operation': {
+				const operation = report.unfinished[0];
+				if (!operation) {
+					return false;
+				}
+				if (this.settings.confirmDestructiveOperations) {
+					const confirmed = await this.ui.confirm(`Abort the unfinished ${operation.label}?`, {
+						confirmLabel: 'Abort it',
+						destructive: true,
+						detail: [
+							operation.detail,
+							'',
+							`Runs: git ${operation.abortArgs.join(' ')}`,
+							'The conflict edits are dropped; the commits that were already made stay exactly where they are.',
+						].join('\n'),
+					});
+					if (!confirmed) {
+						this.ui.log(`The unfinished ${operation.label} was kept.`);
+						return false;
+					}
+				}
+				const result = await this.ui.withProgress(`Aborting the unfinished ${operation.label}`, () => abortUnfinished(ctx, operation));
+				this.ui.log(`  ${result.message}`);
+				await this.ui.message('info', result.message);
+				return true;
+			}
+
+			case 'remove-lock': {
+				const lock = report.locks[0];
+				if (!lock) {
+					return false;
+				}
+				// A lock that is *held* looks exactly like a stale one, so this is
+				// the one repair that always asks - whatever the settings say.
+				const confirmed = await this.ui.confirm(`Remove ${lock.name}?`, {
+					confirmLabel: 'Remove the lock file',
+					destructive: true,
+					detail: [
+						lock.path,
+						`It is ${formatAge(lock.ageMs)} old.`,
+						'',
+						'Only remove it when no git command and no VS Code git operation is running in this repository: a lock that is still held belongs to an operation that is writing right now, and deleting it can corrupt the index. While it exists, every other git operation fails, which is why it has to go.',
+					].join('\n'),
+				});
+				if (!confirmed) {
+					this.ui.log(`Kept ${lock.name}.`);
+					return false;
+				}
+				const removed = await removeLockFiles(ctx, [lock]);
+				await this.ui.message('info', `Removed ${removed.map((entry) => entry.split(/[\\/]/).pop()).join(', ')}.`, 'Push and sync work again - run this command once more if something else blocks them.');
+				return true;
+			}
+
+			case 'rebase-onto-upstream': {
+				const sync = report.sync;
+				const branch = report.branch;
+				if (!sync || !branch) {
+					return false;
+				}
+				if (await ctx.git.isDirty()) {
+					await this.ui.message('warn', 'The worktree has uncommitted changes, so a rebase cannot start.', 'Commit or stash them, then run "Git Easy Ops: Diagnose Push / Sync Trouble..." again.');
+					return false;
+				}
+				const confirmed = await this.ui.confirm(`Rebase "${branch}" onto ${sync.upstream.ref}?`, {
+					confirmLabel: 'Rebase',
+					detail: [
+						...sync.localOnly.map((commit) => `${commit.shortSha} ${commit.subject}${commit.alreadyThere ? '   (already on the remote - dropped)' : '   (replayed)'}`),
+						'',
+						`git rebase ${sync.upstream.ref}`,
+						'A recovery point is written first: "Undo Last Operation" puts the branch back to where it is now.',
+					].join('\n'),
+				});
+				if (!confirmed) {
+					this.ui.log(`Rebasing "${branch}" was cancelled.`);
+					return false;
+				}
+				const result = await this.ui.withProgress(`Rebasing onto ${sync.upstream.ref}`, (progress) => {
+					progress('replaying the local commits on top of the remote copy');
+					return rebaseOntoUpstream(ctx, {
+						branch,
+						upstreamSha: sync.upstream.sha ?? '',
+						upstreamRef: sync.upstream.ref,
+						duplicates: sync.duplicates.length,
+					});
+				});
+				await this.ui.message(
+					'info',
+					`Rebased "${result.branch}" onto ${result.upstreamRef}: ${shorten(result.from)} -> ${shorten(result.to)}${result.dropped > 0 ? `, ${countOf(result.dropped, 'already-there commit')} dropped` : ''}.`,
+					result.recoveryRef ? `Recovery point: ${result.recoveryRef} (Undo removes it again).` : undefined,
+				);
+				return true;
+			}
+
+			case 'move-onto-upstream': {
+				const sync = report.sync;
+				const branch = report.branch;
+				if (!sync || !branch || !sync.upstream.sha) {
+					return false;
+				}
+				const confirmed = await this.ui.confirm(`Point "${branch}" at ${sync.upstream.ref}?`, {
+					confirmLabel: 'Move the branch',
+					detail: [
+						`${branch}: ${shorten(sync.head)} -> ${shorten(sync.upstream.sha)}`,
+						`Every commit ${branch} has and ${sync.upstream.ref} does not is already there:`,
+						...sync.duplicates.map((commit) => `  ${commit.shortSha} ${commit.subject}${commit.equivalentTo ? ` = ${shorten(commit.equivalentTo)}` : ''}${commit.identicalContent ? ' (identical content)' : ''}`),
+						'',
+						'The current tip is parked on a backup branch first and the move is journaled, so "Undo Last Operation" brings everything back.',
+					].join('\n'),
+				});
+				if (!confirmed) {
+					this.ui.log(`Moving "${branch}" was cancelled.`);
+					return false;
+				}
+				const upstreamSha = sync.upstream.sha;
+				const result = await this.ui.withProgress(`Moving ${branch} onto ${sync.upstream.ref}`, (progress) => {
+					progress(`moving ${branch} to ${shorten(upstreamSha)}`);
+					return moveBranchOntoUpstream(ctx, { branch, upstreamSha, upstreamRef: sync.upstream.ref });
+				});
+				await this.ui.message(
+					'info',
+					`"${branch}" now points at ${shorten(result.fastForward.to)}${result.backup ? `, old tip kept on "${result.backup}"` : ''}.`,
+					'Nothing was lost: every commit that was not on the remote is there under a different hash. "Undo Last Operation" puts the branch back.',
+				);
+				return true;
+			}
+
+			case 'force-push': {
+				// The existing flow: --force-with-lease by default, its own
+				// confirmation, its own journal entry (the remote sha before the push).
+				await this.forcePush(cwd, [], 'lease', report.branch);
+				return true;
+			}
+
+			case 'fetch': {
+				const remote = pickRemote(report.remotes);
+				const outcome = await this.ui.withProgress(`Fetching ${remote}`, () => fetchRemote(ctx, remote));
+				if (outcome.ok) {
+					this.ui.log(`Fetched ${remote}.${outcome.output ? `\n${outcome.output}` : ''}`);
+					await this.ui.message('info', `Fetched ${remote}${outcome.localPath ? '' : ' over the network'}: the remote is reachable, and the state above is current.`);
+				} else {
+					await this.ui.message(
+						'warn',
+						outcome.timedOut ? `Fetching ${remote} timed out - the network looks down.` : `Could not fetch ${remote}.`,
+						[
+							outcome.output,
+							outcome.timedOut
+								? 'A push will fail the same way while the connection is down; the history above is still what it was after the last successful fetch.'
+								: 'That is a network or credential problem, not a history problem: push and sync fail on the connection, not on the commits.',
+						].filter(Boolean).join('\n'),
+					);
+				}
+				return true;
+			}
+
+			case 'publish': {
+				const branch = report.branch;
+				const remote = pickRemote(report.remotes);
+				if (!branch || !remote) {
+					return false;
+				}
+				const result = await this.ui.withProgress(`Publishing ${branch}`, (progress) => {
+					progress(`pushing ${branch} to ${remote}`);
+					return publishBranch(ctx, { branch, remote });
+				});
+				await this.ui.message('info', `Published "${result.branch}" to ${result.remote}/${result.branch} (${shorten(result.sha)}) and set it as the upstream.`, '"Undo Last Operation" deletes the remote branch again.');
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// ------------------------------------------------------------- feature 3
 
 	async forcePush(cwd: string, args: readonly unknown[], mode?: ForcePushMode, branch?: string): Promise<void> {
 		await this.guard('Force push', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			let target = branch;
 			if (!target) {
 				const resolved = resolveMenuArgs(args);
@@ -900,6 +1243,7 @@ export class Controller {
 	async applyPatchAtProperBase(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Apply patch', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx, { allowAm: true });
 			const source = await this.pickPatchSource(ctx, args);
 			if (!source) {
 				return;
@@ -1188,6 +1532,7 @@ export class Controller {
 	async cleanHistory(cwd: string): Promise<void> {
 		await this.guard('Clean history', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			if ((await ctx.git.commits({ limit: 1 })).length === 0) {
 				throw new GecoError('nothing-to-do', 'This repository has no commits yet - there is no history to clean.');
 			}
@@ -1751,6 +2096,7 @@ export class Controller {
 	async renameBranch(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Rename branch', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const branch = await this.resolveBranchArg(ctx, args, 'Rename which branch?');
 			if (!branch) {
 				return;
@@ -1845,6 +2191,7 @@ export class Controller {
 	async deleteBranch(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Delete branch', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const branch = await this.resolveBranchArg(ctx, args, 'Delete which branch?');
 			if (!branch) {
 				return;
@@ -1940,6 +2287,7 @@ export class Controller {
 	async removeRedundantBranches(cwd: string): Promise<void> {
 		await this.guard('Remove redundant branches', async () => {
 			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
 			const scan = await this.ui.withProgress('Looking for redundant branches', (report) => {
 				report('checking which branches carry commits of their own');
 				return findRedundantBranches(ctx);
@@ -2584,6 +2932,26 @@ export class Controller {
 			await this.ui.message('error', `${label}: ${headline}`, rest.length > 0 ? rest.join('\n') : undefined);
 		}
 	}
+}
+
+/** "1 commit" / "2 commits" - used in the picker labels of the diagnosis. */
+function countOf(count: number, noun: string): string {
+	return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** The remote a repair defaults to: `origin` when it exists, else the first. */
+function pickRemote(remotes: readonly string[]): string {
+	return remotes.includes('origin') ? 'origin' : remotes[0] ?? 'origin';
+}
+
+/** The first problem of a report, as notification detail. */
+function problemDetail(report: PushSyncReport): string | undefined {
+	const finding = report.findings.find((entry) => entry.severity !== 'info');
+	if (!finding) {
+		return undefined;
+	}
+	const extra = report.findings.find((entry) => entry.severity === 'blocker' && entry !== finding);
+	return [finding.headline, ...finding.lines.slice(0, 6), extra ? `... and: ${extra.headline}` : ''].filter(Boolean).join('\n');
 }
 
 type SourceChoice =

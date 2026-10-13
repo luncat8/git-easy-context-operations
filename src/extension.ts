@@ -339,6 +339,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.renameBranch', async (cwd, args) => runtime.controller.renameBranch(cwd, args)],
 		['geco.deleteBranch', async (cwd, args) => runtime.controller.deleteBranch(cwd, args)],
 		['geco.removeRedundantBranches', async (cwd) => runtime.controller.removeRedundantBranches(cwd)],
+		['geco.diagnosePushSync', async (cwd) => runtime.controller.diagnosePushSync(cwd)],
 		['geco.checkoutBranch', async (cwd, args) => runtime.controller.checkoutBranch(cwd, args)],
 		['geco.undoLastOperation', async (cwd) => runtime.controller.undoLastOperation(cwd)],
 		['geco.showBackups', async (cwd) => runtime.controller.showBackups(cwd)],

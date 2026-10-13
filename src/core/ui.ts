@@ -148,6 +148,18 @@ export function reportWithoutWaiting(show: () => PromiseLike<unknown> | undefine
 	}
 }
 
+/**
+ * The warning every flow that rewrote history repeats, because the habit it
+ * warns about is the natural one: after a reword, a squash, a forced move or a
+ * cleaned history, the remote still holds the *old* commits, so a plain push is
+ * rejected. VS Code's **Sync** button looks like the way out - but it runs
+ * `git pull` first, and that pull merges (or rebases) the old remote history
+ * back into the branch: the rewrite is undone, or the merge stops with a
+ * conflict and leaves the repository half-finished. The way out is the force
+ * push this extension offers right next to the report.
+ */
+export const SYNC_BUTTON_WARNING = 'Do not use VS Code\'s Sync button for this: it runs "git pull" first and merges the old remote history - including the commits this operation replaced - back into the branch, or stops half-way with a conflict. Use Force Push (with lease) instead.';
+
 /** Follow-up action labels used across the flows. */
 export const ACTIONS = {
 	forcePush: 'Force Push',
@@ -164,6 +176,7 @@ export const ACTIONS = {
 	checkout: 'Check Out',
 	enableGraphMenu: 'How to Enable the Graph Menu',
 	copyCommands: 'Copy Commands',
+	diagnose: 'Diagnose Push / Sync Trouble',
 	dropRecoveryPoints: 'Drop Recovery Points',
 	removeWorktrees: 'Remove Linked Worktrees',
 } as const;

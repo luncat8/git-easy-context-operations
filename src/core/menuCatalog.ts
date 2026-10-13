@@ -133,6 +133,10 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// deleted" - the opposite of a whole-graph sweep whose list of victims only
 	// exists after the scan. One flat entry, one click, then the checkbox list.
 	{ id: 'geco.removeRedundantBranches', label: 'Remove Redundant Branches...', surfaces: ['view.commit', 'view.branch', 'view.title', 'submenu.commit', 'submenu.branch', 'graph.commit', 'graph.title'] },
+	// Repository-wide like Clean History, and deliberately on a toolbar rather
+	// than on a row: the trouble it explains (an unfinished merge, a lock, a
+	// branch that diverged) is about the repository, not about one commit.
+	{ id: 'geco.diagnosePushSync', label: 'Diagnose Push / Sync Trouble...', surfaces: ['view.title', 'graph.title'] },
 	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title'] },
 	{ id: 'geco.showBackups', label: 'Show Backups and Recovery Points', surfaces: ['view.title'] },
 	// Only on our own view's toolbar: the built-in Source Control Graph

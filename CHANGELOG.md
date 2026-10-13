@@ -4,6 +4,84 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.11
+
+### Added
+
+- **Diagnose Push / Sync Trouble...** (`geco.diagnosePushSync`) - one command
+  that answers "why can I not push or sync?" from the repository itself. It
+  recognizes the states that stop both buttons and says what a push would do
+  (*rejected: non-fast-forward*, *it would work*, *blocked by an unfinished
+  merge*, ...):
+
+  - an **unfinished merge / rebase / cherry-pick / revert / am** and the
+    conflict markers it left behind;
+  - a stale **`index.lock`** left by a killed git process (shown with its age);
+  - a branch with **no upstream**, or one whose tracked branch is **gone from
+    the server**;
+  - a **rewritten branch the remote still has** (after a reword, squash,
+    forced move or Clean History), where the *Sync* button would merge the old
+    history back in;
+  - and the reported accident: **the same work committed twice** - the local
+    commit and a commit on the remote carry byte-identical trees under
+    different hashes, so `git push` is rejected as non-fast-forward while
+    GitHub is already correct. `git cherry` (patch equivalence) and `patch-id`
+    are compared, so the counterpart commit is *named*, and the report explains
+    why Sync's `git pull` half turns this into duplicate history or into a
+    conflict that leaves the repository "unfinished" (`MERGE_HEAD`).
+
+  Offered repairs, one at a time, re-reading the repository after each:
+  **abort** the unfinished operation, **remove** the stale lock (always
+  confirmed), **rebase** onto the remote copy (git drops the already-applied
+  commits itself - "skipped previously applied commit"), **point the branch at
+  the remote copy** when nothing local is unique (old tip parked on a backup
+  branch first), **Force Push (with lease)**, **fetch** (60-second timeout, so
+  "the network is down" is an answer instead of a hang; `--prune` drops tracking
+  refs the server no longer has) and **publish** (`git push -u`). Every repair
+  that touches a ref is journaled - one **Undo** puts it back. A rebase that
+  stops on a real conflict is aborted again before the error is rethrown, so
+  the command never leaves behind the state it exists to clean up.
+- **[docs/STUCK-STATES.md](docs/STUCK-STATES.md)** - the investigation behind it:
+  every state reproduced against real repositories (including the two-clone
+  accident with byte-identical trees), what the Sync button does in each one,
+  why a lost connection on its own leaves *nothing* behind (a failed push or
+  fetch is the safe case; the stuck state comes from the merge half of a sync, or
+  from a killed process), and a recovery cheat sheet.
+
+### Changed
+
+- **Every operation that rewrites or moves refs refuses to start on top of a
+  half-finished repository.** Rename Commit Message, Squash, Fast-Forward, Force
+  Push, Clean History, Remove Redundant Branches and branch rename/delete now
+  stop with `repo-busy` when a merge, rebase, cherry-pick or revert is still in
+  progress, when conflict markers are left in the index, or when a lock file is
+  in the way - with the state named, the command that finishes or aborts it, and
+  a pointer at the diagnosis. Nothing is changed by such a command. The patch
+  flow is exempt from the `git am` (and the `--3way` conflicts) it produces
+  itself, because continuing or aborting them is part of that flow.
+- **The report after a reword, a squash or a forced move now warns about the
+  Sync button** when a force push is needed: Sync pulls (merges) first and would
+  fold the old remote history - including the commits the operation replaced -
+  back into the branch. The output line says it too.
+
+### Changed (continued)
+
+- `dist/` carries the current build (0.4.11) and the previous release (0.4.10)
+  for one step of rollback; 0.4.11 also drops the `refs/remotes/...` spelling
+  from the diagnosis text - the upstream is named the way a human reads it
+  (`origin/main`).
+
+### Tests
+
+- 30 new tests (`src/test/core/pushSync.test.ts`): the duplicate-commit accident
+  (identical trees, `alreadyThere`, the named counterpart), a divergent rewrite,
+  being behind, a missing and a deleted upstream, a detached HEAD, an unfinished
+  merge with conflict markers, a stale lock, the whole repair set (including a
+  conflicting rebase that is aborted again, and a move that refuses to drop a
+  unique commit), the guard (`repo-busy`) in front of the flows, and the
+  interactive flow with the fake UI: the picker's rows, the confirmations, the
+  journal/undo, and the "dismiss the picker" path.
+
 ## 0.4.10
 
 ### Fixed

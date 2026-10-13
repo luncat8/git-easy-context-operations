@@ -34,6 +34,7 @@ const EXPECTED_COMMANDS = [
 	'geco.renameBranch',
 	'geco.deleteBranch',
 	'geco.removeRedundantBranches',
+	'geco.diagnosePushSync',
 	'geco.checkoutBranch',
 	'geco.undoLastOperation',
 	'geco.showBackups',

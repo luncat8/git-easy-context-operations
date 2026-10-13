@@ -11,7 +11,7 @@ import { GecoError } from './errors';
 import type { Git } from './git';
 import type { Settings } from './config';
 
-export type OperationKind = 'reword' | 'squash' | 'fastForward' | 'forcePush' | 'applyPatch' | 'backup' | 'branch' | 'cleanHistory';
+export type OperationKind = 'reword' | 'squash' | 'fastForward' | 'forcePush' | 'applyPatch' | 'backup' | 'branch' | 'cleanHistory' | 'rebase';
 
 export interface RefRestore {
 	ref: string;
