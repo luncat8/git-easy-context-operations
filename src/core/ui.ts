@@ -90,7 +90,12 @@ export interface UI {
 	/**
 	 * A message with optional action buttons; resolves to the chosen action.
 	 * Without any action it is a plain report: it must not wait for the
-	 * notification to be dismissed either.
+	 * notification to be dismissed either. With actions, only a caller
+	 * that needs the answer to continue may await it - an end-of-operation
+	 * report whose buttons are optional follow-ups must go through
+	 * {@link followUpWithoutWaiting} instead, or the command (and the
+	 * Source Control Graph's progress indicator tied to it) stays pending
+	 * until the notification goes away.
 	 */
 	ask(message: string, options: AskOptions): Promise<string | undefined>;
 	/**
@@ -145,6 +150,56 @@ export function reportWithoutWaiting(show: () => PromiseLike<unknown> | undefine
 		}
 	} catch {
 		// A message that cannot be shown is not worth failing a finished command.
+	}
+}
+
+/**
+ * Hand an end-of-operation report to the user *without waiting for its
+ * answer*, and run `handle` if and when an action is picked.
+ *
+ * This is the follow-up sibling of {@link reportWithoutWaiting}, for the
+ * reports that carry buttons ("Undo", "Open Worktree", ...). The rule is
+ * the same, and it is stated here because it has regressed several times:
+ * a report is not a step of the operation. The work is already done, the
+ * journal entry is already written, and the branch that refreshes the
+ * graphs has already been scheduled - nothing is gained by keeping the
+ * *command* pending until the toast is dismissed, and much is lost: VS
+ * Code resolves the notification promise only when it goes away (never
+ * under Do Not Disturb, while hovered, or while the window is unfocused),
+ * and an action started from the built-in Source Control Graph runs under
+ * a progress indicator that lasts exactly as long as the command's
+ * promise. Awaiting the report is therefore precisely the "endless
+ * progress bar" - most recently reintroduced by Apply Patch Automatically,
+ * whose result report waited for its *Undo* button.
+ *
+ * So: show it, attach the follow-up, and let the command finish. When the
+ * user does click, `handle` runs then (the controller's change hook and
+ * the repository watcher repaint the graphs for it, exactly as they do
+ * for an Undo started from the Command Palette). A report that cannot be
+ * shown, or a follow-up that fails, is logged through `onError` and never
+ * turns into an unhandled rejection.
+ */
+export function followUpWithoutWaiting(
+	shown: PromiseLike<string | undefined> | string | undefined,
+	handle: (chosen: string | undefined) => Promise<void> | void,
+	onError?: (error: unknown) => void,
+): void {
+	try {
+		void Promise.resolve(shown as PromiseLike<string | undefined>)
+			.then((chosen) => handle(chosen))
+			.then(undefined, (error: unknown) => {
+				try {
+					onError?.(error);
+				} catch {
+					// Even reporting the failure must not escape.
+				}
+			});
+	} catch (error) {
+		try {
+			onError?.(error);
+		} catch {
+			// See above.
+		}
 	}
 }
 

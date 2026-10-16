@@ -7,7 +7,7 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { Controller, type RewordFlow } from './core/controller';
+import { Controller, type PatchFileMemory, type RewordFlow } from './core/controller';
 import { createGitExec, createProcessExec, type GitExec } from './core/gitRunner';
 import type { Settings } from './core/config';
 import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, defaultHiddenIds, effectiveHiddenList, parseHiddenItems } from './core/menuVisibility';
@@ -23,6 +23,8 @@ import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 const VIEW_ID = 'geco.history';
 const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
 const GRAPH_HINT_KEY = 'geco.graphMenuHintShown';
+/** Workspace-state key: repository path -> last patch file auto-applied there. */
+const LAST_PATCH_FILES_KEY = 'geco.lastPatchFileByRepo';
 
 /**
  * Files inside the git directory that no refresh may react to: plain
@@ -156,7 +158,20 @@ export function activate(context: vscode.ExtensionContext): void {
 	// operation (and every undo) schedules a burst, so the graph a squash
 	// just rewrote is current before the result notification is even
 	// dismissed, and so is the branch list after a cleanup.
-	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true));
+	// "Apply Patch Automatically" remembers, per repository, the patch file
+	// it last applied successfully - in workspace state, so the memory is
+	// this workspace's, survives reloads, and never leaks into settings
+	// (a patch path is machine-local and often outside the repository).
+	const lastPatchFile = {
+		get: (repoPath: string) => context.workspaceState.get<Record<string, string>>(LAST_PATCH_FILES_KEY, {})[repoPath],
+		set: async (repoPath: string, patchFile: string) => {
+			const remembered = { ...context.workspaceState.get<Record<string, string>>(LAST_PATCH_FILES_KEY, {}) };
+			remembered[repoPath] = patchFile;
+			await context.workspaceState.update(LAST_PATCH_FILES_KEY, remembered);
+		},
+	};
+
+	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile);
 
 	const createdTree = new GecoHistoryProvider({
 		controller: () => runtime.controller,
@@ -333,6 +348,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.forcePush', async (cwd, args) => runtime.controller.forcePush(cwd, args)],
 		['geco.forcePushHard', async (cwd, args) => runtime.controller.forcePush(cwd, args, 'force')],
 		['geco.applyPatchAtProperBase', async (cwd, args) => runtime.controller.applyPatchAtProperBase(cwd, args)],
+		['geco.applyPatchAutomatically', async (cwd) => runtime.controller.applyPatchAutomatically(cwd)],
 		['geco.findProperBase', async (cwd, args) => runtime.controller.showProperBase(cwd, args)],
 		['geco.createBackupBranch', async (cwd, args) => runtime.controller.createBackupBranch(cwd, args)],
 		['geco.createBranch', async (cwd, args) => runtime.controller.createBranch(cwd, args)],
@@ -441,7 +457,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!affectsGeco(event)) {
 				return;
 			}
-			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true));
+			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile);
 			output.appendLine('Settings reloaded.');
 			scheduleRefresh('settings changed');
 			// Hidden-menu items changed here or in another window: converge.
@@ -479,12 +495,17 @@ async function writeHiddenMenuItems(ids: readonly string[], output: vscode.Outpu
 	);
 }
 
-function buildRuntime(settings: Settings, ui: VsCodeUI, onRepositoryChanged: () => void): Runtime {
+function buildRuntime(
+	settings: Settings,
+	ui: VsCodeUI,
+	onRepositoryChanged: () => void,
+	lastPatchFile: PatchFileMemory,
+): Runtime {
 	const exec = createGitExec({ gitPath: resolveGitPath(settings) });
 	// The process runner for everything that is not git itself: the
 	// git-filter-repo probe/rewrite of "Clean History" and its installers.
 	const processExec = createProcessExec({});
-	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec, onRepositoryChanged }) };
+	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec, onRepositoryChanged, lastPatchFile }) };
 }
 
 function contains(parent: string, child: string): boolean {

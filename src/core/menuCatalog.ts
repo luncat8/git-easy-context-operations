@@ -115,8 +115,15 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.createBackupBranch', label: 'Create Backup Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
 	{ id: 'geco.forcePush', label: 'Force Push (with lease)...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
 	{ id: 'geco.forcePushHard', label: 'Force Push (--force)...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
-	{ id: 'geco.applyPatchAtProperBase', label: 'Apply Patch at Proper Base...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
-	{ id: 'geco.findProperBase', label: 'Find Proper Base for Patch...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	// The patch operations are repository-wide: the patch comes from a file
+	// (or, interactively, from a source the user picks *after* clicking), and
+	// it lands at a base the search finds - the clicked commit is neither
+	// its target nor (usually) its source. They therefore live on the two
+	// headers (our view's toolbar and the built-in graph's toolbar), next to
+	// the other whole-repository buttons, and on no commit row at all.
+	{ id: 'geco.applyPatchAtProperBase', label: 'Apply Patch at Proper Base...', surfaces: ['view.title', 'graph.title'] },
+	{ id: 'geco.applyPatchAutomatically', label: 'Apply Patch Automatically', surfaces: ['view.title', 'graph.title'] },
+	{ id: 'geco.findProperBase', label: 'Find Proper Base for Patch...', surfaces: ['view.title', 'graph.title'] },
 	{ id: 'geco.copyCommitSha', label: 'Copy Commit SHA', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.enableGraphMenu', label: 'Enable Source Control Graph Menu...', surfaces: ['view.commit', 'view.title', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.cleanHistory', label: 'Clean History (Remove Dead Paths)...', surfaces: ['view.commit', 'view.graphGroup', 'view.title', 'submenu.commit', 'graph.title'] },

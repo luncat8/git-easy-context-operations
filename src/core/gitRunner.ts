@@ -168,14 +168,25 @@ function runSpawned(
 				if (!source) {
 					return;
 				}
+				// The cap is cumulative: a stream of many small chunks must
+				// not grow past it either (checking only the single chunk let
+				// a huge `git show`/`git log` buffer without bound).
+				let total = 0;
 				source.on('data', (chunk) => {
-					const buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
-					if (buffer.length > maxOutputBytes) {
+					if (total >= maxOutputBytes) {
 						truncated = true;
-						into.push(buffer.subarray(0, maxOutputBytes));
+						return;
+					}
+					const buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+					const room = maxOutputBytes - total;
+					if (buffer.length > room) {
+						truncated = true;
+						into.push(buffer.subarray(0, room));
+						total = maxOutputBytes;
 						return;
 					}
 					into.push(buffer);
+					total += buffer.length;
 				});
 			};
 

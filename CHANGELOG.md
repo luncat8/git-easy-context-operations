@@ -4,6 +4,170 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.14
+
+### Changed
+
+- **Apply Patch Automatically no longer creates a branch for a patch that
+  fits the latest HEAD.** When the proper base *is* HEAD, the patch
+  applies cleanly there (no 3-way merge needed) and no local change
+  touches a file the patch touches, the change is applied directly on the
+  current branch - **no new branch, no worktree, and still no commit**:
+  it lands staged in your own checkout, ready to review and commit under
+  your own name. A branch (or the configured worktree) is still created
+  when the proper base is an older commit, when the patch would need a
+  3-way merge at HEAD, or when a locally changed file is in its way (the
+  new-branch destination then keeps its dirty-tree worktree fallback).
+  The interactive *Apply Patch at Proper Base...* flow is unchanged: a
+  destination picked there is always honoured.
+
+### Fixed
+
+- **The patch operations no longer leave an endless progress bar.** The
+  result report of an apply (shared by *Apply Patch at Proper Base...*
+  and *Apply Patch Automatically*) was awaited by the command, and VS
+  Code only resolves a notification's promise when the notification goes
+  away - never under Do Not Disturb, while it is hovered, or while the
+  window is unfocused. The command therefore stayed pending after the
+  patch was long applied, and the Source Control Graph draws its
+  progress indicator for exactly as long as a command of its toolbar is
+  pending. This is the same bug class fixed in 0.4.10 for plain messages,
+  reintroduced by the apply report's *Undo* / *Open Worktree* buttons.
+  The report is now handed over without waiting
+  (`followUpWithoutWaiting`, next to the existing
+  `reportWithoutWaiting`): the command finishes with the apply, and the
+  follow-up still runs if the button is clicked later.
+
+### Tests
+
+- New coverage for both: a patch that fits HEAD lands on the current
+  branch with no branch/commit (core and automatic flow), a locally
+  changed file in the patch's way keeps the branch/worktree, an explicit
+  interactive branch at HEAD is still created, and an automatic apply
+  whose result notification *never* settles still finishes the command.
+
+## 0.4.13
+
+### Changed
+
+- **Apply Patch Automatically no longer commits.** The change now lands
+  *staged but uncommitted* - on the new branch, in the worktree or on the
+  current branch - and the commit is made by you, with your own message and
+  authorship; that is the point of the change. This now also holds for
+  `format-patch` mailbox files: previously a mailbox was always replayed
+  through `git am`, which commits by definition, so the automatic flow
+  produced a finished commit with the *original* author, date and message.
+  The mailbox diff is applied with `git apply` instead (3-way when
+  `geco.threeWayApply` is on, as before); only the interactive *Apply Patch
+  at Proper Base...* flow still uses `git am` for mailboxes on a new branch
+  / in a worktree, where committing is what you asked for. The result
+  report says explicitly that nothing was committed, and *Undo* of an
+  uncommitted apply discards the staged change and deletes the branch it
+  created. A repeat click recognises the patch as "already in the graph"
+  (by `git patch-id`) once you have committed it; clicking again *before*
+  committing applies the file once more - the new-branch destination then
+  falls back to a separate worktree because the tree is dirty, and the
+  report says so.
+
+### Fixed
+
+- **Branch names derived from patch subjects are always valid refs now.**
+  A subject ending in a period ("fix typo.") used to produce `geco/fix-typo.`,
+  which git rejects, and subjects containing `..` were rejected too - the
+  automatic apply failed for them and fell back to the file dialog, which
+  then failed the same way. Trailing dots/slashes are stripped and repeated
+  dots collapsed before the branch is created.
+- **A failed patch apply on a new branch rolls back completely.** When the
+  3-way apply stopped with conflicts, the rollback could not check the
+  previous branch back out (git refuses with a dirty index) and could not
+  delete the half-built branch either (it was still checked out), so the
+  user was stranded on it with conflict markers. The rollback now discards
+  what *its own* apply left behind first - safe, because that destination
+  is only chosen when the tracked files were clean - and a previously
+  detached HEAD is restored as detached.
+- **Huge git output can no longer exhaust memory.** The output cap of a
+  spawned git process was only checked per read chunk, so a stream of many
+  chunks grew without bound; it is now cumulative per stream, and the
+  `truncated` flag actually gets set.
+- **A timed-out git call reports "timed out" instead of "failed (exit -1)"**
+  in the error headline (the detail always had it).
+
+### Performance
+
+- **"Is this patch already in the graph?" went from up to 400 git processes
+  to 2.** The check hashed every one of the newest 200 commits of `--all`
+  with its own `git show` + `git patch-id` pair on every click of *Apply
+  Patch Automatically*; both sides are now hashed in one `git show` and one
+  `git patch-id` each. The duplicate-detection half of *Diagnose Push /
+  Sync Trouble* batches the same way.
+- **The safety check that runs before almost every command went from ~13
+  git processes to 1.** The unfinished-operation markers (MERGE_HEAD,
+  rebase-merge, ...) and the lock files (index.lock, ...) each cost their
+  own `git rev-parse --git-path`; one `rev-parse` call with repeated
+  `--git-path` flags resolves them all (git too old for that falls back to
+  the per-name resolution).
+
+### Tests
+
+- The automatic-apply test asserts the new contract: branch tip still at
+  the base, change staged in the working tree, report says nothing was
+  committed. New cases: mailbox with `commit: false`, undo of an
+  uncommitted apply, rollback of a conflicting new-branch apply, branch
+  name from a subject ending in a period, mailbox on the current branch.
+
+### Checked, unchanged
+
+- The built-in **Source Control Graph** menus still need a proposed VS Code
+  API: `scm/historyItem/context`, `scm/historyItemRef/context` and
+  `scm/history/title` are gated behind `contribSourceControlHistoryItemMenu`
+  / `contribSourceControlHistoryTitleMenu` on `microsoft/vscode` `main` as
+  of 2026-10-16 (VS Code 1.142), and the tracking issues
+  [#201997](https://github.com/microsoft/vscode/issues/201997) and
+  [#226144](https://github.com/microsoft/vscode/issues/226144) are open.
+  The Marketplace keeps rejecting `enabledApiProposals`, so the two builds
+  stay: the publishable manifest without the graph menus, and the `+graph`
+  vsix for a local install.
+
+## 0.4.12
+
+### Added
+
+- **Apply Patch Automatically** (`geco.applyPatchAutomatically`, ⚡ in the
+  view header and in the built-in graph's toolbar) - the question-free
+  sibling of *Apply Patch at Proper Base...*. The first click opens the
+  patch-file dialog, applies the file at its proper base with the default
+  destination (`geco.applyPatchDestination`) and a branch name derived from
+  the patch, and remembers the file **per repository** (editor workspace
+  state - a patch path is machine-local, so it never becomes a setting).
+  Every later click re-applies that same file with no dialog, no picker,
+  no branch-name input and no confirmation; a plain diff is committed on
+  the new branch / in the worktree so one click leaves a finished commit.
+  The file dialog reopens - instead of failing - whenever the remembered
+  file cannot be used for any reason: it is missing or unreadable, it is
+  not a patch, it **is already in the graph** (the commit it was made from
+  is reachable from a branch, a tag or HEAD, or every commit of it has a
+  `git patch-id` twin among the newest 200 commits of `--all`), or it does
+  not apply. A file picked in that dialog that also fails is reported as an
+  error rather than reopening the dialog, and only a successfully applied
+  file becomes the remembered one.
+
+### Changed
+
+- **The patch operations moved from the commit rows to the headers.**
+  *Apply Patch at Proper Base...* and *Find Proper Base for Patch...* (and
+  the new automatic one) are now buttons in the **Git Easy Ops view
+  toolbar** - and in the built-in Source Control Graph's toolbar in the
+  `+graph` build - and no longer sit on commit rows or in the commit
+  submenu. A patch is operated on the whole repository: it is read from a
+  file and applied at the base the search finds, so the clicked commit was
+  never its target (at most an optional *source* the interactive flow can
+  still pick after clicking). This follows the precedent of *Clean
+  History* and *Diagnose Push / Sync Trouble*, which already live only on
+  the headers. Trade-off, consciously taken: the one-click "turn this
+  commit into a patch and re-apply it at its base" shortcut is gone - the
+  interactive command still offers a selected commit as a patch source
+  from the Command Palette, and asking is what that flow is for.
+
 ## 0.4.11
 
 ### Added

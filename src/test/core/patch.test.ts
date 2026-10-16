@@ -2,7 +2,7 @@ import { test, describe, afterEach } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { applyPatch, findProperBase, materializePatch, parsePatch } from '../../core/patch';
+import { applyPatch, findProperBase, materializePatch, parsePatch, patchAlreadyAppliedReason } from '../../core/patch';
 import { GecoError } from '../../core/errors';
 import { createTempRepo, type TempRepo } from '../helpers/tempRepo';
 
@@ -415,6 +415,38 @@ describe('findProperBase', () => {
 	});
 });
 
+describe('patchAlreadyAppliedReason', () => {
+	test('the commit a mailbox patch came from is already in the graph', async () => {
+		const { repo, p1 } = await scenario();
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1 });
+
+		const reason = await patchAlreadyAppliedReason(repo.ctx, parsePatch(patch));
+
+		assert.match(reason ?? '', /already in the graph on feature/);
+	});
+
+	test('the same change under a different commit hash is recognised by patch-id', async () => {
+		const repo = await temp();
+		await repo.commit('base', { 'f.txt': 'one\n' });
+		await repo.commit('the change', { 'f.txt': 'two\n' });
+		// A plain diff carries no `From <sha>` line, so only patch equivalence
+		// can recognise it - and HEAD already holds exactly that change.
+		const patch = await repo.gitOk(['diff', 'HEAD~1', 'HEAD']);
+
+		const reason = await patchAlreadyAppliedReason(repo.ctx, parsePatch(patch));
+
+		assert.match(reason ?? '', /same patch-id/);
+	});
+
+	test('a patch that fits but was never applied is not flagged', async () => {
+		const { repo, p1 } = await scenario();
+		await repo.gitOk(['branch', '-D', 'feature']);
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1 });
+
+		assert.equal(await patchAlreadyAppliedReason(repo.ctx, parsePatch(patch)), undefined);
+	});
+});
+
 describe('applyPatch - new branch at the proper base', () => {
 	test('a mailbox patch is replayed with git am, keeping author and message', async () => {
 		const { repo, c1, p1 } = await scenario();
@@ -467,6 +499,77 @@ describe('applyPatch - new branch at the proper base', () => {
 		assert.equal(result.staged, true, '--3way implies --index');
 		assert.equal(await repo.subject('wip'), 'c1 initial', 'the branch tip is still the base commit');
 		assert.equal(repo.read('f.txt'), 'feature\n');
+	});
+
+	test('a mailbox patch with commit:false is applied without committing', async () => {
+		const { repo, c1, p1 } = await scenario();
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1 });
+
+		const result = await applyPatch(repo.ctx, {
+			patch,
+			sourceCommit: p1,
+			targetBranch: 'main',
+			destination: 'newBranch',
+			branchName: 'review/me',
+			commit: false,
+		});
+
+		assert.equal(result.base.sha, c1);
+		assert.equal(result.method, 'apply-3way', 'the mailbox is applied with git apply, not git am');
+		assert.equal(result.committed, false);
+		assert.equal(result.staged, true);
+		assert.equal(await repo.branchSha('review/me'), c1, 'the branch tip is still the base commit');
+		assert.equal(repo.read('f.txt'), 'feature\n');
+		assert.deepEqual(await repo.statusLines(), ['M  f.txt'], 'the change waits staged for the user to commit');
+	});
+
+	test('undo of an uncommitted mailbox apply discards the change and the branch', async () => {
+		const { repo, p1 } = await scenario();
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1 });
+
+		const result = await applyPatch(repo.ctx, { patch, sourceCommit: p1, targetBranch: 'main', destination: 'newBranch', branchName: 'review/me', commit: false });
+		assert.equal(result.committed, false);
+
+		const entry = (await repo.ctx.safety.readJournal()).pop()!;
+		assert.match(entry.summary, /\(not committed\)/);
+		const undo = await repo.ctx.safety.undo(entry);
+
+		assert.equal(await repo.hasBranch('review/me'), false, 'the branch this apply created is gone');
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+		assert.equal(repo.read('f.txt'), 'two\n', 'the working tree is back to main');
+		assert.deepEqual(await repo.statusLines(), []);
+		assert.match(undo.messages.join('\n'), /Checked out main again/);
+	});
+
+	test('a conflicting apply on a new branch rolls the checkout back completely', async () => {
+		const { repo, c3, p1 } = await scenario();
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1 });
+
+		// c3 already changed f.txt differently: the 3-way apply stops with
+		// conflict markers and unmerged index entries - the rollback must
+		// clean those up, not strand the user on the half-built branch.
+		const error = await expectCode(
+			() => applyPatch(repo.ctx, { patch, base: c3, destination: 'newBranch', branchName: 'temp/conflict', commit: false }),
+			'conflict',
+		);
+		assert.match(error.userMessage, /f\.txt/);
+		assert.equal(await repo.hasBranch('temp/conflict'), false, 'the half-built branch is gone');
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main', 'the checkout is back on main');
+		assert.deepEqual(await repo.statusLines(), [], 'no conflict leftovers in the working tree');
+	});
+
+	test('a subject ending in a period still yields a valid branch name', async () => {
+		const source = await temp();
+		await source.commit('base', { 'f.txt': 'one\n' });
+		const dotted = await source.commit('fix typo.', { 'f.txt': 'two\n' });
+		const { patch } = await materializePatch(source.ctx, { kind: 'commit', commit: dotted });
+
+		const repo = await temp();
+		await repo.commit('base', { 'f.txt': 'one\n' });
+		const result = await applyPatch(repo.ctx, { patch, destination: 'newBranch', commit: false });
+
+		assert.equal(result.branch, 'geco/fix-typo', 'git refuses refs that end with a dot');
+		assert.equal(await repo.hasBranch('geco/fix-typo'), true);
 	});
 
 	test('an existing branch name is refused', async () => {
@@ -569,6 +672,23 @@ describe('applyPatch - current branch', () => {
 		assert.equal(await repo.subject('main'), 'bump g');
 	});
 
+	test('a mailbox patch on the current branch stays uncommitted', async () => {
+		const repo = await temp();
+		const base = await repo.commit('base', { 'f.txt': 'one\n' });
+		await repo.gitOk(['checkout', '--quiet', '-b', 'side', base]);
+		const side = await repo.commit('side work', { 'f.txt': 'side\n' });
+		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: side });
+		await repo.checkout('main');
+
+		const result = await applyPatch(repo.ctx, { patch, sourceCommit: side, targetBranch: 'main', destination: 'current', commit: false });
+
+		assert.equal(result.committed, false);
+		assert.equal(result.method, 'apply-3way', 'git am would have committed on the current branch');
+		assert.equal(await repo.branchSha('main'), base, 'main did not move');
+		assert.equal(repo.read('f.txt'), 'side\n');
+		assert.deepEqual(await repo.statusLines(), ['M  f.txt']);
+	});
+
 	test('refuses when HEAD is not the proper base', async () => {
 		const { repo, p1 } = await scenario();
 		const { patch } = await materializePatch(repo.ctx, { kind: 'commit', commit: p1, mailbox: false });
@@ -578,6 +698,67 @@ describe('applyPatch - current branch', () => {
 			'unsupported',
 		);
 		assert.match(error.userMessage, /proper base/i);
+	});
+
+	test('applyAtHeadWithoutBranch applies on the current branch instead of creating one', async () => {
+		const { repo, c3 } = await scenario();
+		const patch = 'diff --git a/g.txt b/g.txt\nindex 1111111..2222222 100644\n--- a/g.txt\n+++ b/g.txt\n@@ -1 +1 @@\n-g-two\n+g-three\n';
+		const branchesBefore = await repo.branches();
+
+		const result = await applyPatch(repo.ctx, {
+			patch,
+			targetBranch: 'main',
+			destination: 'newBranch',
+			branchName: 'should/not-exist',
+			commit: false,
+			applyAtHeadWithoutBranch: true,
+		});
+
+		assert.equal(result.base.sha, c3);
+		assert.equal(result.destination, 'current');
+		assert.equal(result.branch, 'main', 'the result names the branch that was already checked out');
+		assert.equal(result.committed, false, 'nothing is committed for the user');
+		assert.equal(await repo.hasBranch('should/not-exist'), false, 'no branch was created');
+		assert.deepEqual(await repo.branches(), branchesBefore);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+		assert.equal(await repo.branchSha('main'), c3, 'main did not move');
+		assert.equal(repo.read('g.txt'), 'g-three\n', 'the change is in the working tree');
+		assert.deepEqual(await repo.statusLines(), ['M  g.txt'], 'the change is staged, ready to commit');
+		assert.match(result.warnings.join('\n'), /instead of creating a new branch/);
+	});
+
+	test('applyAtHeadWithoutBranch keeps the branch when a file the patch touches is locally changed', async () => {
+		const { repo } = await scenario();
+		repo.write('g.txt', 'my own edit\n');
+		const patch = 'diff --git a/g.txt b/g.txt\nindex 1111111..2222222 100644\n--- a/g.txt\n+++ b/g.txt\n@@ -1 +1 @@\n-g-two\n+g-three\n';
+
+		const result = await applyPatch(repo.ctx, {
+			patch,
+			targetBranch: 'main',
+			destination: 'newBranch',
+			branchName: 'kept/apart',
+			commit: false,
+			applyAtHeadWithoutBranch: true,
+		});
+
+		// The local edit is in the way in this checkout, so the patch goes
+		// to a separate worktree (the new-branch destination's own dirty
+		// fallback) and the edit is untouched.
+		assert.equal(result.destination, 'worktree');
+		assert.ok(result.worktreePath);
+		assert.equal(await repo.hasBranch('kept/apart'), true);
+		assert.equal(repo.read('g.txt'), 'my own edit\n');
+		assert.equal(fs.readFileSync(path.join(result.worktreePath!, 'g.txt'), 'utf8'), 'g-three\n');
+	});
+
+	test('without applyAtHeadWithoutBranch an explicit new branch at HEAD is still created', async () => {
+		const { repo } = await scenario();
+		const patch = 'diff --git a/g.txt b/g.txt\nindex 1111111..2222222 100644\n--- a/g.txt\n+++ b/g.txt\n@@ -1 +1 @@\n-g-two\n+g-three\n';
+
+		const result = await applyPatch(repo.ctx, { patch, targetBranch: 'main', destination: 'newBranch', branchName: 'explicit', commit: false });
+
+		assert.equal(result.destination, 'newBranch');
+		assert.equal(await repo.hasBranch('explicit'), true, 'a destination the user picked is honoured');
 	});
 
 	test('undo of a committed apply restores the branch and the files', async () => {

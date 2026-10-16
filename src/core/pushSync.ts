@@ -423,20 +423,24 @@ async function findUnfinishedOperations(ctx: RepoContext): Promise<UnfinishedOpe
 	const { git } = ctx;
 	const found: UnfinishedOperation[] = [];
 	const seen = new Set<UnfinishedKind>();
+	// One git call resolves every marker path (previously one
+	// `rev-parse --git-path` per marker) - this runs before almost every
+	// command through `assertStartable`.
+	const paths = await git.gitPaths(OPERATION_MARKERS.map((marker) => marker.marker));
+	const exists = (name: string) => pathExists(paths.get(name) ?? '');
 	for (const marker of OPERATION_MARKERS) {
 		if (seen.has(marker.kind)) {
 			continue;
 		}
-		const target = await git.gitPath(marker.marker);
-		if (!(await pathExists(target))) {
+		if (!(await exists(marker.marker))) {
 			continue;
 		}
 		// `rebase-apply` alone is an am; the specific files inside it were
 		// already checked above, so the generic marker only fires for a rebase
 		// directory whose flavour file is missing (an old git wrote neither).
 		if (marker.marker === 'rebase-apply') {
-			const rebasing = await pathExists(await git.gitPath('rebase-apply/rebasing'));
-			const applying = await pathExists(await git.gitPath('rebase-apply/applying'));
+			const rebasing = await exists('rebase-apply/rebasing');
+			const applying = await exists('rebase-apply/applying');
 			if (rebasing || applying) {
 				continue;
 			}
@@ -451,8 +455,12 @@ async function findLockFiles(ctx: RepoContext): Promise<LockFile[]> {
 	const { git } = ctx;
 	const locks: LockFile[] = [];
 	const now = Date.now();
+	const paths = await git.gitPaths(LOCK_NAMES);
 	for (const name of LOCK_NAMES) {
-		const target = await git.gitPath(name);
+		const target = paths.get(name);
+		if (!target) {
+			continue;
+		}
 		try {
 			const stat = await fsp.stat(target);
 			locks.push({ path: target, name: path.basename(target), ageMs: Math.max(0, now - stat.mtimeMs) });
@@ -481,14 +489,18 @@ async function analyzeSync(
 
 	// The counterpart of a duplicated commit: the remote commit with the same
 	// patch id (the same edit, a different hash). Only computed when a duplicate
-	// candidate exists at all - `git cherry` is the cheap first pass.
+	// candidate exists at all - `git cherry` is the cheap first pass. When it
+	// does, both sides are hashed together in two git processes instead of two
+	// per commit.
+	const duplicates = localShas.filter((sha) => alreadyThere.has(sha));
+	const patchIdsBySha = duplicates.length > 0
+		? await git.patchIdsOfCommits([...remoteShas, ...duplicates])
+		: new Map<string, string>();
 	const remoteByPatchId = new Map<string, string>();
-	if (localShas.some((sha) => alreadyThere.has(sha))) {
-		for (const sha of remoteShas) {
-			const patchId = await git.patchIdOf(sha);
-			if (patchId) {
-				remoteByPatchId.set(patchId, sha);
-			}
+	for (const sha of remoteShas) {
+		const patchId = patchIdsBySha.get(sha);
+		if (patchId) {
+			remoteByPatchId.set(patchId, sha);
 		}
 	}
 
@@ -498,7 +510,7 @@ async function analyzeSync(
 		const isDuplicate = alreadyThere.has(sha);
 		const entry: LocalOnlyCommit = { sha, shortSha: info.shortSha, subject: info.subject, alreadyThere: isDuplicate };
 		if (isDuplicate) {
-			const patchId = await git.patchIdOf(sha);
+			const patchId = patchIdsBySha.get(sha);
 			const counterpart = patchId ? remoteByPatchId.get(patchId) : undefined;
 			if (counterpart) {
 				entry.equivalentTo = counterpart;

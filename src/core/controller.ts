@@ -9,7 +9,7 @@
 import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
-import { ACTIONS, SYNC_BUTTON_WARNING, type ActionLabel, type QuickPickChoice, type UI } from './ui';
+import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type QuickPickChoice, type UI } from './ui';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -59,6 +59,8 @@ import {
 	applyPatch,
 	findProperBase,
 	materializePatch,
+	parsePatch,
+	patchAlreadyAppliedReason,
 	type ApplyPatchResult,
 	type BaseEvaluation,
 	type PatchSource,
@@ -136,6 +138,25 @@ export interface ControllerOptions {
 	 * has already returned.
 	 */
 	onRepositoryChanged?(): void;
+	/**
+	 * Remembers the patch file **Apply Patch Automatically** used last, per
+	 * repository - the whole point of that command is that the second click
+	 * needs no file dialog. Wired to the editor's workspace state in
+	 * production; absent in tests that do not care (the command then always
+	 * asks for a file). Only ever written after a patch applied cleanly, so
+	 * a broken or already-applied file never becomes the remembered one.
+	 */
+	lastPatchFile?: PatchFileMemory;
+}
+
+/**
+ * Where the last successfully auto-applied patch file lives, per repository.
+ * `get` returns the absolute path remembered for `repoPath` (or `undefined`
+ * when this repository never auto-applied one); `set` replaces it.
+ */
+export interface PatchFileMemory {
+	get(repoPath: string): Promise<string | undefined> | string | undefined;
+	set(repoPath: string, patchFile: string): Promise<void> | void;
 }
 
 export interface CommitPick {
@@ -1307,6 +1328,126 @@ export class Controller {
 		});
 	}
 
+	/**
+	 * **Apply Patch Automatically** - the question-free sibling of
+	 * {@link applyPatchAtProperBase}. It always applies a patch *file*:
+	 *
+	 *  1. the file remembered from the last successful run in this
+	 *     repository is tried first, with no dialog at all;
+	 *  2. when there is none - or it is missing, unreadable, not a patch,
+	 *     already in the graph, or does not apply for any other reason -
+	 *     the file dialog opens and the picked file is tried instead;
+	 *  3. a file picked in the dialog that also fails is reported as an
+	 *     error (no second dialog: the user just chose that file, looping
+	 *     back to the picker would only ask the same question again).
+	 *
+	 * Everything the interactive flow asks about is answered from the
+	 * defaults instead: the destination is `geco.applyPatchDestination`,
+	 * the branch name is derived from the patch (its subject for a mailbox
+	 * patch, `geco/patch-<base>` otherwise) - except when the patch applies
+	 * cleanly on the latest HEAD itself, in which case it is applied
+	 * directly on the current branch and no branch (and no worktree) is
+	 * created at all - and **nothing is committed** -
+	 * the change lands staged in the working tree (on the new branch / in
+	 * the worktree, or on the current branch) and the user commits it
+	 * themselves, with their own message and authorship. Once that commit
+	 * exists, a repeat click recognises the patch as "already in the graph"
+	 * (by `git patch-id`); a repeat click *before* committing applies the
+	 * file again - on a dirty tree the new-branch destination falls back
+	 * to a separate worktree, which the report says. The result report
+	 * (with *Undo*) is shared with the interactive flow: it is a report,
+	 * not a question, so it is handed over without waiting for its answer
+	 * (see {@link followUpWithoutWaiting}) - awaiting it kept this command
+	 * pending until the toast was dismissed, which the Source Control
+	 * Graph draws as an endless progress bar.
+	 */
+	async applyPatchAutomatically(cwd: string): Promise<void> {
+		await this.guard('Auto-apply patch', async () => {
+			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx, { allowAm: true });
+
+			const rememberedRaw = this.options.lastPatchFile ? await this.options.lastPatchFile.get(cwd) : undefined;
+			const remembered = rememberedRaw?.trim() ? rememberedRaw : undefined;
+			if (remembered) {
+				try {
+					await this.applyPatchFileAutomatically(ctx, cwd, remembered);
+					return;
+				} catch (error) {
+					// Any reason at all - missing file, garbage, already in
+					// the graph, no fitting base, a conflicting apply - means
+					// "ask for a (different) file", never a dead end. The
+					// failed attempt changed nothing: a new-branch/worktree
+					// apply rolls its own creations back, and the checks
+					// above it never touch the worktree.
+					this.ui.log(
+						`Auto-apply: the remembered patch file "${remembered}" cannot be used (${toErrorMessage(error).split('\n')[0]}). Opening the file dialog instead.`,
+					);
+				}
+			}
+
+			if (!this.ui.pickFile) {
+				await this.ui.message('error', 'Auto-apply patch: this UI cannot open a file dialog, and no usable patch file is remembered for this repository.');
+				return;
+			}
+			const picked = await this.ui.pickFile({
+				title: remembered ? 'The remembered patch cannot be used - choose a patch file' : 'Choose a patch file to apply',
+				filters: { Patch: ['patch', 'diff'], 'All files': ['*'] },
+			});
+			if (!picked) {
+				this.ui.log('Auto-apply patch: no patch file chosen.');
+				return;
+			}
+			await this.applyPatchFileAutomatically(ctx, cwd, picked);
+		});
+	}
+
+	/**
+	 * One silent attempt to apply `patchFile` at its proper base. Throws on
+	 * every failure (the caller decides whether that means "open the file
+	 * dialog" or "report it"); on success the file becomes the remembered
+	 * one for this repository and the shared report is shown.
+	 */
+	private async applyPatchFileAutomatically(ctx: RepoContext, cwd: string, patchFile: string): Promise<void> {
+		const materialized = await this.ui.withProgress('Building patch', () => materializePatch(ctx, { kind: 'file', path: patchFile }));
+		const parsed = parsePatch(materialized.patch);
+
+		const alreadyReason = await this.ui.withProgress('Checking whether the patch is already in the graph', () =>
+			patchAlreadyAppliedReason(ctx, parsed),
+		);
+		if (alreadyReason) {
+			throw new GecoError('already-applied', `Patch "${materialized.label}" is already applied: ${alreadyReason}.`);
+		}
+
+		const destination = this.settings.applyPatchDestination;
+		const result = await this.ui.withProgress('Applying patch', (report) => {
+			report(`applying "${materialized.label}" (${destination})`);
+			return applyPatch(ctx, {
+				patch: materialized.patch,
+				sourceCommit: parsed.commitSha,
+				destination,
+				// No branch-name question: `applyPatch` derives one from the
+				// patch subject / base. `commit: false` also keeps a mailbox
+				// patch out of `git am`: the change stays staged and
+				// uncommitted so the user picks the commit name themselves.
+				commit: false,
+				// When the patch fits the latest HEAD, no branch is needed
+				// to hold it: apply it on the current branch, uncommitted.
+				applyAtHeadWithoutBranch: true,
+			});
+		});
+
+		if (this.options.lastPatchFile) {
+			try {
+				await this.options.lastPatchFile.set(cwd, patchFile);
+			} catch (error) {
+				// The patch is applied; failing to remember it must not fail
+				// the command - the next click simply asks for the file again.
+				this.ui.log(`Auto-apply: could not remember "${patchFile}" for next time: ${toErrorMessage(error)}`);
+			}
+		}
+		await this.reportApplyPatch(ctx, result, materialized.label, cwd);
+	}
+
 	async showProperBase(cwd: string, args: readonly unknown[]): Promise<void> {
 		await this.guard('Find proper base', async () => {
 			const ctx = this.contextFor(cwd);
@@ -1379,7 +1520,7 @@ export class Controller {
 				`  destination: ${result.destination}${result.branch ? ` (${result.branch})` : ''}`,
 				result.worktreePath ? `  worktree: ${result.worktreePath}` : '',
 				`  files: ${result.appliedPaths.join(', ') || '(none)'}`,
-				result.committed && result.commitSha ? `  commit: ${shorten(result.commitSha)}` : '',
+				result.committed && result.commitSha ? `  commit: ${shorten(result.commitSha)}` : '  commit: none - the changes are left uncommitted, review and commit them yourself',
 				result.conflicts.length > 0 ? `  conflicts: ${result.conflicts.join(', ')}` : '',
 				...result.warnings.map((warning) => `  warning: ${warning}`),
 			].filter(Boolean).join('\n'),
@@ -1395,12 +1536,30 @@ export class Controller {
 			? `Patch applied at ${shorten(result.base.sha)} with conflicts in ${result.conflicts.join(', ')}.`
 			: `Patch applied at ${shorten(result.base.sha)} (${result.base.label})${result.branch ? ` on ${result.branch}` : ''}${result.worktreePath ? ` in ${result.worktreePath}` : ''}.`;
 
-		const chosen = await this.ui.ask(headline, { detail: result.warnings.join('\n') || undefined, actions });
-		if (chosen === ACTIONS.openWorktree && result.worktreePath) {
-			await this.ui.openPath?.(result.worktreePath);
-		} else if (chosen === ACTIONS.undo) {
-			await this.undoLast(ctx, true);
-		}
+		const detail = [
+			result.committed ? '' : 'Nothing was committed - the changes are in the working tree, ready for you to review and commit under your own name.',
+			...result.warnings,
+		].filter(Boolean).join('\n') || undefined;
+
+		// A report, not a question: the patch is applied and journaled, so
+		// the command must finish *now*. Awaiting the notification (which
+		// is what `ask` does in the real adapter, and which only resolves
+		// when the toast goes away) left the command pending indefinitely
+		// and the Source Control Graph spinning - the recurring endless
+		// progress bar. The follow-up runs when/if it is picked; the
+		// journal hook and the repository watcher repaint the graphs for
+		// it, as they do for an Undo started from the palette.
+		followUpWithoutWaiting(
+			this.ui.ask(headline, { detail, actions }),
+			async (chosen) => {
+				if (chosen === ACTIONS.openWorktree && result.worktreePath) {
+					await this.ui.openPath?.(result.worktreePath);
+				} else if (chosen === ACTIONS.undo) {
+					await this.undoLast(ctx, true);
+				}
+			},
+			(error) => this.ui.log(`Apply patch: the follow-up to the result report failed: ${toErrorMessage(error)}`),
+		);
 		void cwd;
 	}
 

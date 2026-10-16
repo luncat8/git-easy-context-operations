@@ -4,7 +4,8 @@
  * The built-in Source Control Graph only offers a per-commit context menu
  * through the *proposed* contribution point `scm/historyItem/context`
  * (proposal `contribSourceControlHistoryItemMenu` - still proposed as of VS Code
- * 1.10x). An installed extension may use a proposal when its manifest declares
+ * 1.142, re-checked on 2026-10-16 against microsoft/vscode main: issues
+ * microsoft/vscode#201997 and #226144 are open). An installed extension may use a proposal when its manifest declares
  * `enabledApiProposals` **and** the user allowed it, either per launch
  * (`code --enable-proposed-api <id>`) or persistently via `argv.json`:
  *

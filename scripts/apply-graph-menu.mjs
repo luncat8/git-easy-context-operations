@@ -38,8 +38,6 @@ const GRAPH_MENUS = {
 		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: '4_modify@3' },
 		{ command: 'geco.rewordCommitAppend', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)', group: '4_modify@4' },
 		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)', group: '4_modify@5' },
-		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: '6_patch@1' },
-		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: '6_patch@2' },
 		// The branch group of the built-in graph: "Create Branch..." is git.branch
 		// at 2_branch@2, so the branch cleanup lands directly behind it - last in
 		// that group, exactly like on the extension's own commit rows.
@@ -89,6 +87,12 @@ const GRAPH_MENUS = {
 		// Same surface, one more repository-wide answer: "why can I not push or
 		// sync?" - the state it explains usually becomes visible in this graph.
 		{ command: 'geco.diagnosePushSync', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)', group: 'navigation@93' },
+		// The patch operations join the toolbar too: a patch comes from a
+		// file and lands at the base the search finds, so it is about the
+		// whole repository - never about the commit a right-click landed on.
+		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: 'navigation@94' },
+		{ command: 'geco.applyPatchAutomatically', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)', group: 'navigation@95' },
+		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: 'navigation@96' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };

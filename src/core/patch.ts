@@ -571,6 +571,78 @@ function blobMatches(full: string, expected: string): boolean {
 	return full === expected || full.startsWith(expected) || expected.startsWith(full);
 }
 
+/**
+ * Is this patch already in the repository graph? Returns *why* when it is
+ * (a sentence for the log / notification), `undefined` when it looks new.
+ *
+ * Three proofs, strongest first - any one is enough:
+ *
+ *  1. **the commit itself is reachable**: a mailbox patch names the commit it
+ *     was made from (`From <sha> ...`); when a branch, a tag or HEAD already
+ *     contains that sha, the change is in the graph by definition;
+ *  2. **patch equivalence**: `git patch-id` hashes the change while ignoring
+ *     parent, author, date and message, so the same edit committed twice
+ *     under different hashes still matches. Every commit of the patch must
+ *     have a counterpart in the graph - a half-applied series is not
+ *     "already applied", it is work still to do;
+ *  3. (left to the caller) `git apply` / `git am` failing on the change is
+ *     also treated as "not usable" by the automatic flow - this function is
+ *     the cheap, explainable pre-check, not the only guard.
+ *
+ * Only the newest `maxCommits` commits of `--all` are patch-id compared:
+ * the graph can be huge, and a patch whose twin is older than that is
+ * re-checked by the apply itself.
+ */
+export async function patchAlreadyAppliedReason(
+	ctx: RepoContext,
+	parsed: ParsedPatch,
+	options: { maxCommits?: number } = {},
+): Promise<string | undefined> {
+	const { git } = ctx;
+	if (parsed.files.length === 0) {
+		return undefined;
+	}
+
+	if (parsed.commitSha) {
+		const sha = await git.tryRun(['rev-parse', '--verify', '--quiet', `${parsed.commitSha}^{commit}`]);
+		if (sha) {
+			const branches = await git.branchesContaining(sha);
+			const tags = await git.tagsContaining(sha);
+			const onHead = await git.isAncestor(sha, 'HEAD');
+			const where = branches[0] ?? tags[0] ?? (onHead ? 'HEAD' : undefined);
+			if (where) {
+				return `commit ${shorten(sha)}${parsed.subject ? ` ("${parsed.subject}")` : ''} is already in the graph on ${where}`;
+			}
+		}
+	}
+
+	const incoming = await git.patchIdsOfPatch(parsed.raw);
+	if (incoming.length === 0) {
+		return undefined;
+	}
+	const limit = Math.max(1, options.maxCommits ?? 200);
+	const commits = await git.revList(['--all', `--max-count=${limit}`]);
+	// Two git processes for the whole graph slice (`git show` + `git
+	// patch-id`) instead of two *per commit*: the per-commit loop spawned up
+	// to 400 processes for the default 200 commits on every click.
+	const idsBySha = await git.patchIdsOfCommits(commits);
+	const wanted = new Set(incoming);
+	const matched = new Map<string, string>();
+	for (const sha of commits) {
+		const id = idsBySha.get(sha);
+		if (id && wanted.has(id) && !matched.has(id)) {
+			matched.set(id, sha);
+		}
+	}
+	if (matched.size === incoming.length) {
+		const first = matched.get(incoming[0]!)!;
+		return incoming.length === 1
+			? `the same change is already in the graph as commit ${shorten(first)} (same patch-id)`
+			: `all ${incoming.length} commits of this patch series are already in the graph (same patch-ids, e.g. ${shorten(first)})`;
+	}
+	return undefined;
+}
+
 // ------------------------------------------------------------------- applying
 
 export interface ApplyPatchOptions {
@@ -583,7 +655,32 @@ export interface ApplyPatchOptions {
 	branchName?: string;
 	worktreePath?: string;
 	threeWay?: boolean;
-	/** Commit the result (mailbox patches always commit through `git am`). */
+	/**
+	 * Apply in place on the current branch when the proper base *is* HEAD.
+	 *
+	 * Only a caller that never asked where the patch should land (the
+	 * automatic flow) sets this: when the patch fits the latest HEAD
+	 * cleanly, creating `geco/patch-<base>` (or a worktree branch) just to
+	 * hold an uncommitted change the user is about to review in their own
+	 * checkout is ceremony without a benefit, so the configured
+	 * `newBranch` / `worktree` destination is dropped for `current`. The
+	 * downgrade only happens when the base is exactly HEAD, the tree probe
+	 * says the patch applies without a 3-way merge, and no local change
+	 * (staged, unstaged or untracked) touches a path the patch touches -
+	 * otherwise the requested destination is honoured as usual. An
+	 * interactive caller, who *picked* the branch/worktree destination,
+	 * never sets this.
+	 */
+	applyAtHeadWithoutBranch?: boolean;
+	/**
+	 * Whether the result may become a commit.
+	 *
+	 * - a mailbox patch commits through `git am` unless this is `false` -
+	 *   with `false` its diff is applied with `git apply` instead, so the
+	 *   change lands in the worktree/index *uncommitted* and the user picks
+	 *   the commit name;
+	 * - a plain diff commits (with `commitMessage`) only when this is `true`.
+	 */
 	commit?: boolean;
 	commitMessage?: string;
 	/** Report what would happen without touching anything. */
@@ -659,6 +756,32 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 	const headBranch = await git.headBranch();
 	let destination = options.destination ?? settings.applyPatchDestination;
 
+	if (
+		options.applyAtHeadWithoutBranch
+		&& destination !== 'current'
+		&& headSha
+		&& base.sha === headSha
+		&& base.appliesCleanly
+	) {
+		// "It applies on the last HEAD" is only true for the checkout as it
+		// stands: a local edit to a file the patch rewrites would make
+		// `git apply` refuse (or, worse, the 3-way fallback would fold the
+		// edit into the result), so any overlap keeps the branch/worktree
+		// the caller asked for - which then falls back to a worktree of its
+		// own accord when the tree is dirty.
+		const patchPaths = new Set(parsed.files.flatMap((f) => [f.path, f.oldPath].filter(Boolean)));
+		const localChanges = await git.status({ includeUntracked: true });
+		const inTheWay = localChanges.some(
+			(entry) => patchPaths.has(entry.path) || (entry.originalPath !== undefined && patchPaths.has(entry.originalPath)),
+		);
+		if (!inTheWay) {
+			destination = 'current';
+			warnings.push(
+				`The proper base is the current HEAD (${shorten(base.sha)}), so the patch is applied directly on ${headBranch ?? 'the current checkout'} instead of creating a new branch.`,
+			);
+		}
+	}
+
 	if (destination === 'current' && base.sha !== headSha) {
 		throw new GecoError(
 			'unsupported',
@@ -726,15 +849,22 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 		const commitSha = applied.committed ? await target.revParse('HEAD') : undefined;
 
 		if (createdWorktree || createdBranch) {
+			// Uncommitted changes on a branch this call just created: Undo has
+			// to discard them first (the guarded `resetHard` refuses once the
+			// user has committed on the branch, so their own commit is never
+			// destroyed), then delete the branch - that restores the state
+			// from before the apply. A *committed* apply keeps the branch as
+			// its result; Undo only checks the previous branch out again.
+			const uncommittedOnNewBranch = Boolean(createdBranch) && !createdWorktree && !applied.committed;
 			await safety.record({
 				kind: 'applyPatch',
-				summary: `Applied patch at ${shorten(base.sha)} (${base.label})${createdBranch ? ` on branch ${createdBranch}` : ''}${createdWorktree ? ` in worktree ${createdWorktree}` : ''}`,
+				summary: `Applied patch at ${shorten(base.sha)} (${base.label})${createdBranch ? ` on branch ${createdBranch}` : ''}${createdWorktree ? ` in worktree ${createdWorktree}` : ''}${applied.committed ? '' : ' (not committed)'}`,
 				undo: {
 					type: 'refs',
-					refs: [],
-					deleteBranches: createdWorktree ? [createdBranch!] : [],
+					refs: uncommittedOnNewBranch ? [{ ref: `refs/heads/${createdBranch}`, restoreTo: base.sha, expected: base.sha, resetHard: true }] : [],
+					deleteBranches: createdWorktree || uncommittedOnNewBranch ? [createdBranch!] : [],
 					worktrees: createdWorktree ? [{ path: createdWorktree, branch: createdBranch }] : [],
-					checkoutRef: checkedOut && previousBranch ? previousBranch : undefined,
+					checkoutRef: checkedOut ? previousBranch ?? (uncommittedOnNewBranch ? base.sha : undefined) : undefined,
 				},
 			});
 		} else if (applied.committed && previousBranch && headSha) {
@@ -786,9 +916,14 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 			}
 		} else if (checkedOut && createdBranch) {
 			await abortAmIfInProgress(git);
-			if (previousBranch) {
-				await git.checkout(previousBranch).catch(() => undefined);
-			}
+			// Discard whatever the failed apply left in the checkout *we*
+			// created - a 3-way apply that stopped with conflicts would
+			// otherwise make the checkout below fail and strand the user on
+			// the half-built branch. Safe: this destination is only chosen
+			// when the tracked files were clean, so everything dirty here is
+			// ours.
+			await git.reset('hard', base.sha).catch(() => undefined);
+			await git.checkout(previousBranch ?? base.sha, previousBranch ? undefined : { detach: true }).catch(() => undefined);
 			if (await git.branchExists(createdBranch)) {
 				await git.deleteBranch(createdBranch, { force: true }).catch(() => undefined);
 			}
@@ -807,6 +942,7 @@ async function abortAmIfInProgress(git: Git): Promise<void> {
 interface ApplyInWorktreeOptions {
 	threeWay: boolean;
 	mailbox: boolean;
+	/** See {@link ApplyPatchOptions.commit} - `false` means never commit, mailbox included. */
 	commit?: boolean;
 	commitMessage?: string;
 	warnings: string[];
@@ -824,7 +960,12 @@ interface ApplyInWorktreeResult {
 async function applyInWorktree(git: Git, parsed: ParsedPatch, options: ApplyInWorktreeOptions): Promise<ApplyInWorktreeResult> {
 	const paths = parsed.files.map((f) => f.path || f.oldPath).filter(Boolean);
 
-	if (options.mailbox) {
+	// `git am` is the only way to replay a mailbox *as a commit* (author,
+	// date, message included). When committing is explicitly unwanted, its
+	// mail headers are dropped and the diff goes through `git apply` like a
+	// plain patch: the change lands in the worktree/index, uncommitted, and
+	// the user writes the commit under their own name.
+	if (options.mailbox && options.commit !== false) {
 		const result = await git.amPatch(parsed.raw, { threeWay: options.threeWay });
 		const output = `${result.stdout}\n${result.stderr}`;
 		const alreadyApplied = /No changes -- Patch already applied/i.test(output);
@@ -895,6 +1036,7 @@ function slugify(value: string): string {
 	return value
 		.toLowerCase()
 		.replace(/[^a-z0-9._/-]+/g, '-')
-		.replace(/^-+|-+$/g, '')
-		.slice(0, 40) || 'patch';
+		.replace(/\.{2,}/g, '.') // `..` is forbidden anywhere in a ref name
+		.slice(0, 40)
+		.replace(/[./]+$/, '') || 'patch'; // a ref cannot end with `.` or `/`
 }

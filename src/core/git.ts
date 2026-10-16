@@ -106,11 +106,12 @@ export class Git {
 	/** Run and require success; returns trimmed stdout. */
 	async ok(args: readonly string[], options?: { env?: Record<string, string | undefined>; input?: string; timeoutMs?: number }): Promise<string> {
 		const result = await this.run(args, options);
+		if (result.timedOut) {
+			// Checked first: a killed process reports a meaningless exit code.
+			throw new GecoError('git-failed', `git ${args[0]} timed out.`, describeFailure(args, result));
+		}
 		if (result.exitCode !== 0) {
 			throw new GecoError('git-failed', `git ${args[0]} failed (exit ${result.exitCode}).`, describeFailure(args, result));
-		}
-		if (result.timedOut) {
-			throw new GecoError('git-failed', `git ${args[0]} timed out.`, describeFailure(args, result));
 		}
 		// trimEnd only: `git status --porcelain -z` legitimately starts with a space.
 		return result.stdout.trimEnd();
@@ -181,6 +182,32 @@ export class Git {
 			return reported;
 		}
 		return path.resolve(await this.gitDir(), name);
+	}
+
+	/**
+	 * Like {@link gitPath}, but resolves every name in **one** git call
+	 * (`rev-parse` accepts repeated `--git-path` flags and prints one line per
+	 * name, in order). Git too old for the batch falls back to the per-name
+	 * resolution, so callers never need to care.
+	 */
+	async gitPaths(names: readonly string[]): Promise<Map<string, string>> {
+		const resolved = new Map<string, string>();
+		if (names.length === 0) {
+			return resolved;
+		}
+		const args: string[] = ['rev-parse', '--path-format=absolute'];
+		for (const name of names) {
+			args.push('--git-path', name);
+		}
+		const lines = (await this.tryRun(args))?.split('\n').map((line) => line.trim()).filter(Boolean) ?? [];
+		if (lines.length === names.length) {
+			names.forEach((name, index) => resolved.set(name, lines[index]!));
+			return resolved;
+		}
+		for (const name of names) {
+			resolved.set(name, await this.gitPath(name));
+		}
+		return resolved;
 	}
 
 	// ------------------------------------------------------------------- revs
@@ -755,6 +782,30 @@ export class Git {
 	}
 
 	/**
+	 * The patch ids of a raw patch text (a plain diff or a `format-patch`
+	 * mailbox - `git patch-id` skips the mail headers itself). One id per
+	 * commit in the patch, in order; an empty list when the patch carries no
+	 * hunks `patch-id` can hash (binary-only, mode-only, garbage).
+	 */
+	async patchIdsOfPatch(patch: string): Promise<string[]> {
+		if (!patch.trim()) {
+			return [];
+		}
+		const result = await this.run(['patch-id', '--stable'], { input: patch });
+		if (result.exitCode !== 0) {
+			return [];
+		}
+		const ids: string[] = [];
+		for (const line of result.stdout.split('\n')) {
+			const first = line.trim().split(/\s+/)[0];
+			if (first && /^[0-9a-f]{7,64}$/.test(first) && !ids.includes(first)) {
+				ids.push(first);
+			}
+		}
+		return ids;
+	}
+
+	/**
 	 * The patch id of a commit: the hash of the change it introduces, ignoring
 	 * parent, author, date and message. Two commits made from the same edit
 	 * have the same patch id even when their commit hashes differ - that is
@@ -771,6 +822,38 @@ export class Git {
 		}
 		const first = result.stdout.trim().split(/\s+/)[0];
 		return first && /^[0-9a-f]{7,64}$/.test(first) ? first : undefined;
+	}
+
+	/**
+	 * Patch-ids of many commits at once, with **two** git processes (one
+	 * `git show` that prints every patch, one `git patch-id` that hashes them)
+	 * instead of the two-per-commit {@link patchIdOf}. `patch-id` attributes
+	 * every line it prints as `<patch-id> <commit-sha>` - the sha comes from
+	 * the `commit ...` header `git show` emits, so this keeps the default
+	 * (medium) format on purpose. Commits without a diff `patch-id` can hash
+	 * (merges, empty commits) simply do not appear in the map - the same
+	 * result `patchIdOf` gives for them.
+	 */
+	async patchIdsOfCommits(shas: readonly string[]): Promise<Map<string, string>> {
+		const map = new Map<string, string>();
+		if (shas.length === 0) {
+			return map;
+		}
+		const show = await this.run(['show', '--no-color', '--no-renames', '--patch', ...shas]);
+		if (show.exitCode !== 0 || !show.stdout.trim()) {
+			return map;
+		}
+		const result = await this.run(['patch-id', '--stable'], { input: show.stdout });
+		if (result.exitCode !== 0) {
+			return map;
+		}
+		for (const line of result.stdout.split('\n')) {
+			const [id, sha] = line.trim().split(/\s+/);
+			if (id && sha && /^[0-9a-f]{7,64}$/.test(id) && /^[0-9a-f]{7,64}$/.test(sha)) {
+				map.set(sha, id);
+			}
+		}
+		return map;
 	}
 
 	// ------------------------------------------------------------ rebase state

@@ -8,7 +8,7 @@ import { after, before, describe, it } from 'node:test';
 import * as fs from 'node:fs';
 import { DEFAULT_SETTINGS, type Settings } from '../../core/config';
 import { Controller } from '../../core/controller';
-import { ACTIONS } from '../../core/ui';
+import { ACTIONS, type AskOptions } from '../../core/ui';
 import { createLinearRepo, TempRepo } from '../helpers/tempRepo';
 import { FakeUI } from '../helpers/fakeUi';
 
@@ -979,6 +979,239 @@ describe('controller - apply patch at the proper base', () => {
 			const worktree = (await repo.worktrees()).find((w) => w.endsWith('geco-diff-only'));
 			assert.ok(worktree && fs.existsSync(`${worktree}/side.txt`), 'the change is in the worktree, uncommitted');
 			assert.match(ui.allLogs(), /method: apply/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
+
+describe('controller - apply patch automatically', () => {
+	/** An in-memory {@link PatchFileMemory}: what the editor wires to workspace state. */
+	function patchMemory(initial?: string) {
+		let stored = initial;
+		return {
+			memory: {
+				get: () => stored,
+				set: (_repoPath: string, patchFile: string) => {
+					stored = patchFile;
+				},
+			},
+			get stored() {
+				return stored;
+			},
+		};
+	}
+
+	/** A patch file exported from the side branch, plus a fresh repo to apply it in. */
+	async function exportedPatch() {
+		const source = await withSideBranch();
+		const patchPath = `${source.repo.root}/exported.patch`;
+		fs.writeFileSync(patchPath, await source.repo.gitOk(['format-patch', '-1', '--stdout', source.sideSha]), 'utf8');
+		const target = await createLinearRepo();
+		return { source, patchPath, target };
+	}
+
+	it('asks nothing but the file dialog on the first run, and remembers the file', async () => {
+		const { source, patchPath, target } = await exportedPatch();
+		try {
+			const ui = new FakeUI({ files: [patchPath] });
+			const remembered = patchMemory();
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(target.repo.dir);
+
+			assert.equal(ui.pickCalls.length, 0, `no source/destination picker: ${ui.transcript}`);
+			assert.equal(ui.inputCalls.length, 0, 'no branch name input');
+			assert.equal(ui.confirmCalls.length, 0, 'no confirmation');
+			// The patch adds a file that does not exist anywhere, so it
+			// applies cleanly on the latest HEAD: no branch (and no commit)
+			// is created for it - it lands on the current branch instead.
+			assert.equal(await target.repo.hasBranch('geco/side-change'), false, (await target.repo.branches()).join(', '));
+			assert.deepEqual(await target.repo.branches(), ['main']);
+			assert.equal(await target.repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+			assert.equal(target.repo.read('side.txt'), 's\n', 'the change is in the working tree');
+			assert.deepEqual(await target.repo.statusLines(), ['A  side.txt'], 'the change is staged, not committed');
+			assert.equal(remembered.stored, patchPath, 'the applied file is remembered for next time');
+			assert.match(ui.askCalls[0]!.message, /Patch applied at [0-9a-f]{7}/);
+			assert.match(ui.askCalls[0]!.options!.detail!, /Nothing was committed/);
+			assert.match(ui.allLogs(), /commit: none/);
+		} finally {
+			source.repo.cleanup();
+			target.repo.cleanup();
+		}
+	});
+
+	it('reuses the remembered file without any dialog on the next run', async () => {
+		const { source, patchPath, target } = await exportedPatch();
+		const secondTarget = await createLinearRepo();
+		try {
+			const remembered = patchMemory();
+			const firstUi = new FakeUI({ files: [patchPath] });
+			await new Controller({ ui: firstUi, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(target.repo.dir);
+			assert.equal(remembered.stored, patchPath);
+
+			// No file answer scripted: a dialog would be cancelled and nothing applied.
+			const secondUi = new FakeUI();
+			await new Controller({ ui: secondUi, settings: DEFAULT_SETTINGS, exec: secondTarget.repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(secondTarget.repo.dir);
+
+			assert.equal(secondTarget.repo.read('side.txt'), 's\n', 'the remembered file was applied again, in a fresh repo');
+			assert.deepEqual(await secondTarget.repo.branches(), ['main'], 'again on the current branch, with no branch created');
+			assert.equal(secondUi.pickCalls.length + secondUi.inputCalls.length + secondUi.confirmCalls.length, 0);
+		} finally {
+			source.repo.cleanup();
+			target.repo.cleanup();
+			secondTarget.repo.cleanup();
+		}
+	});
+
+	it('falls back to the file dialog when the remembered file is gone', async () => {
+		const { source, patchPath, target } = await exportedPatch();
+		try {
+			const remembered = patchMemory(`${target.repo.root}/deleted.patch`);
+			const ui = new FakeUI({ files: [patchPath] });
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(target.repo.dir);
+
+			assert.match(ui.allLogs(), /remembered patch file .* cannot be used/);
+			assert.equal(target.repo.read('side.txt'), 's\n', 'the replacement file was applied');
+			assert.deepEqual(await target.repo.branches(), ['main'], 'on the current branch, with no branch created');
+			assert.equal(remembered.stored, patchPath, 'the replacement file is remembered instead');
+		} finally {
+			source.repo.cleanup();
+			target.repo.cleanup();
+		}
+	});
+
+	it('falls back to the file dialog when the remembered patch is already in the graph', async () => {
+		const { repo, sideSha } = await withSideBranch();
+		try {
+			const patchPath = `${repo.root}/already.patch`;
+			fs.writeFileSync(patchPath, await repo.gitOk(['format-patch', '-1', '--stdout', sideSha]), 'utf8');
+			const remembered = patchMemory(patchPath);
+			// The dialog is cancelled: nothing may be applied a second time.
+			const ui = new FakeUI({ files: [undefined] });
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(repo.dir);
+
+			assert.match(ui.allLogs(), /already applied/);
+			assert.match(ui.allLogs(), /Opening the file dialog instead/);
+			assert.equal(await repo.hasBranch('geco/side-change'), false, 'the patch was not applied again');
+			assert.equal(ui.messages.length, 0, 'cancelling the fallback dialog is not an error');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('applies on the current branch - no new branch, no commit - when the patch fits the latest HEAD', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			const headBefore = await repo.sha('main');
+			const changeSha = await repo.commit('head change', { 'head.txt': 'head\n' });
+			const patchPath = `${repo.root}/head.patch`;
+			fs.writeFileSync(patchPath, await repo.gitOk(['format-patch', '-1', '--stdout', changeSha]), 'utf8');
+			await repo.gitOk(['reset', '--hard', '--quiet', headBefore]);
+			assert.equal(await repo.sha('main'), headBefore);
+
+			const ui = new FakeUI({ files: [patchPath] });
+			const remembered = patchMemory();
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(repo.dir);
+
+			assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main', 'still on the branch that was checked out');
+			assert.equal(await repo.sha('main'), headBefore, 'no commit was made and the branch did not move');
+			assert.deepEqual(await repo.branches(), ['main'], `no branch was created: ${(await repo.branches()).join(', ')}`);
+			assert.equal((await repo.worktrees()).length, 1, 'no worktree was created either');
+			assert.equal(repo.read('head.txt'), 'head\n', 'the change is in the working tree');
+			assert.deepEqual(await repo.statusLines(), ['A  head.txt'], 'the change is staged, ready for the user to commit');
+			assert.match(ui.allLogs(), /destination: current/);
+			assert.match(ui.allLogs(), /instead of creating a new branch/);
+			assert.match(ui.askCalls[0]!.message, /Patch applied at [0-9a-f]{7}/);
+			assert.equal(remembered.stored, patchPath);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('still creates a branch when the proper base is not the latest HEAD', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'side', shas.v02]);
+			const sideSha = await repo.commit('side b change', { 'b.txt': 'side b\n' });
+			const patchPath = `${repo.root}/side-b.patch`;
+			fs.writeFileSync(patchPath, await repo.gitOk(['format-patch', '-1', '--stdout', sideSha]), 'utf8');
+			await repo.checkout('main');
+			// Without this the patch is (correctly) "already in the graph".
+			await repo.gitOk(['branch', '--quiet', '-D', 'side']);
+
+			const ui = new FakeUI({ files: [patchPath] });
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: patchMemory().memory })
+				.applyPatchAutomatically(repo.dir);
+
+			assert.equal(await repo.hasBranch('geco/side-b-change'), true, (await repo.branches()).join(', '));
+			assert.equal(await repo.sha('geco/side-b-change'), shas.v02, 'the branch sits at the proper base, with no commit on top');
+			assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'geco/side-b-change');
+			assert.equal(await repo.sha('main'), shas.v04, 'main itself did not move');
+			assert.equal(repo.read('b.txt'), 'side b\n');
+			assert.deepEqual(await repo.statusLines(), ['M  b.txt'], 'the change is staged on the new branch, not committed');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('does not wait for the result notification to be dismissed (the endless progress bar)', async () => {
+		const { source, patchPath, target } = await exportedPatch();
+		try {
+			// The real adapter's notification promise only settles when the
+			// toast goes away - which, under Do Not Disturb / hover / an
+			// unfocused window, is never. That must not hold the command
+			// (and the graph progress indicator tied to it) hostage.
+			class NeverDismissedUI extends FakeUI {
+				override async ask(message: string, options: AskOptions): Promise<string | undefined> {
+					this.askCalls.push({ message, options });
+					return new Promise<string | undefined>(() => undefined);
+				}
+			}
+			const ui = new NeverDismissedUI({ files: [patchPath] });
+			const remembered = patchMemory();
+			const applied = new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(target.repo.dir);
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				await Promise.race([
+					applied,
+					new Promise<never>((_resolve, reject) => {
+						timer = setTimeout(() => reject(new Error('auto-apply did not finish while its result notification was still on screen')), 5000);
+					}),
+				]);
+			} finally {
+				if (timer) {
+					clearTimeout(timer);
+				}
+			}
+
+			assert.equal(target.repo.read('side.txt'), 's\n', 'the patch was applied');
+			assert.equal(remembered.stored, patchPath, 'the file was remembered');
+			assert.equal(ui.askCalls.length, 1, 'the result report was still handed to the UI');
+		} finally {
+			source.repo.cleanup();
+			target.repo.cleanup();
+		}
+	});
+
+	it('reports a dialog-picked file that is not a patch, and remembers nothing', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			const garbagePath = `${repo.root}/not-a.patch`;
+			fs.writeFileSync(garbagePath, 'this is not a patch\n', 'utf8');
+			const remembered = patchMemory();
+			const ui = new FakeUI({ files: [garbagePath] });
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+				.applyPatchAutomatically(repo.dir);
+
+			assert.equal(ui.messages[0]!.kind, 'error');
+			assert.match(ui.messages[0]!.message, /^Auto-apply patch: /);
+			assert.equal(remembered.stored, undefined, 'a broken file never becomes the remembered one');
 		} finally {
 			repo.cleanup();
 		}

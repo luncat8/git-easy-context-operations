@@ -28,6 +28,7 @@ const EXPECTED_COMMANDS = [
 	'geco.forcePush',
 	'geco.forcePushHard',
 	'geco.applyPatchAtProperBase',
+	'geco.applyPatchAutomatically',
 	'geco.findProperBase',
 	'geco.createBackupBranch',
 	'geco.createBranch',

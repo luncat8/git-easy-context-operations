@@ -12,7 +12,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { reportWithoutWaiting } from '../../core/ui';
+import { followUpWithoutWaiting, reportWithoutWaiting } from '../../core/ui';
 
 /** Long enough for a stray rejection/tick to surface, short enough to not slow the suite. */
 function tick(ms = 10): Promise<void> {
@@ -87,5 +87,49 @@ describe('reportWithoutWaiting', () => {
 		// `Promise.resolve(thenable)` calls `then` in a microtask.
 		await tick();
 		assert.equal(askedForAHandler, true);
+	});
+});
+
+describe('followUpWithoutWaiting', () => {
+	it('does not hold the caller back, and runs the follow-up when the answer eventually arrives', async () => {
+		let answer: (chosen: string | undefined) => void = () => undefined;
+		const notification = new Promise<string | undefined>((resolve) => {
+			answer = resolve;
+		});
+		const handled: (string | undefined)[] = [];
+
+		const command = (async () => {
+			// Exactly what the patch report does: hand the toast (with its
+			// Undo button) over and finish the command around it.
+			followUpWithoutWaiting(notification, (chosen) => {
+				handled.push(chosen);
+			});
+			return 'done';
+		})();
+
+		assert.equal(await withDeadline(command, 1000, 'a command that reported its result with follow-up actions'), 'done');
+		assert.deepEqual(handled, [], 'no follow-up runs before the user picks one');
+
+		answer('Undo');
+		await tick();
+		assert.deepEqual(handled, ['Undo'], 'the follow-up runs when the button is eventually clicked');
+	});
+
+	it('reports a failing follow-up instead of leaking an unhandled rejection', async () => {
+		const errors: unknown[] = [];
+		followUpWithoutWaiting(
+			Promise.resolve('Undo'),
+			() => {
+				throw new Error('the undo blew up');
+			},
+			(error) => errors.push(error),
+		);
+		followUpWithoutWaiting(
+			Promise.reject(new Error('the toast could not be created')),
+			() => undefined,
+			(error) => errors.push(error),
+		);
+		await tick();
+		assert.equal(errors.length, 2);
 	});
 });

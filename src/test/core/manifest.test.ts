@@ -220,9 +220,12 @@ describe('manifest - menus', () => {
 				.map((e) => (e.group ?? '').split('@')[0]!),
 		);
 		assert.equal(perCommitGroups.has('8_clean'), false, '8_clean is shared with a per-commit item');
-		for (const group of ['1_message', '2_commit', '3_branch', '4_move', '5_remote', '6_patch']) {
+		for (const group of ['1_message', '2_commit', '3_branch', '4_move', '5_remote']) {
 			assert.ok(perCommitGroups.has(group), `the ${group} group disappeared`);
 		}
+		// The patch operations used to be the `6_patch` group here; they are
+		// repository-wide and moved to the headers (see the next test).
+		assert.equal(perCommitGroups.has('6_patch'), false, 'a per-commit patch group survived the move to the header');
 
 		const submenu = (manifest.contributes.menus['geco.commitSubmenu'] ?? []).map((e) => e.command);
 		// The required "Customize Context Menus..." entry comes after it, but
@@ -230,6 +233,39 @@ describe('manifest - menus', () => {
 		const toggleable = submenu.filter((id) => id !== 'geco.customizeMenus');
 		assert.equal(toggleable[toggleable.length - 1], 'geco.cleanHistory', 'the submenu does not end with the whole-graph operation');
 		assert.equal(submenu[submenu.length - 1], 'geco.customizeMenus', 'the required way back is the last entry');
+	});
+
+	it('puts the patch operations on the headers, not on a commit row', () => {
+		// A patch comes from a file and lands at the base the search finds:
+		// it is operated on the whole repository, never on the commit that
+		// was clicked. So all three patch commands are buttons of our view's
+		// toolbar (and of the built-in graph's toolbar in the +graph build),
+		// and none of them sits on a commit row, in the commit submenu, or
+		// on a graph commit row any more.
+		const patchCommands = ['geco.applyPatchAtProperBase', 'geco.applyPatchAutomatically', 'geco.findProperBase'];
+		const title = manifest.contributes.menus['view/title'] ?? [];
+		for (const id of patchCommands) {
+			const button = title.find((e) => e.command === id);
+			assert.ok(button, `${id} has no button in the view toolbar`);
+			assert.match(button!.group ?? '', /^navigation@/, `${id} is not a toolbar button`);
+			assert.match(button!.when ?? '', /geco\.repositoryOpen/, `${id} shows without a repository`);
+		}
+
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		const submenu = manifest.contributes.menus['geco.commitSubmenu'] ?? [];
+		for (const id of patchCommands) {
+			assert.equal(itemContext.some((e) => e.command === id), false, `${id} is still on a row of our view`);
+			assert.equal(submenu.some((e) => e.command === id), false, `${id} is still in the commit submenu`);
+		}
+
+		const script = sourceOf('scripts/apply-graph-menu.mjs');
+		const graphMenus = script.slice(script.indexOf('const GRAPH_MENUS'), script.indexOf('const action ='));
+		const commitRowSection = graphMenus.slice(graphMenus.indexOf("'scm/historyItem/context'"), graphMenus.indexOf("'scm/historyItemRef/context'"));
+		const titleSection = graphMenus.slice(graphMenus.indexOf("'scm/history/title'"));
+		for (const id of patchCommands) {
+			assert.equal(commitRowSection.includes(id), false, `${id} is still on a graph commit row`);
+			assert.ok(titleSection.includes(id), `${id} has no button on the graph toolbar`);
+		}
 	});
 
 	it('scopes title menus to our own views', () => {

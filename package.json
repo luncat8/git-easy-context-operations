@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.11",
+  "version": "0.4.14",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -103,6 +103,12 @@
         "title": "Apply Patch at Proper Base...",
         "category": "Git Easy Ops",
         "icon": "$(diff-added)"
+      },
+      {
+        "command": "geco.applyPatchAutomatically",
+        "title": "Apply Patch Automatically",
+        "category": "Git Easy Ops",
+        "icon": "$(zap)"
       },
       {
         "command": "geco.findProperBase",
@@ -255,6 +261,21 @@
           "group": "navigation@2"
         },
         {
+          "command": "geco.applyPatchAtProperBase",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)",
+          "group": "navigation@3"
+        },
+        {
+          "command": "geco.applyPatchAutomatically",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)",
+          "group": "navigation@4"
+        },
+        {
+          "command": "geco.findProperBase",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)",
+          "group": "navigation@5"
+        },
+        {
           "command": "geco.showBackups",
           "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.showBackups)",
           "group": "1_geco@1"
@@ -287,7 +308,7 @@
         {
           "command": "geco.customizeMenus",
           "when": "view == geco.history",
-          "group": "navigation@3"
+          "group": "navigation@6"
         },
         {
           "command": "geco.menuResetAll",
@@ -355,16 +376,6 @@
           "command": "geco.forcePushHard",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)",
           "group": "5_remote@2"
-        },
-        {
-          "command": "geco.applyPatchAtProperBase",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)",
-          "group": "6_patch@1"
-        },
-        {
-          "command": "geco.findProperBase",
-          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)",
-          "group": "6_patch@2"
         },
         {
           "command": "geco.cleanHistory",
@@ -522,16 +533,6 @@
           "command": "geco.forcePushHard",
           "group": "3_remote@2",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)"
-        },
-        {
-          "command": "geco.applyPatchAtProperBase",
-          "group": "4_patch@1",
-          "when": " && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)"
-        },
-        {
-          "command": "geco.findProperBase",
-          "group": "4_patch@2",
-          "when": " && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)"
         },
         {
           "command": "geco.copyCommitSha",

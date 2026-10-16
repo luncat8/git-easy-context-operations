@@ -25,6 +25,7 @@ export type GecoErrorCode =
 	| 'index-locked'
 	| 'no-remote-for-patch'
 	| 'nothing-to-do'
+	| 'already-applied'
 	| 'conflict'
 	| 'rejected'
 	| 'unsupported'

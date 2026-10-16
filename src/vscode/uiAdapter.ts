@@ -95,9 +95,15 @@ export class VsCodeUI implements UI {
 			reportWithoutWaiting(() => vscode.window.showInformationMessage(message, { modal: false, detail: options.detail }));
 			return undefined;
 		}
-		// This one *is* awaited: the answer is what the caller asked for, and
-		// VS Code can only hand it over through this promise (dismissing the
-		// notification resolves `undefined`, i.e. "no follow-up action").
+		// The answer can only be handed over through this promise
+		// (dismissing the notification resolves `undefined`, i.e. "no
+		// follow-up action") - so a caller may only *await* it when it
+		// genuinely needs the answer before it can go on. An
+		// end-of-operation report (work done, buttons are optional
+		// follow-ups such as Undo) must instead be handed to
+		// `followUpWithoutWaiting`: awaiting it keeps the command pending
+		// until the toast goes away, which the Source Control Graph draws
+		// as an endless progress bar.
 		return vscode.window.showInformationMessage(message, { modal: false, detail: options.detail }, ...options.actions);
 	}
 

@@ -94,8 +94,10 @@ explicitly told to grant the proposed API to:
 
 Then restart VS Code and right-click a commit in Source Control > Graph: the
 items sit in the same groups as the built-in ones (squash/reword next to Cherry
-Pick, patch and fast-forward/force-push after Compare), and "Rename Branch... >
-main" is on the branch badge next to checkout and delete - git has no rename.
+Pick, fast-forward/force-push after Compare), the patch buttons are on the
+graph toolbar (they work on the whole repository, not on one commit), and
+"Rename Branch... > main" is on the branch badge next to checkout and
+delete - git has no rename.
 
 Without the grant, "Git Easy Ops" in the Source Control sidebar always works -
 its Graph group shows the same commits, refs and operations.

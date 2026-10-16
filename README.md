@@ -30,6 +30,14 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   overwritten silently.
 - **Apply a patch at its proper base** - finds the commit the patch was made
   against and applies it there, on a new branch or in a separate worktree.
+  The patch buttons sit in the view header (they work on the whole
+  repository, not on a clicked commit) - including **Apply Patch
+  Automatically**, which re-applies the patch file you used last time with
+  no questions at all, leaves the result **uncommitted** (staged, ready for
+  you to commit under your own name) - applied directly on the current
+  branch, with no new branch created, when the patch fits the latest
+  HEAD - and only opens the file dialog when
+  that file is missing, invalid or already in the graph.
 - **Diagnose push / sync trouble** - one command that says why *Push* or *Sync* is
   refused (an unfinished merge, the same work committed twice under different
   hashes, a rewritten branch the remote still has, a stale `index.lock`, a missing
