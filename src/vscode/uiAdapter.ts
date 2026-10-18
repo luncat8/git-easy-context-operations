@@ -2,25 +2,26 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import type { AskOptions, ChooseOptions, ConfirmOptions, FilePickOptions, InputOptions, MessageKind, MultiPickChoice, PickOptions, QuickPickChoice, UI } from '../core/ui';
-import { reportWithoutWaiting } from '../core/ui';
+import { decodeMultilineInput, encodeMultilineInput, reportWithoutWaiting } from '../core/ui';
 
 export class VsCodeUI implements UI {
 	constructor(private readonly output: vscode.OutputChannel) {}
 
 	async input(options: InputOptions): Promise<string | undefined> {
-		return vscode.window.showInputBox({
+		const result = await vscode.window.showInputBox({
 			title: options.title,
-			prompt: options.prompt,
-			value: options.value ?? '',
+			prompt: options.multiline ? `${options.prompt} (\n = newline; \\ = literal backslash)` : options.prompt,
+			value: options.multiline ? encodeMultilineInput(options.value ?? '') : options.value ?? '',
 			placeHolder: options.placeholder,
 			ignoreFocusOut: true,
 			validateInput: options.validate
 				? (value) => {
-					const problem = options.validate!(value);
+					const problem = options.validate!(options.multiline ? decodeMultilineInput(value) : value);
 					return problem ?? null;
 				}
 				: undefined,
 		});
+		return result === undefined ? undefined : options.multiline ? decodeMultilineInput(result) : result;
 	}
 
 	async pick<T>(items: readonly QuickPickChoice<T>[], options?: PickOptions): Promise<T | undefined> {

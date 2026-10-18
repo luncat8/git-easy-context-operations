@@ -31,9 +31,11 @@ export interface CommitInfo {
 	tree: string;
 	author: Identity;
 	committer: Identity;
+	/** The first paragraph of the message, folded into one line (git's `%s`). */
 	subject: string;
+	/** Everything after the first empty line (git's `%b`). */
 	body: string;
-	/** Full raw message (subject + body), as `%B` reports it. */
+	/** The full raw message, as `%B` reports it - every line break included. */
 	message: string;
 }
 
@@ -81,9 +83,43 @@ export interface CommitTreeOptions {
 	committer: Identity;
 }
 
+/**
+ * The fields every `git log` run in this extension asks for.
+ *
+ * The last one is `%B` - the *raw* message, exactly as it is stored in the
+ * commit object.  It is the only placeholder that can hold every line break
+ * the user wrote: `%s` (the subject) folds the first paragraph of a message
+ * into a single line ("123\n456" becomes "123 456") and `%b` (the body) is
+ * empty for a message without a blank line.  A message rebuilt from `%s` +
+ * `%b` therefore cannot hold a single line break - it always looks like a
+ * paragraph break instead, which is why the subject and the body are
+ * derived from the raw message here (see {@link splitCommitMessage}).
+ */
 export const COMMIT_LOG_FORMAT = [
-	'%H', '%h', '%P', '%T', '%an', '%ae', '%aI', '%cn', '%ce', '%cI', '%s', '%b',
+	'%H', '%h', '%P', '%T', '%an', '%ae', '%aI', '%cn', '%ce', '%cI', '%B',
 ].join(US) + RS;
+
+/** The number of fields every commit record starts with (the message is the last one). */
+const COMMIT_FIELD_COUNT = 10;
+
+/**
+ * Split a raw commit message into git's subject and body.
+ *
+ * Git's own rules, applied to the raw message: the subject (`%s`) is the
+ * first paragraph with its line breaks folded into single spaces, the body
+ * (`%b`) is everything after the first empty line.
+ */
+export function splitCommitMessage(message: string): { subject: string; body: string } {
+	const lines = message.split('\n');
+	let end = 0;
+	while (end < lines.length && lines[end] !== '') {
+		end++;
+	}
+	return {
+		subject: lines.slice(0, end).join(' ').replace(/\s+$/, ''),
+		body: lines.slice(end + 1).join('\n').replace(/\n+$/, ''),
+	};
+}
 
 export class Git {
 	constructor(public readonly exec: GitExec, public readonly cwd: string) {}
@@ -889,11 +925,14 @@ export function parseCommits(raw: string): CommitInfo[] {
 			continue;
 		}
 		const fields = trimmed.split(US);
-		if (fields.length < 12) {
+		if (fields.length < COMMIT_FIELD_COUNT + 1) {
 			continue;
 		}
-		const [sha, shortSha, parents, tree, an, ae, aI, cn, ce, cI, subject, ...rest] = fields;
-		const body = rest.join(US);
+		const [sha, shortSha, parents, tree, an, ae, aI, cn, ce, cI] = fields;
+		// The message is the last field and may contain the separator
+		// character itself, so the remaining fields are joined again.
+		const message = fields.slice(COMMIT_FIELD_COUNT).join(US).replace(/\n+$/, '');
+		const { subject, body } = splitCommitMessage(message);
 		commits.push({
 			sha,
 			shortSha,
@@ -902,8 +941,8 @@ export function parseCommits(raw: string): CommitInfo[] {
 			author: { name: an, email: ae, date: aI },
 			committer: { name: cn, email: ce, date: cI },
 			subject,
-			body: body.replace(/\n+$/, ''),
-			message: body.trim().length > 0 ? `${subject}\n\n${body.replace(/\n+$/, '')}` : subject,
+			body,
+			message,
 		});
 	}
 	return commits;

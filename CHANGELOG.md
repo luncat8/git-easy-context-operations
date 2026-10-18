@@ -4,6 +4,38 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.16
+
+### Fixed
+
+- **A single line break in a commit message survives a squash and a
+  rename.** The message was rebuilt from git's *subject* (`%s`) and *body*
+  (`%b`) when it was read: git folds the first paragraph of a message into
+  one line (`123\n456` becomes the subject `123 456`) and the body is empty
+  for a message without a blank line. A message with a paragraph break
+  (`123\n\n456`) came out unchanged, but a message with a single line break
+  lost it - the line break turned into a space. The raw message (`%B`) is
+  now read instead, so every line break the message has is kept: the
+  default message of **Squash Selected Commits...** / **Squash with
+  Previous Commits...** and of **Rename Commit Message...** is the message
+  as it is stored, and it is stored that way again.
+
+### Tests
+
+- New coverage for the message parsing (a single line break, a paragraph
+  break, indentation, a message that is only a body) and for both flows:
+  the default message keeps its line breaks when it is accepted.
+
+## 0.4.15
+
+### Fixed
+
+- **Squash and Rename Commit Message preserve multiline messages when the
+  default is accepted.** VS Code's single-line input used to strip line
+  breaks. These prompts now show editable `\n` escapes for line breaks and
+  `\\` for literal backslashes, decoded before the message is saved.
+  Paragraphs, indentation and literal escape sequences survive unchanged.
+
 ## 0.4.14
 
 ### Changed

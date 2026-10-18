@@ -8,7 +8,7 @@ import { after, before, describe, it } from 'node:test';
 import * as fs from 'node:fs';
 import { DEFAULT_SETTINGS, type Settings } from '../../core/config';
 import { Controller } from '../../core/controller';
-import { ACTIONS, type AskOptions } from '../../core/ui';
+import { ACTIONS, decodeMultilineInput, encodeMultilineInput, type AskOptions } from '../../core/ui';
 import { createLinearRepo, TempRepo } from '../helpers/tempRepo';
 import { FakeUI } from '../helpers/fakeUi';
 
@@ -60,6 +60,27 @@ describe('controller - reword flows', () => {
 		assert.equal(ui.inputCalls[0]!.title, `Rename ${tip.slice(0, 7)}`);
 		assert.equal(ui.inputCalls[0]!.prompt, 'New commit message (currently "v0.4")');
 		assert.equal((await repo.message('main')).trim(), 'v0.4 add the new button');
+	});
+
+	it('pre-fills the rename input with the exact message, line breaks included', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			// A single line break: git folds it into the subject "123 456",
+			// so a message rebuilt from subject + body would show (and
+			// store) "123 456" instead.
+			const tip = await repo.commit('123\n456', { 'multiline.txt': 'content' });
+			const ui: FakeUI = new FakeUI({ inputs: (): string => {
+				const options = ui.inputCalls.at(-1)!;
+				assert.equal(options.multiline, true);
+				return decodeMultilineInput(encodeMultilineInput(options.value!));
+			}, confirms: [true], asks: [undefined] });
+			await controllerFor(ui, repo).rewordCommit(repo.dir, [tip], 'replace');
+
+			assert.equal(ui.inputCalls[0]!.value, '123\n456', 'the input holds the message as it is');
+			assert.equal((await repo.message('main')).trimEnd(), '123\n456', 'and the line break survives the rename');
+		} finally {
+			repo.cleanup();
+		}
 	});
 
 	it('renames part of a message with find/replace', async () => {
@@ -1479,6 +1500,52 @@ describe('controller - squash flows', () => {
 			const log = await repo.log('main');
 			assert.deepEqual(log.map((line) => line.subject), ['v0.2-v0.4 squashed', 'v0.1']);
 			assert.equal((await repo.ctx.safety.readJournal()).at(-1)!.kind, 'squash');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps paragraphs and literal backslashes when the default squash message is accepted', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			const original = 'Subject\n\nFirst paragraph.\n  - indented item\n\nLiteral \\n and C:\\repo\\file';
+			const tip = await repo.commit(original, { 'multiline.txt': 'content' });
+			const previous = await repo.sha('HEAD~1');
+			const ui: FakeUI = new FakeUI({ inputs: (): string => {
+				const options = ui.inputCalls.at(-1)!;
+				assert.equal(options.multiline, true);
+				// Model the single-line VS Code input accepting its encoded default.
+				return decodeMultilineInput(encodeMultilineInput(options.value!));
+			}, confirms: [true], asks: [undefined] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [tip, previous]);
+
+			assert.equal(ui.inputCalls[0]!.value, original, 'the input is pre-filled with the exact message');
+			assert.equal((await repo.message('main')).trimEnd(), original, 'and the message survives the squash');
+			assert.equal((await repo.log('main')).length, 4, 'two commits really became one');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps a single line break between subject and body when the default squash message is accepted', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			// One line break, not a paragraph break: git folds this into the
+			// subject "123 456", so a message rebuilt from subject + body
+			// would lose the line break completely.
+			const original = '123\n456';
+			const tip = await repo.commit(original, { 'multiline.txt': 'content' });
+			const previous = await repo.sha('HEAD~1');
+			const ui: FakeUI = new FakeUI({ inputs: (): string => {
+				const options = ui.inputCalls.at(-1)!;
+				assert.equal(options.multiline, true);
+				return decodeMultilineInput(encodeMultilineInput(options.value!));
+			}, confirms: [true], asks: [undefined] });
+			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [tip, previous]);
+
+			assert.equal(ui.inputCalls[0]!.value, original, 'the input is pre-filled with the exact message');
+			assert.equal((await repo.message('main')).trimEnd(), original, 'and the line break survives the squash');
+			assert.equal((await repo.log('main')).length, 4, 'two commits really became one');
 		} finally {
 			repo.cleanup();
 		}

@@ -13,11 +13,22 @@ export interface QuickPickChoice<T> {
 	value: T;
 }
 
+/** Lossless representation of multiline text in VS Code's single-line input. */
+export function encodeMultilineInput(value: string): string {
+	return value.replace(/\\/g, '\\\\').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+}
+
+export function decodeMultilineInput(value: string): string {
+	return value.replace(/\\([\\rn])/g, (_, escaped: string) => escaped === 'n' ? '\n' : escaped === 'r' ? '\r' : '\\');
+}
+
 export interface InputOptions {
 	title?: string;
 	prompt: string;
 	value?: string;
 	placeholder?: string;
+	/** Preserve line breaks using editable \n escapes in single-line UIs. */
+	multiline?: boolean;
 	validate?(value: string): string | undefined | null;
 }
 

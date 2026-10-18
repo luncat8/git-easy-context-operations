@@ -253,6 +253,7 @@ export class Controller {
 				// cannot stretch the input box past the screen.
 				prompt: `New commit message (currently "${previewSubject(info.message)}")`,
 				value: info.message,
+				multiline: true,
 			});
 			if (value === undefined) {
 				return undefined;
@@ -473,6 +474,7 @@ export class Controller {
 			title: `Squash ${infos.length} commits into one`,
 			prompt: `Message of the combined commit (default: the message of ${newest.shortSha})`,
 			value: composeSquashMessage(infos.map((info) => info.message)),
+			multiline: true,
 		});
 		if (typed === undefined) {
 			return;
