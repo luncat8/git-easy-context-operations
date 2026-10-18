@@ -76,23 +76,31 @@ const GRAPH_MENUS = {
 	// built-in equivalent.) Every Git Easy Ops operation also asks the git
 	// extension to re-sync its state, so the built-in button is enough.
 	'scm/history/title': [
-		// The whole-graph operation gets the toolbar of the built-in graph too:
-		// it is not about one commit, so it never joins the per-commit menu.
-		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@90' },
-		// Same idea, one level down: not about a commit either, it prunes the
-		// branch names the graph shows once their commits live elsewhere.
-		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@91' },
+		// The built-in graph already supplies Refresh. Keep the Git Easy Ops
+		// toolbar in the same order as the stable view: patch work first, then
+		// history rewrites, repository maintenance, and Undo as the last action.
+		// A patch comes from a file and lands at the base the search finds, so it
+		// is about the whole repository - never about the commit a right-click
+		// landed on.
+		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: 'navigation@1' },
+		{ command: 'geco.applyPatchAutomatically', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)', group: 'navigation@2' },
+		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: 'navigation@3' },
+		// These two commands have useful no-selection fallbacks: they open the
+		// commit picker, so the graph header can offer them without pretending
+		// that a toolbar has a selected row.
+		{ command: 'geco.squashWithPreviousCommits', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)', group: 'navigation@4' },
+		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: 'navigation@5' },
+		// Whole-repository maintenance follows the history actions.
+		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@6' },
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@7' },
 		// Repository-wide, like Clean History: the link to the repo on the web.
-		{ command: 'geco.copyRepositoryWebLink', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyRepositoryWebLink)', group: 'navigation@92' },
+		{ command: 'geco.copyRepositoryWebLink', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyRepositoryWebLink)', group: 'navigation@8' },
 		// Same surface, one more repository-wide answer: "why can I not push or
 		// sync?" - the state it explains usually becomes visible in this graph.
-		{ command: 'geco.diagnosePushSync', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)', group: 'navigation@93' },
-		// The patch operations join the toolbar too: a patch comes from a
-		// file and lands at the base the search finds, so it is about the
-		// whole repository - never about the commit a right-click landed on.
-		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: 'navigation@94' },
-		{ command: 'geco.applyPatchAutomatically', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)', group: 'navigation@95' },
-		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: 'navigation@96' },
+		{ command: 'geco.diagnosePushSync', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)', group: 'navigation@9' },
+		// Undo opens the same newest-first journal picker as the Command Palette
+		// command. It is deliberately the last operation in the toolbar.
+		{ command: 'geco.undoLastOperation', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)', group: 'navigation@10' },
 		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };

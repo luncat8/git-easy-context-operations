@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -256,44 +256,54 @@
           "group": "navigation@1"
         },
         {
-          "command": "geco.cleanHistory",
-          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
-          "group": "navigation@2"
-        },
-        {
           "command": "geco.applyPatchAtProperBase",
           "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "geco.applyPatchAutomatically",
           "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)",
-          "group": "navigation@4"
+          "group": "navigation@3"
         },
         {
           "command": "geco.findProperBase",
           "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)",
+          "group": "navigation@4"
+        },
+        {
+          "command": "geco.squashWithPreviousCommits",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)",
           "group": "navigation@5"
+        },
+        {
+          "command": "geco.rewordCommit",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)",
+          "group": "navigation@6"
+        },
+        {
+          "command": "geco.cleanHistory",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)",
+          "group": "navigation@7"
+        },
+        {
+          "command": "geco.removeRedundantBranches",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
+          "group": "navigation@8"
+        },
+        {
+          "command": "geco.diagnosePushSync",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)",
+          "group": "navigation@9"
+        },
+        {
+          "command": "geco.undoLastOperation",
+          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)",
+          "group": "navigation@10"
         },
         {
           "command": "geco.showBackups",
           "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.showBackups)",
           "group": "1_geco@1"
-        },
-        {
-          "command": "geco.undoLastOperation",
-          "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)",
-          "group": "1_geco@2"
-        },
-        {
-          "command": "geco.removeRedundantBranches",
-          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)",
-          "group": "1_geco@3"
-        },
-        {
-          "command": "geco.diagnosePushSync",
-          "when": "view == geco.history && geco.repositoryOpen && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)",
-          "group": "1_geco@4"
         },
         {
           "command": "geco.explainMenus",
@@ -308,7 +318,7 @@
         {
           "command": "geco.customizeMenus",
           "when": "view == geco.history",
-          "group": "navigation@6"
+          "group": "navigation@11"
         },
         {
           "command": "geco.menuResetAll",

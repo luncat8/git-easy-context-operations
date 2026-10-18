@@ -201,7 +201,7 @@ describe('manifest - menus', () => {
 		const title = manifest.contributes.menus['view/title'] ?? [];
 		const toolbar = title.find((e) => e.command === 'geco.cleanHistory');
 		assert.ok(toolbar, 'no clean-history button in the view toolbar');
-		assert.equal(toolbar!.group, 'navigation@2', 'the toolbar button does not sit next to Refresh');
+		assert.equal(toolbar!.group, 'navigation@7', 'the toolbar button does not sit in the maintenance section after history actions');
 		assert.match(toolbar!.when ?? '', /geco\.repositoryOpen/, 'the toolbar button shows without a repository');
 
 		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
@@ -266,6 +266,22 @@ describe('manifest - menus', () => {
 			assert.equal(commitRowSection.includes(id), false, `${id} is still on a graph commit row`);
 			assert.ok(titleSection.includes(id), `${id} has no button on the graph toolbar`);
 		}
+
+		// Header actions are deliberately the primary, no-row-argument flows:
+		// patch first, then the picker-based history rewrites, and Undo last.
+		const navigation = title
+			.filter((entry) => (entry.when ?? '').startsWith('view == geco.history') && (entry.group ?? '').startsWith('navigation@'))
+			.map((entry) => entry.command);
+		assert.deepEqual(navigation.slice(0, 6), [
+			'geco.refresh',
+			'geco.applyPatchAtProperBase',
+			'geco.applyPatchAutomatically',
+			'geco.findProperBase',
+			'geco.squashWithPreviousCommits',
+			'geco.rewordCommit',
+		]);
+		assert.equal(navigation[navigation.length - 2], 'geco.undoLastOperation', 'Undo is not the last operation before settings');
+		assert.equal(navigation[navigation.length - 1], 'geco.customizeMenus', 'the settings gear should remain after the operations');
 	});
 
 	it('scopes title menus to our own views', () => {

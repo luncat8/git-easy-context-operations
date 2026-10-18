@@ -252,6 +252,22 @@ describe('menu order - Remove Redundant Branches... follows Create Branch...', (
 	});
 });
 
+describe('menu order - graph header actions', () => {
+	it('puts patch actions first, picker-based rewrites next, and Undo last', () => {
+		const navigation = graphEntries()
+			.filter((entry) => entry.key === 'scm/history/title' && (entry.group ?? '').startsWith('navigation@'))
+			.map((entry) => entry.command);
+		assert.deepEqual(navigation.slice(0, 5), [
+			'geco.applyPatchAtProperBase',
+			'geco.applyPatchAutomatically',
+			'geco.findProperBase',
+			'geco.squashWithPreviousCommits',
+			'geco.rewordCommit',
+		]);
+		assert.equal(navigation.at(-1), 'geco.undoLastOperation');
+	});
+});
+
 interface GraphEntry extends MenuEntry {
 	key: string;
 }

@@ -4,6 +4,26 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.17
+
+### Added
+
+- **Undo is now a header button.** The Git Easy Ops view and the optional built-in
+  Source Control Graph toolbar both expose **Undo Last Operation**. It opens the
+  same newest-first journal picker as `Git Easy Ops: Undo Last Operation` in the
+  Command Palette, including the existing option to roll back several newer
+  operations when an older entry is selected.
+- **Primary history actions are available from the headers.** **Squash with
+  Previous Commits...** and **Rename Commit Message...** open their normal commit
+  picker when no row is selected. Header actions now follow a predictable order:
+  patch actions first, then squash and rename, repository maintenance, and Undo
+  last.
+
+### Tests
+
+- The manifest/catalogue tests cover the new header surfaces, visibility switches,
+  and ordering in both the stable view and the proposed graph build.
+
 ## 0.4.16
 
 ### Fixed

@@ -104,11 +104,15 @@ export interface MenuRow {
 
 /** One switch per command, across every menu that shows it. */
 export const MENU_ROWS: readonly MenuRow[] = [
-	{ id: 'geco.rewordCommit', label: 'Rename Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	// The primary rewrite actions also have header buttons. With no row
+	// argument they open the same commit picker used by the Command Palette;
+	// the multi-select variant stays on commit rows because a header has no
+	// selection to pass through.
+	{ id: 'geco.rewordCommit', label: 'Rename Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title', 'graph.title'] },
 	{ id: 'geco.rewordCommitAppend', label: 'Append to Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.rewordCommitRename', label: 'Search and Replace in Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'], defaultHidden: true },
 	{ id: 'geco.squashSelectedCommits', label: 'Squash Selected Commits...', surfaces: ['view.commit'] },
-	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title', 'graph.title'] },
 	{ id: 'geco.createBranch', label: 'Create Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch'] },
 	{ id: 'geco.fastForwardDefaultBranch', label: 'Fast-Forward Default Branch to Commit...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.fastForwardBranch', label: 'Fast-Forward Branch to Commit...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
@@ -144,7 +148,7 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// than on a row: the trouble it explains (an unfinished merge, a lock, a
 	// branch that diverged) is about the repository, not about one commit.
 	{ id: 'geco.diagnosePushSync', label: 'Diagnose Push / Sync Trouble...', surfaces: ['view.title', 'graph.title'] },
-	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title'] },
+	{ id: 'geco.undoLastOperation', label: 'Undo Last Operation', surfaces: ['view.backup', 'view.title', 'graph.title'] },
 	{ id: 'geco.showBackups', label: 'Show Backups and Recovery Points', surfaces: ['view.title'] },
 	// Only on our own view's toolbar: the built-in Source Control Graph
 	// caption already carries its own refresh button, and a second one there
