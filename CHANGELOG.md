@@ -4,6 +4,74 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.18
+
+### Changed
+
+- **Both headers now share one button order, and the graph header skips the
+  row-targeted operations.** After the header's original buttons (Refresh on
+  our own view; the pickers, Fetch / Pull / Push / Publish and Refresh on the
+  built-in Source Control Graph), ours run: **Apply Patch Automatically**,
+  **Apply Patch at Proper Base...**, **Find Proper Base for Patch...**,
+  **Fast-Forward Default Branch to Commit...**, **Squash with Previous
+  Commits...**, **Rename Commit Message...**, **Rename Branch...**, **Remove
+  Redundant Branches...**, **Clean History (Remove Dead Paths)...**, **Undo
+  Last Operation**, **Diagnose Push / Sync Trouble...** and **Copy Repository
+  Web Link** last (the **Customize Context Menus...** gear still closes our
+  own view's header). **Apply Patch Automatically** now leads **Apply Patch
+  at Proper Base...**, and **Remove Redundant Branches...** and **Undo Last
+  Operation** moved ahead of **Clean History...** and **Diagnose Push / Sync
+  Trouble...** respectively.
+- **Fast-Forward Default Branch to Commit...**, **Rename Branch...** and
+  **Copy Repository Web Link** are now buttons of the stable `Git Easy Ops`
+  view header (the fast-forward opens the usual commit picker and moves the
+  default branch; the rename opens the branch picker).
+- **The `+graph` header contains no fast-forward, Squash, rename-commit or
+  rename-branch button any more.** In that build they are context-menu items
+  of the very commit row (fast-forward / Squash / rename commit) and branch
+  badge (rename branch) they operate on, so a header button would only have
+  to guess its target through a picker. The stable header keeps all four:
+  without the proposed API there is no such context menu.
+- **Our graph-header buttons now sit after the original ones**
+  (`navigation@1010` and behind, past the workbench Refresh at order 1000
+  and git's Fetch / Pull / Push / Publish at `navigation@900`-`903`), instead
+  of interleaving with them at the front. A `|` separator between the
+  originals and ours cannot be contributed - only the single `navigation`
+  group renders as buttons in a view caption, so there is no group boundary
+  a separator could sit on; a second group would move the buttons into the
+  caption's overflow menu instead.
+
+### Fixed
+
+- **"Why Don't I See the Menus?" hides itself once the graph menus are
+  actually visible.** Both header entries now also require that the proposed
+  Source Control Graph menus are *not* on screen in the running session
+  (`geco.graphMenuVisible`, set at activation from the proposals VS Code
+  enabled for this session). That is deliberately the session's truth, not
+  the grant files': an `argv.json` / `product.json` grant that still needs
+  its restart keeps the entry, while a per-launch `--enable-proposed-api`
+  (or an Extension Development Host) hides it the moment the menus show.
+  The Customize Context Menus switch still governs the entry everywhere
+  else, and the Command Palette always keeps the command. The same split
+  fixes the diagnosis reading the two proposal lists as one: VS Code
+  empties the runtime `enabledApiProposals` of a not-yet-granted `+graph`
+  install, so "is this a graph build?" is now read from the untouched
+  `originalEnabledApiProposals`, and the report states "ready" (build plus
+  persistent grant) and "visible in this session" as the two separate
+  facts they are.
+
+### Tests
+
+- The manifest/catalogue tests pin the exact button order of both headers,
+  the four buttons the graph header skips (and that each of them is still on
+  its graph row menu, so skipping loses nothing), and that every graph
+  header button sorts behind the last original button.
+- The graph-menu tests pin the "visible in this session" verdict (every menu
+  key and both proposals, and the split from file-based "ready" in both
+  directions), and the manifest/catalogue tests pin that only the two
+  "Why Don't I See the Menus?" header entries carry the visibility gate
+  while the palette keeps the command.
+
 ## 0.4.17
 
 ### Added

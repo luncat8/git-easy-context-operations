@@ -55,7 +55,19 @@ export class FsFileStore implements ArgvStore {
 	}
 }
 
-/** What the *installed* build declares, read from its own manifest. */
+/**
+ * What the *installed* build declares - and what this session lets it use -
+ * read from its own manifest. The runtime manifest keeps the two apart: the
+ * extension scanner copies the VSIX's `enabledApiProposals` into
+ * `originalEnabledApiProposals`, and the workbench then rewrites
+ * `enabledApiProposals` itself to the proposals this session's grant (if
+ * any) allows, *before* extension points are registered and before the
+ * description reaches the extension host. So `original...` answers "is this
+ * a graph build?" even before any grant, and `enabledApiProposals` answers
+ * the question the grant files cannot: "are the proposed menus really
+ * registered in the session that is running right now?" (a fresh grant
+ * needs a restart; a launch flag leaves no trace in any file).
+ */
 export function describeInstalledBuild(
 	context: vscode.ExtensionContext,
 	appName: string = vscode.env.appName,
@@ -66,14 +78,20 @@ export function describeInstalledBuild(
 		name?: string;
 		version?: string;
 		enabledApiProposals?: string[];
+		originalEnabledApiProposals?: string[];
 		contributes?: { menus?: Record<string, unknown> };
 	};
 	const menuKeys = Object.keys(manifest.contributes?.menus ?? {}).filter((key) => (GRAPH_MENU_KEYS as readonly string[]).includes(key));
-	const proposals = manifest.enabledApiProposals ?? [];
+	const enabledProposals = manifest.enabledApiProposals ?? [];
+	// Older editors may not surface the untouched list; the session list is
+	// then the only (and, for the graph build check, still usable) copy.
+	const declaredProposals = manifest.originalEnabledApiProposals ?? enabledProposals;
 
 	return {
 		extensionId: `${manifest.publisher ?? 'luncat8'}.${manifest.name ?? 'git-easy-context-operations'}`,
-		hasProposals: (GRAPH_MENU_PROPOSALS as readonly string[]).some((proposal) => proposals.includes(proposal)),
+		hasProposals: (GRAPH_MENU_PROPOSALS as readonly string[]).some((proposal) => declaredProposals.includes(proposal)),
+		declaredProposals,
+		enabledProposals,
 		menuKeys,
 		argvPath: argvJsonPath(appName),
 		// `vscode.env.appRoot` is the `resources/app` folder, which is where VS

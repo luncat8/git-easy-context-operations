@@ -76,32 +76,61 @@ const GRAPH_MENUS = {
 	// built-in equivalent.) Every Git Easy Ops operation also asks the git
 	// extension to re-sync its state, so the built-in button is enough.
 	'scm/history/title': [
-		// The built-in graph already supplies Refresh. Keep the Git Easy Ops
-		// toolbar in the same order as the stable view: patch work first, then
-		// history rewrites, repository maintenance, and Undo as the last action.
-		// A patch comes from a file and lands at the base the search finds, so it
-		// is about the whole repository - never about the commit a right-click
-		// landed on.
-		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: 'navigation@1' },
-		{ command: 'geco.applyPatchAutomatically', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)', group: 'navigation@2' },
-		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: 'navigation@3' },
-		// These two commands have useful no-selection fallbacks: they open the
-		// commit picker, so the graph header can offer them without pretending
-		// that a toolbar has a selected row.
-		{ command: 'geco.squashWithPreviousCommits', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)', group: 'navigation@4' },
-		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: 'navigation@5' },
-		// Whole-repository maintenance follows the history actions.
-		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@6' },
-		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@7' },
-		// Repository-wide, like Clean History: the link to the repo on the web.
-		{ command: 'geco.copyRepositoryWebLink', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyRepositoryWebLink)', group: 'navigation@8' },
-		// Same surface, one more repository-wide answer: "why can I not push or
-		// sync?" - the state it explains usually becomes visible in this graph.
-		{ command: 'geco.diagnosePushSync', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)', group: 'navigation@9' },
-		// Undo opens the same newest-first journal picker as the Command Palette
-		// command. It is deliberately the last operation in the toolbar.
-		{ command: 'geco.undoLastOperation', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)', group: 'navigation@10' },
-		{ command: 'geco.explainMenus', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
+		// Ours come after the original buttons. The slots the built-ins occupy
+		// in this caption are known: the workbench registers the repository /
+		// reference pickers and "Go to Current History Item" at navigation
+		// orders 0-2 and its Refresh at order 1000 (scmHistoryViewPane.ts),
+		// and the git extension puts Fetch / Pull / Push / Publish at
+		// navigation@900-903 (extensions/git/package.json). Ours start at
+		// 1010, so the original buttons stay in one piece in front.
+		//
+		// A visible "|" separator between the originals and ours cannot be
+		// contributed: in a view caption only the single `navigation` group
+		// renders as buttons (ViewMenuActions only treats that group as
+		// primary, and the SCM history pane declares no extra primary
+		// groups), so there is no group boundary a separator could sit on -
+		// a second group would move the buttons into the overflow ("...")
+		// menu instead of placing them behind a separator. Ordering after
+		// the originals is as close as the contribution model gets.
+		//
+		// The order itself is the shared header order (see `view/title` in
+		// package.json): patch work first, then the row-targeted history
+		// operations, then whole-repository maintenance. Four of those are
+		// SKIPPED here - fast-forward, Squash, rename commit and rename
+		// branch - because in this build they sit on the rows they operate
+		// on: the commit context menu above (`7_move`, `4_modify`) and the
+		// branch badge (`2_branch`). A header copy would have to guess its
+		// target through a picker while the right row is under the mouse.
+		// The stable (non-graph) header keeps all four: without the proposed
+		// API there is no such context menu, so the picker is the entry
+		// point there.
+		//
+		// A patch comes from a file and lands at the base the search finds,
+		// so it is about the whole repository - never about the commit a
+		// right-click landed on. The no-questions apply leads, then the
+		// interactive one, then "find the base only".
+		{ command: 'geco.applyPatchAutomatically', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAutomatically)', group: 'navigation@1010' },
+		{ command: 'geco.applyPatchAtProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.applyPatchAtProperBase)', group: 'navigation@1020' },
+		{ command: 'geco.findProperBase', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.findProperBase)', group: 'navigation@1030' },
+		// Whole-repository maintenance, in the shared header order: the
+		// branch-name sweep, then the history rewrite, then Undo (the same
+		// newest-first journal picker as the Command Palette command).
+		{ command: 'geco.removeRedundantBranches', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.removeRedundantBranches)', group: 'navigation@1040' },
+		{ command: 'geco.cleanHistory', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.cleanHistory)', group: 'navigation@1050' },
+		{ command: 'geco.undoLastOperation', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.undoLastOperation)', group: 'navigation@1060' },
+		// "Why can I not push or sync?" - the state it explains usually
+		// becomes visible in this graph.
+		{ command: 'geco.diagnosePushSync', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.diagnosePushSync)', group: 'navigation@1070' },
+		// Last ours: the link to the repo on the web.
+		{ command: 'geco.copyRepositoryWebLink', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyRepositoryWebLink)', group: 'navigation@1080' },
+		// The "where are the menus?" help only while the graph menus are not
+		// really on screen in this session (`geco.graphMenuVisible`, set at
+		// activation from the proposals VS Code enabled) - e.g. when only
+		// this title proposal was granted and the commit-row menu is still
+		// missing. Once every graph menu is visible the question answers
+		// itself and the entry goes away; the Command Palette always keeps
+		// the command.
+		{ command: 'geco.explainMenus', when: 'scmProvider == git && !geco.graphMenuVisible && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' },
 	],
 };
 

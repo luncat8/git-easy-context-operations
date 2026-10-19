@@ -30,19 +30,26 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   overwritten silently.
 - **Apply a patch at its proper base** - finds the commit the patch was made
   against and applies it there, on a new branch or in a separate worktree.
-  The patch buttons sit first in the view header (and in the graph-build
-  header); they work on the whole repository, not on a clicked commit -
+  The patch buttons lead our block in the view header (in the graph build's
+  header they sit right after the built-in buttons, still first of ours,
+  **Apply Patch Automatically** ahead of the interactive apply); they work
+  on the whole repository, not on a clicked commit -
   including **Apply Patch Automatically**, which re-applies the patch file you
   used last time with no questions at all, leaves the result **uncommitted**
   (staged, ready for you to commit under your own name) - applied directly on
   the current branch, with no new branch created, when the patch fits the latest
   HEAD - and only opens the file dialog when that file is missing, invalid or
   already in the graph.
-- **Header history actions** - **Squash with Previous Commits...** and
-  **Rename Commit Message...** open the same commit picker as the Command
-  Palette when no row is selected. They follow the patch actions; **Undo Last
-  Operation** is the last operation button and opens the newest-first undo
-  list (the same list available from the palette).
+- **Header history actions** - both headers share one order (after the
+  header's original buttons): apply automatically, apply, fast-forward main,
+  Squash, rename commit, rename branch, remove redundant, clean, undo,
+  diagnose, link. On the stable view header the row-targeted four
+  (**Fast-Forward Default Branch to Commit...**, **Squash with Previous
+  Commits...**, **Rename Commit Message...**, **Rename Branch...**) open the
+  same pickers as the Command Palette when no row is selected; the
+  `+graph` header skips those four, because there they sit in the context
+  menu of the very commit or branch instead. **Undo Last Operation** opens
+  the newest-first undo list (the same list available from the palette).
 - **Diagnose push / sync trouble** - one command that says why *Push* or *Sync* is
   refused (an unfinished merge, the same work committed twice under different
   hashes, a rewritten branch the remote still has, a stale `index.lock`, a missing

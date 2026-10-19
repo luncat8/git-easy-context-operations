@@ -18,7 +18,9 @@ import {
 	assessGraphMenu,
 	GRAPH_MENU_KEYS,
 	GRAPH_MENU_PROPOSALS,
+	GRAPH_MENU_VISIBLE_CONTEXT_KEY,
 	graphMenuFixOptions,
+	isGraphMenuVisible,
 	type ArgvStore,
 	type GraphMenuBuild,
 } from '../../core/graphMenu';
@@ -253,6 +255,56 @@ describe('graph menu - diagnosis', () => {
 		assert.match(status.report, /"Rename Branch\.\.\. > main"/, 'explains how ref menus show up in the graph');
 		assert.match(status.report, /not nested under an extension name/, 'says the items are flat, not in a submenu');
 		assert.match(status.report, /next to Cherry Pick/, 'says which built-in group they land in');
+	});
+
+	it('sees the menu as visible only when every key and every proposal is enabled in this session', () => {
+		assert.equal(GRAPH_MENU_VISIBLE_CONTEXT_KEY, 'geco.graphMenuVisible');
+		assert.equal(
+			isGraphMenuVisible(build({ enabledProposals: [...GRAPH_MENU_PROPOSALS] })),
+			true,
+			'the graph build, all menu keys and both proposals enabled by VS Code',
+		);
+		assert.equal(
+			isGraphMenuVisible(build({ enabledProposals: GRAPH_MENU_PROPOSALS.map((proposal) => `${proposal}@3`) })),
+			true,
+			'a version suffix on a proposal entry changes nothing',
+		);
+		assert.equal(
+			isGraphMenuVisible(build({ enabledProposals: [] })),
+			false,
+			'a graph build VS Code did not grant shows no proposed menus',
+		);
+		assert.equal(
+			isGraphMenuVisible(build({ enabledProposals: ['contribSourceControlHistoryItemMenu'] })),
+			false,
+			'a partial grant still leaves a missing half to explain',
+		);
+		assert.equal(
+			isGraphMenuVisible(build({ menuKeys: GRAPH_MENU_KEYS.slice(0, 2), enabledProposals: [...GRAPH_MENU_PROPOSALS] })),
+			false,
+			'an enabled proposal cannot render a menu key the build does not contribute',
+		);
+		assert.equal(
+			isGraphMenuVisible(build({ hasProposals: false, menuKeys: [], enabledProposals: [...GRAPH_MENU_PROPOSALS] })),
+			false,
+			'a grant aimed at the publishable build renders nothing',
+		);
+	});
+
+	it('keeps "ready" (grant files) apart from "visible" (this session)', () => {
+		// The grant is on disk but the session predates it: configured, not
+		// yet on screen - the help entry must stay.
+		const pending = assessGraphMenu(build({ enabledProposals: [] }), `{\n\t"enable-proposed-api": ["${ID}"]\n}`);
+		assert.equal(pending.ready, true, 'the build and a persistent grant are in place');
+		assert.equal(pending.visible, false, 'but this session has not picked the grant up yet');
+		assert.match(pending.report, /visible in this session:\s+no/);
+
+		// Launched with --enable-proposed-api: no file says so, yet the
+		// menus are on screen - the help entry must go.
+		const launched = assessGraphMenu(build({ enabledProposals: [...GRAPH_MENU_PROPOSALS] }), '{}');
+		assert.equal(launched.ready, false, 'no persistent grant exists');
+		assert.equal(launched.visible, true, 'but VS Code enabled the proposals for this launch');
+		assert.match(launched.report, /visible in this session:\s+YES/);
 	});
 });
 

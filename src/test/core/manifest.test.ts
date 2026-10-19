@@ -201,7 +201,7 @@ describe('manifest - menus', () => {
 		const title = manifest.contributes.menus['view/title'] ?? [];
 		const toolbar = title.find((e) => e.command === 'geco.cleanHistory');
 		assert.ok(toolbar, 'no clean-history button in the view toolbar');
-		assert.equal(toolbar!.group, 'navigation@7', 'the toolbar button does not sit in the maintenance section after history actions');
+		assert.equal(toolbar!.group, 'navigation@10', 'the toolbar button does not sit in the maintenance section after the redundant-branch sweep');
 		assert.match(toolbar!.when ?? '', /geco\.repositoryOpen/, 'the toolbar button shows without a repository');
 
 		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
@@ -267,34 +267,102 @@ describe('manifest - menus', () => {
 			assert.ok(titleSection.includes(id), `${id} has no button on the graph toolbar`);
 		}
 
-		// Header actions are deliberately the primary, no-row-argument flows:
-		// patch first, then the picker-based history rewrites, and Undo last.
+		// The stable (non-graph) header has one deliberate order, and this is
+		// all of it: Refresh (the view's own "original" button), then ours -
+		// apply automatically, apply, find-the-base-only, fast-forward,
+		// Squash, rename commit, rename branch, remove redundant, clean,
+		// Undo, diagnose, link - and the settings gear after the operations.
+		// The row-targeted four (fast-forward, Squash, rename commit, rename
+		// branch) live here because this header has no proposed-API context
+		// menu to call them from: with no row argument they open their
+		// pickers. The +graph header skips exactly those four (pinned in
+		// menuCatalog.test.ts) because there they sit on the rows themselves.
 		const navigation = title
 			.filter((entry) => (entry.when ?? '').startsWith('view == geco.history') && (entry.group ?? '').startsWith('navigation@'))
 			.map((entry) => entry.command);
-		assert.deepEqual(navigation.slice(0, 6), [
+		assert.deepEqual(navigation, [
 			'geco.refresh',
-			'geco.applyPatchAtProperBase',
 			'geco.applyPatchAutomatically',
+			'geco.applyPatchAtProperBase',
 			'geco.findProperBase',
+			'geco.fastForwardDefaultBranch',
 			'geco.squashWithPreviousCommits',
 			'geco.rewordCommit',
+			'geco.renameBranch',
+			'geco.removeRedundantBranches',
+			'geco.cleanHistory',
+			'geco.undoLastOperation',
+			'geco.diagnosePushSync',
+			'geco.copyRepositoryWebLink',
+			'geco.customizeMenus',
 		]);
-		assert.equal(navigation[navigation.length - 2], 'geco.undoLastOperation', 'Undo is not the last operation before settings');
-		assert.equal(navigation[navigation.length - 1], 'geco.customizeMenus', 'the settings gear should remain after the operations');
 	});
 
 	it('scopes title menus to our own views', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
 			// The toolbar buttons may additionally require an open repository -
 			// but never another view. The menu editor contributes its own view
-			// (its reset button lives on the editor's toolbar).
+			// (its reset button lives on the editor's toolbar). The only other
+			// extra condition a title entry may carry is the missing-graph-menu
+			// help's "not while the graph menus are on screen" gate below.
 			assert.match(
 				entry.when ?? '',
-				/^view == geco\.(history|menuEditor)( && geco\.repositoryOpen)?( && \(!geco\.menuFilter.*)?$/,
+				/^view == geco\.(history|menuEditor)( && geco\.repositoryOpen)?( && !geco\.graphMenuVisible)?( && \(!geco\.menuFilter.*)?$/,
 				entry.command,
 			);
 		}
+	});
+
+	it('offers "Why Don\'t I See the Menus?" only while the graph menus are not visible in this session', () => {
+		// The help for a missing graph menu answers a question that is only
+		// open while the proposed menus are not really on screen, so both
+		// header entries carry `!geco.graphMenuVisible` on top of the
+		// Customize Context Menus switch - and nothing else does (an
+		// operation must never vanish because the graph build works).
+		const title = manifest.contributes.menus['view/title'] ?? [];
+		const explain = title.find((entry) => entry.command === 'geco.explainMenus');
+		assert.ok(explain, 'our own header has no "Why Don\'t I See the Menus?" entry');
+		assert.equal(
+			explain!.when,
+			'view == geco.history && !geco.graphMenuVisible && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)',
+		);
+		assert.equal(explain!.group, '9_geco@1');
+		for (const entry of title) {
+			if (entry.command !== 'geco.explainMenus') {
+				assert.equal((entry.when ?? '').includes('geco.graphMenuVisible'), false, `${entry.command} carries the graph-menu visibility gate`);
+			}
+		}
+
+		const script = sourceOf('scripts/apply-graph-menu.mjs');
+		const graphMenus = script.slice(script.indexOf('const GRAPH_MENUS'), script.indexOf('const action ='));
+		const titleSection = graphMenus.slice(graphMenus.indexOf("'scm/history/title'"));
+		assert.ok(
+			titleSection.includes(
+				"{ command: 'geco.explainMenus', when: 'scmProvider == git && !geco.graphMenuVisible && (!geco.menuFilter || geco.menuVisible.geco.explainMenus)', group: '9_geco@1' }",
+			),
+			'the graph header offers the help without the visibility gate',
+		);
+
+		// The Command Palette keeps the command at all times - hiding a menu
+		// entry must never make the diagnosis itself unreachable.
+		assert.ok(manifest.contributes.commands.some((command) => command.command === 'geco.explainMenus'));
+		assert.equal(
+			(manifest.contributes.menus.commandPalette ?? []).some((entry) => entry.command === 'geco.explainMenus'),
+			false,
+			'"Why Don\'t I See the Menus?" is hidden from the Command Palette',
+		);
+
+		// The gate is only as good as the context key behind it: activation
+		// must set it from the verdict over the installed build's
+		// session-enabled proposals (not from the grant files, which say
+		// what a restart *would* allow - see `isGraphMenuVisible`).
+		const extensionSource = sourceOf('src/extension.ts');
+		assert.match(extensionSource, /const installedBuild = describeInstalledBuild\(context\)/);
+		assert.match(extensionSource, /const graphMenuVisible = isGraphMenuVisible\(installedBuild\)/);
+		assert.match(extensionSource, /executeCommand\('setContext', GRAPH_MENU_VISIBLE_CONTEXT_KEY, graphMenuVisible\)/);
+		const buildSource = sourceOf('src/vscode/graphMenu.ts');
+		assert.match(buildSource, /originalEnabledApiProposals/, 'the graph-build check no longer reads the declared proposals');
+		assert.match(buildSource, /enabledProposals = manifest\.enabledApiProposals/, 'the session-enabled proposals are not read from the runtime manifest');
 	});
 
 	it('puts our own view items straight into categories instead of a submenu', () => {

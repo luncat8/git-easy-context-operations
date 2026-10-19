@@ -5,10 +5,10 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.17.vsix
+code --install-extension dist/git-easy-context-operations-0.4.18.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.17+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) For the `+graph` build,
@@ -22,6 +22,9 @@ yourself and restart:
 ```
 
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
+Once the graph menus really are visible in the running VS Code session, that
+entry leaves both headers by itself (a grant that still needs the restart
+keeps it); the Command Palette always keeps the command.
 
 
 
@@ -76,7 +79,7 @@ Repository: https://github.com/luncat8/git-easy-context-operations
 | 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** / **Apply Patch Automatically** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. All three are header buttons (view toolbar, and the built-in graph's toolbar in the `+graph` build): a patch comes from a file and lands at the base the search finds, so it belongs to the whole repository, never to the commit that was clicked - they no longer sit on commit rows. **Apply Patch Automatically** asks nothing: it re-applies the patch file last used successfully in this repository (remembered per repository in the editor's workspace state), with the default destination and a branch name derived from the patch - unless the patch applies cleanly on the latest HEAD itself, in which case it is applied directly on the current branch and no branch or worktree is created at all - and **never commits**: the change (a mailbox patch included - it is applied with `git apply`, not `git am`) lands staged in the working tree, on the new branch / in the worktree or on the current branch, and you commit it yourself with your own message and authorship. Once that commit exists, the next click recognises the patch as already in the graph by its patch-id; clicking again *before* committing applies the file once more (on the dirty tree the new-branch destination falls back to a separate worktree, which the report says). The file dialog only opens when there is no remembered file, or the remembered one is missing/unreadable, is not a patch, is already in the graph (its commit is reachable, or every commit of it has a patch-id twin among the newest 200 commits of `--all`), or does not apply for any other reason; a file picked in that dialog that also fails is reported as an error instead of reopening the dialog. Only a successfully applied file becomes the remembered one. |
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. **Undo Last Operation** is also a header button, opens the same newest-first list as the Command Palette, and can roll back an older entry together with every newer operation. |
 
-| 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph, its header or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
+| 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph's commit context menu, our view's header or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
 
@@ -144,14 +147,25 @@ without any proposed API.
   maintenance actions (and in the built-in graph's toolbar in the `+graph`
   build): **Diagnose Push / Sync Trouble...** - it is about the repository, not
   about a commit, so it never sits in a row.
-- **The header actions have a deliberate order.** After Refresh, the three
-  patch buttons come first: **Apply Patch at Proper Base...**, **Apply Patch
-  Automatically** (⚡) and **Find Proper Base for Patch...**. They are followed
-  by **Squash with Previous Commits...** and **Rename Commit Message...**, which
-  open the normal commit picker when the header has no row selection. The
-  repository-maintenance actions follow, and **Undo Last Operation** is the last
-  operation button. Undo opens the same newest-first journal list as the Command
-  Palette's **Git Easy Ops: Undo Last Operation** command.
+- **The header actions have one deliberate order** - the same on this view's
+  header and (with four skips, below) on the built-in graph's header in the
+  `+graph` build. After the header's original buttons, ours run: **Apply Patch
+  Automatically** (⚡), **Apply Patch at Proper Base...**, **Find Proper Base
+  for Patch...**, **Fast-Forward Default Branch to Commit...**, **Squash with
+  Previous Commits...**, **Rename Commit Message...**, **Rename Branch...**,
+  **Remove Redundant Branches...**, **Clean History (Remove Dead Paths)...**,
+  **Undo Last Operation**, **Diagnose Push / Sync Trouble...** and **Copy
+  Repository Web Link** (then the **Customize Context Menus...** gear on this
+  view). On this stable header the row-targeted four (fast-forward, Squash,
+  rename commit, rename branch) open their normal pickers when the header has
+  no row selection - without the proposed API there is no built-in graph
+  context menu to call them from, so the header is their picker-based entry
+  point. The `+graph` header **skips exactly those four**: there they are in
+  the context menu of the very commit (fast-forward, Squash, rename commit) or
+  branch badge (rename branch) they operate on, and a header copy could only
+  guess its target through a picker. *Undo* opens the same newest-first
+  journal list as the Command Palette's **Git Easy Ops: Undo Last Operation**
+  command.
 - **The patch buttons live in the same headers** for the same reason:
   a patch is read from a file and applied at the base the search finds - the
   clicked commit was never its target - so they no longer appear on commit rows
@@ -175,7 +189,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.17+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.18+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -204,7 +218,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 | *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`). Deliberately **not** on the branch badges - see below. |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
-| graph *toolbar* (`scm/history/title`, `navigation`) | After the built-in Refresh button: the three patch buttons (**Apply Patch at Proper Base...**, **Apply Patch Automatically**, **Find Proper Base for Patch...**), **Squash with Previous Commits...**, **Rename Commit Message...**, repository maintenance (**Clean History (Remove Dead Paths)...**, **Remove Redundant Branches...**, **Copy Repository Web Link**, **Diagnose Push / Sync Trouble...**) and **Undo Last Operation** last. The rewrite buttons open a commit picker; Undo opens the same newest-first list as the Command Palette. The web link is built from `origin` (or the first remote with a web address), e.g. `git@github.com:acme/app.git` -> `https://github.com/acme/app`, and never contains credentials |
+| graph *toolbar* (`scm/history/title`, `navigation`) | After **all** the original buttons - the workbench's reference pickers (`navigation` orders 0-2), git's Fetch / Pull / Push / Publish (`navigation@900`-`903`) and the graph Refresh (order 1000) - at `navigation@1010` and behind: **Apply Patch Automatically**, **Apply Patch at Proper Base...**, **Find Proper Base for Patch...**, **Remove Redundant Branches...**, **Clean History (Remove Dead Paths)...**, **Undo Last Operation**, **Diagnose Push / Sync Trouble...**, **Copy Repository Web Link**. No `\|` separator can be contributed between the originals and ours: only the one `navigation` group renders as buttons in a view caption, so there is no group boundary to hang a separator on (a second group would land in the caption's `…` overflow instead). Fast-forward, Squash, rename commit and rename branch have **no** buttons here - in this build they are context-menu items of the very commit row / branch badge they operate on (above); the stable view header keeps them as picker-based buttons. Undo opens the same newest-first list as the Command Palette. The web link is built from `origin` (or the first remote with a web address), e.g. `git@github.com:acme/app.git` -> `https://github.com/acme/app`, and never contains credentials |
 
 Nothing is duplicated: the built-in graph already offers checkout, create branch,
 create tag, cherry pick, copy commit id and - on a branch badge - delete branch,
@@ -244,6 +258,11 @@ until you open it.
 - **Search and Replace in Commit Message...** is hidden **by default** (its box
   starts unchecked, with a "hidden by default" note); every other item starts
   visible. Tick it to keep it - an explicit choice always wins over the default.
+- **Why Don't I See the Menus?** has one extra condition beyond its switch: it
+  hides itself while the proposed graph menus are actually visible in the
+  running session (even with its box ticked), and comes back whenever they are
+  not - the proposed-API question answers itself once the menus are on screen.
+  Its palette command is always available.
 - The *Customize Context Menus...* entry itself is locked (the way back), and the
   palette command **Restore Default Menu Items** puts the list back to the
   built-in defaults (showing everything except the default-hidden rows).
@@ -264,12 +283,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.17.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.17.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.18.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.18.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.17+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.17+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -281,10 +300,12 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.17.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.18.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
-**Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing.
+**Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing (and
+disappears from both headers once the graph menus are visible in the running
+session; the palette keeps it).
 
 Building them yourself:
 

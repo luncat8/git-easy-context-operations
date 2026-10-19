@@ -253,18 +253,85 @@ describe('menu order - Remove Redundant Branches... follows Create Branch...', (
 });
 
 describe('menu order - graph header actions', () => {
-	it('puts patch actions first, picker-based rewrites next, and Undo last', () => {
+	it('follows the shared header order without the row-targeted operations', () => {
+		// The shared order is: apply automatically, apply, (find base),
+		// fast-forward, Squash, rename commit, rename branch, remove
+		// redundant, clean, Undo, diagnose, link. The built-in graph's
+		// header skips the row-targeted four - in the +graph build they are
+		// in the context menu of the commit / branch they operate on, and a
+		// header copy could only guess its target through a picker. The
+		// stable view header keeps all of them (pinned in manifest.test.ts).
 		const navigation = graphEntries()
 			.filter((entry) => entry.key === 'scm/history/title' && (entry.group ?? '').startsWith('navigation@'))
 			.map((entry) => entry.command);
-		assert.deepEqual(navigation.slice(0, 5), [
-			'geco.applyPatchAtProperBase',
+		assert.deepEqual(navigation, [
 			'geco.applyPatchAutomatically',
+			'geco.applyPatchAtProperBase',
 			'geco.findProperBase',
-			'geco.squashWithPreviousCommits',
-			'geco.rewordCommit',
+			'geco.removeRedundantBranches',
+			'geco.cleanHistory',
+			'geco.undoLastOperation',
+			'geco.diagnosePushSync',
+			'geco.copyRepositoryWebLink',
 		]);
-		assert.equal(navigation.at(-1), 'geco.undoLastOperation');
+	});
+
+	it('skips on the graph header what the graph rows already offer', () => {
+		const entries = graphEntries();
+		const onTitle = new Set(entries.filter((entry) => entry.key === 'scm/history/title').map((entry) => entry.command));
+		const skipped: [string, string][] = [
+			['geco.fastForwardDefaultBranch', 'scm/historyItem/context'],
+			['geco.fastForwardBranch', 'scm/historyItem/context'],
+			['geco.squashWithPreviousCommits', 'scm/historyItem/context'],
+			['geco.rewordCommit', 'scm/historyItem/context'],
+			['geco.renameBranch', 'scm/historyItemRef/context'],
+		];
+		for (const [command, rowKey] of skipped) {
+			assert.equal(onTitle.has(command), false, `${command} duplicates its graph row menu entry as a header button`);
+			assert.ok(
+				entries.some((entry) => entry.key === rowKey && entry.command === command),
+				`${command} is skipped on the header but missing from ${rowKey} - the skip would lose the operation`,
+			);
+		}
+	});
+
+	it('offers the missing-menu help only while the graph menus are not visible in this session', () => {
+		// Once every proposed menu really is on screen (`geco.graphMenuVisible`,
+		// set at activation), "Why Don't I See the Menus?" has answered itself
+		// and leaves the graph header's overflow - on top of, and independent
+		// from, its Customize Context Menus switch. It is the *only* entry
+		// with that extra condition: no operation may disappear just because
+		// the graph build works.
+		const entries = graphEntries();
+		const explain = entries.find((entry) => entry.key === 'scm/history/title' && entry.command === 'geco.explainMenus');
+		assert.ok(explain, 'the graph header has no "Why Don\'t I See the Menus?" entry');
+		assert.match(explain!.when ?? '', /^scmProvider == git && !geco\.graphMenuVisible && /, explain!.when);
+		assert.equal(hasVisibilityFragment(explain!, 'geco.explainMenus'), true, 'the editor switch no longer governs the help entry');
+		assert.equal(explain!.group, '9_geco@1', 'the help left the header overflow group');
+		for (const entry of entries) {
+			if (entry !== explain) {
+				assert.equal((entry.when ?? '').includes('geco.graphMenuVisible'), false, `${entry.key} ${entry.command} carries the visibility gate`);
+			}
+		}
+	});
+
+	it('sits after every original button of the graph caption', () => {
+		// The originals and their navigation orders, from the VS Code tree:
+		// the workbench registers the repository picker, the reference
+		// picker and "Go to Current History Item" at orders 0-2 and the
+		// graph Refresh at 1000 (scmHistoryViewPane.ts); the git extension
+		// contributes Fetch / Pull / Push / Publish at navigation@900-903.
+		// Ours must start behind the last original (Refresh, 1000) and keep
+		// strictly increasing, so the original block stays in one piece and
+		// the shared order survives.
+		const orders = graphEntries()
+			.filter((entry) => entry.key === 'scm/history/title' && (entry.group ?? '').startsWith('navigation@'))
+			.map((entry) => Number.parseInt((entry.group ?? '').slice('navigation@'.length), 10));
+		assert.ok(orders.length > 0, 'the graph header lost its buttons');
+		assert.ok(orders[0]! > 1000, `our first graph-header button (@${orders[0]}) does not sit after the original buttons (Refresh is @1000)`);
+		for (let i = 1; i < orders.length; i++) {
+			assert.ok(orders[i]! > orders[i - 1]!, `graph header orders are not strictly increasing (${orders.join(', ')})`);
+		}
 	});
 });
 

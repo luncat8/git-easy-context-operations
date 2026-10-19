@@ -104,17 +104,25 @@ export interface MenuRow {
 
 /** One switch per command, across every menu that shows it. */
 export const MENU_ROWS: readonly MenuRow[] = [
-	// The primary rewrite actions also have header buttons. With no row
-	// argument they open the same commit picker used by the Command Palette;
-	// the multi-select variant stays on commit rows because a header has no
-	// selection to pass through.
-	{ id: 'geco.rewordCommit', label: 'Rename Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title', 'graph.title'] },
+	// The primary row-targeted actions also have buttons on the **stable**
+	// view header (`view.title`) - fast-forward, Squash, rename commit and
+	// rename branch. With no row argument they open the same pickers used by
+	// the Command Palette, and without the proposed API that header is their
+	// entry point next to our own rows. The built-in graph's header
+	// (`graph.title`) deliberately skips all four: in the +graph build they
+	// sit in the context menu of the very commit / branch they operate on
+	// (`graph.commit`, `graph.ref`), so a picker guessing the target would
+	// only duplicate the right-click. The multi-select variant stays on
+	// commit rows because a header has no selection to pass through.
+	{ id: 'geco.rewordCommit', label: 'Rename Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title'] },
 	{ id: 'geco.rewordCommitAppend', label: 'Append to Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.rewordCommitRename', label: 'Search and Replace in Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'], defaultHidden: true },
 	{ id: 'geco.squashSelectedCommits', label: 'Squash Selected Commits...', surfaces: ['view.commit'] },
-	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title', 'graph.title'] },
+	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title'] },
 	{ id: 'geco.createBranch', label: 'Create Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch'] },
-	{ id: 'geco.fastForwardDefaultBranch', label: 'Fast-Forward Default Branch to Commit...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
+	// The header's one fast-forward button is the default-branch variant
+	// ("move main onto..."); the ask-a-branch variant stays on the rows.
+	{ id: 'geco.fastForwardDefaultBranch', label: 'Fast-Forward Default Branch to Commit...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title'] },
 	{ id: 'geco.fastForwardBranch', label: 'Fast-Forward Branch to Commit...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
 	{ id: 'geco.createBackupBranch', label: 'Create Backup Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
 	{ id: 'geco.forcePush', label: 'Force Push (with lease)...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch', 'graph.commit'] },
@@ -131,7 +139,7 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.copyCommitSha', label: 'Copy Commit SHA', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.enableGraphMenu', label: 'Enable Source Control Graph Menu...', surfaces: ['view.commit', 'view.title', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.cleanHistory', label: 'Clean History (Remove Dead Paths)...', surfaces: ['view.commit', 'view.graphGroup', 'view.title', 'submenu.commit', 'graph.title'] },
-	{ id: 'geco.renameBranch', label: 'Rename Branch...', surfaces: ['view.branch', 'submenu.branch', 'graph.ref'] },
+	{ id: 'geco.renameBranch', label: 'Rename Branch...', surfaces: ['view.branch', 'submenu.branch', 'graph.ref', 'view.title'] },
 	{ id: 'geco.checkoutBranch', label: 'Check Out Branch...', surfaces: ['view.branch', 'submenu.branch'] },
 	{ id: 'geco.deleteBranch', label: 'Delete Branch...', surfaces: ['view.branch', 'submenu.branch'] },
 	// The cleanup sits everywhere a commit row shows branch items (it is about
@@ -154,10 +162,16 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// caption already carries its own refresh button, and a second one there
 	// would be a duplicate (see `scripts/apply-graph-menu.mjs`).
 	{ id: 'geco.refresh', label: 'Refresh', surfaces: ['view.title'] },
+	// The one row with a condition of its own on top of the editor switch:
+	// both header entries also carry `!geco.graphMenuVisible`
+	// (`GRAPH_MENU_VISIBLE_CONTEXT_KEY` in `graphMenu.ts`), so the help for
+	// a missing graph menu disappears by itself once the proposed menus are
+	// really on screen in this session. The switch still governs it
+	// everywhere else, and the Command Palette always keeps the command.
 	{ id: 'geco.explainMenus', label: "Why Don't I See the Menus?", surfaces: ['view.title', 'graph.title'] },
-	// Caption of the built-in Source Control Graph: a repository-wide link, so it
-	// sits on the graph toolbar next to Clean History, not on any commit row.
-	{ id: 'geco.copyRepositoryWebLink', label: 'Copy Repository Web Link', surfaces: ['graph.title'] },
+	// A repository-wide link, so it sits on both headers (never on a commit
+	// row) - last of the operation buttons in the shared header order.
+	{ id: 'geco.copyRepositoryWebLink', label: 'Copy Repository Web Link', surfaces: ['view.title', 'graph.title'] },
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',

@@ -11,6 +11,7 @@ import { Controller, type PatchFileMemory, type RewordFlow } from './core/contro
 import { createGitExec, createProcessExec, type GitExec } from './core/gitRunner';
 import type { Settings } from './core/config';
 import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, defaultHiddenIds, effectiveHiddenList, parseHiddenItems } from './core/menuVisibility';
+import { GRAPH_MENU_VISIBLE_CONTEXT_KEY, isGraphMenuVisible } from './core/graphMenu';
 import { reportWithoutWaiting } from './core/ui';
 import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
@@ -45,6 +46,20 @@ interface Runtime {
 export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel('Git Easy Ops');
 	context.subscriptions.push(output);
+
+	// Are the proposed Source Control Graph menus really on screen in this
+	// session? That (and only that) hides "Why Don't I See the Menus?" from
+	// both header overflow menus - the question is only offered while it is
+	// still open, so a grant configured a minute ago but not yet restarted
+	// keeps it. The installed build cannot change within a session, so the
+	// verdict is taken once, as early as activation allows; until it is,
+	// the unset key leaves the help entry visible (fail-open).
+	const installedBuild = describeInstalledBuild(context);
+	const graphMenuVisible = isGraphMenuVisible(installedBuild);
+	void vscode.commands.executeCommand('setContext', GRAPH_MENU_VISIBLE_CONTEXT_KEY, graphMenuVisible);
+	output.appendLine(graphMenuVisible
+		? 'The Source Control Graph menus are visible in this session; "Why Don\'t I See the Menus?" stays out of the headers (the Command Palette keeps it).'
+		: 'The Source Control Graph menus are not visible in this session; "Why Don\'t I See the Menus?" explains which half is missing.');
 
 	const ui = new VsCodeUI(output);
 	const gitApi: GitApiLike | undefined = loadGitApi();
@@ -381,7 +396,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			output.show(true);
 		}),
 		vscode.commands.registerCommand('geco.enableGraphMenu', async () => {
-			const build = describeInstalledBuild(context);
+			const build = installedBuild;
 			// Two ways to allow the proposed API: the editor's product.json (no
 			// command line at all) and the per-user argv.json.
 			await runtime.controller.enableGraphMenu(build, new FsFileStore(build.argvPath), new FsFileStore(build.productPath));

@@ -28,6 +28,24 @@ export interface GraphMenuBuild {
 	extensionId: string;
 	/** The installed build declares `enabledApiProposals` (i.e. it is a graph build). */
 	hasProposals: boolean;
+	/**
+	 * Proposals the installed VSIX declares, before VS Code filters them for
+	 * this session. Read from the runtime manifest's
+	 * `originalEnabledApiProposals`; optional because older test fixtures and
+	 * callers only supply {@link GraphMenuBuild.hasProposals}.
+	 */
+	declaredProposals?: readonly string[];
+	/**
+	 * Proposals VS Code lets this extension use *in this session* - the
+	 * runtime manifest's `enabledApiProposals`. The workbench rewrites that
+	 * list from the grant that actually applies to the session (product.json,
+	 * argv.json / launch flag, Extension Development Host) before it
+	 * registers extension points, emptying it when no grant applies. Unlike
+	 * the grant *files* (which say what a restart would allow), this list is
+	 * what decides whether the proposed menu contributions were registered -
+	 * i.e. whether the graph menu is really on screen.
+	 */
+	enabledProposals?: readonly string[];
 	/** Proposed menu keys this build contributes. */
 	menuKeys: readonly string[];
 	/** Absolute path of the runtime arguments file for this VS Code flavour. */
@@ -56,6 +74,15 @@ export interface GraphMenuStatus {
 	allowedInProduct: boolean;
 	/** Everything the extension needs is in place - a restart may still be needed. */
 	ready: boolean;
+	/**
+	 * The graph menus are registered in *this* session
+	 * ({@link isGraphMenuVisible}) - unlike {@link GraphMenuStatus.ready},
+	 * which only says the build and a persistent grant are in place. The two
+	 * differ in both directions: a grant written a minute ago is `ready` but
+	 * not visible until the restart, and a per-launch
+	 * `--enable-proposed-api` is visible without being `ready`.
+	 */
+	visible: boolean;
 	/** What is missing, as copy-pasteable steps, in the order they must happen. */
 	steps: string[];
 	/** The report written to the output log. */
@@ -66,6 +93,34 @@ export const GRAPH_MENU_KEYS = ['scm/historyItem/context', 'scm/historyItemRef/c
 
 /** The proposals a graph build declares. */
 export const GRAPH_MENU_PROPOSALS = ['contribSourceControlHistoryItemMenu', 'contribSourceControlHistoryTitleMenu'] as const;
+
+/**
+ * Context key mirroring {@link isGraphMenuVisible}: `true` only while the
+ * proposed graph menus are registered in this session. The
+ * "Why Don't I See the Menus?" entries carry `!geco.graphMenuVisible`, so the
+ * question is only offered while it is still open. Unset (extension not yet
+ * activated) reads as "not visible" by that negation, so the help entry is
+ * the fail-open default until the extension reports otherwise.
+ */
+export const GRAPH_MENU_VISIBLE_CONTEXT_KEY = 'geco.graphMenuVisible';
+
+/**
+ * Whether the proposed Source Control Graph menus are really on screen in
+ * this session: this build contributes every graph menu key and VS Code
+ * enabled every proposal behind them (see
+ * {@link GraphMenuBuild.enabledProposals} for why that list is the
+ * session's truth, and not the grant files). Every key and every proposal
+ * must be present - a partial grant (say, only the title menu) still leaves
+ * a "why don't I see..." question worth answering, and the extension's own
+ * grant writers always write both proposals together.
+ */
+export function isGraphMenuVisible(build: GraphMenuBuild): boolean {
+	// Proposal entries may carry a version suffix (`proposal@3`); the menu
+	// registration only looks at the bare name.
+	const enabled = new Set((build.enabledProposals ?? []).map((proposal) => proposal.split('@')[0]));
+	return GRAPH_MENU_KEYS.every((key) => build.menuKeys.includes(key))
+		&& GRAPH_MENU_PROPOSALS.every((proposal) => enabled.has(proposal));
+}
 
 /** A way to allow the proposal. `none` = just explain. */
 export type GraphMenuFix = 'product' | 'argv' | 'none';
@@ -82,10 +137,19 @@ export function assessGraphMenu(build: GraphMenuBuild, argvText: string | undefi
 	const argvExists = argvText !== undefined;
 	const allowedInProduct = productText !== undefined && allowsProductProposals(productText, build.extensionId, GRAPH_MENU_PROPOSALS);
 	const productExists = productText !== undefined;
-	const ready = build.hasProposals && (allowedInArgv || allowedInProduct);
+	// `hasProposals` is about what the VSIX declares; when the caller knows
+	// the declared list it wins over the boolean, so the session-filtered
+	// `enabledApiProposals` can never turn a graph build into a publishable
+	// one in this diagnosis.
+	const declared = build.declaredProposals;
+	const declaresProposals = declared !== undefined
+		? (GRAPH_MENU_PROPOSALS as readonly string[]).some((proposal) => declared.includes(proposal))
+		: build.hasProposals;
+	const ready = declaresProposals && (allowedInArgv || allowedInProduct);
+	const visible = isGraphMenuVisible(build);
 
 	const steps: string[] = [];
-	if (!build.hasProposals) {
+	if (!declaresProposals) {
 		steps.push(
 			'The installed build is the publishable one, which does not ask for proposed APIs.',
 			'  Build and install the graph build instead:',
@@ -115,12 +179,13 @@ export function assessGraphMenu(build: GraphMenuBuild, argvText: string | undefi
 	const report = [
 		'Source Control Graph commit menu',
 		`  extension:              ${build.extensionId}`,
-		`  installed build:        ${build.hasProposals ? 'graph build (declares enabledApiProposals)' : 'publishable build (no proposed APIs)'}`,
+		`  installed build:        ${declaresProposals ? 'graph build (declares enabledApiProposals)' : 'publishable build (no proposed APIs)'}`,
 		`  contributed menu keys:  ${build.menuKeys.length > 0 ? build.menuKeys.join(', ') : '(none)'}`,
 		`  product.json:           ${build.productPath}${productExists ? '' : ' (does not exist yet)'}`,
 		`  proposal allowed there: ${allowedInProduct ? 'YES' : 'no'}`,
 		`  runtime arguments file: ${build.argvPath}${argvExists ? '' : ' (does not exist yet)'}`,
 		`  proposal allowed there: ${allowedInArgv ? 'YES' : 'no'}`,
+		`  visible in this session: ${visible ? 'YES - the graph menus are on screen' : 'no'}`,
 		`  status:                 ${ready ? 'READY - the graph commit menu is available' : 'NOT available yet'}`,
 		steps.length > 0 ? `  to fix:\n${steps.map((s) => `    ${s}`).join('\n')}` : '',
 		'',
@@ -143,7 +208,7 @@ export function assessGraphMenu(build: GraphMenuBuild, argvText: string | undefi
 		'title/repository menus and the Command Palette.',
 	].filter((line) => line !== '').join('\n');
 
-	return { build, argvExists, allowedInArgv, productExists, allowedInProduct, ready, steps, report };
+	return { build, argvExists, allowedInArgv, productExists, allowedInProduct, ready, visible, steps, report };
 }
 
 /** The fixes "Enable Source Control Graph Menu..." offers, most convenient first. */
