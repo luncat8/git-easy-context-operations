@@ -189,28 +189,33 @@ export function reportWithoutWaiting(show: () => PromiseLike<unknown> | undefine
  * for an Undo started from the Command Palette). A report that cannot be
  * shown, or a follow-up that fails, is logged through `onError` and never
  * turns into an unhandled rejection.
+ *
+ * The returned promise settles when the follow-up is over (immediately
+ * when the notification carries on forever), and never rejects. Nobody
+ * has to await it - it exists so a caller that owns the follow-ups (the
+ * controller, and the tests that drive it) can tell when the work that
+ * outlived the command is done.
  */
 export function followUpWithoutWaiting(
 	shown: PromiseLike<string | undefined> | string | undefined,
 	handle: (chosen: string | undefined) => Promise<void> | void,
 	onError?: (error: unknown) => void,
-): void {
-	try {
-		void Promise.resolve(shown as PromiseLike<string | undefined>)
-			.then((chosen) => handle(chosen))
-			.then(undefined, (error: unknown) => {
-				try {
-					onError?.(error);
-				} catch {
-					// Even reporting the failure must not escape.
-				}
-			});
-	} catch (error) {
+): Promise<void> {
+	const failed = (error: unknown): void => {
 		try {
 			onError?.(error);
 		} catch {
-			// See above.
+			// Even reporting the failure must not escape.
 		}
+	};
+	try {
+		return Promise.resolve(shown as PromiseLike<string | undefined>)
+			.then((chosen) => handle(chosen))
+			.then(undefined, failed)
+			.then(() => undefined);
+	} catch (error) {
+		failed(error);
+		return Promise.resolve();
 	}
 }
 

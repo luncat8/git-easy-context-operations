@@ -190,12 +190,14 @@ describe('controller - reword flows', () => {
 		try {
 			const remoteDir = await other.repo.addBareRemote('origin');
 			const ui = new FakeUI({ inputs: ['pushed too'], asks: [ACTIONS.forcePush] });
-			await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [other.shas.v04], 'append');
+			const controller = controllerFor(ui, other.repo);
+			await controller.rewordCommit(other.repo.dir, [other.shas.v04], 'append');
+			await controller.settled();
 
 			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.forcePush), ui.transcript);
 			assert.equal(await other.repo.remoteBranchSha(remoteDir, 'main'), await other.repo.sha('main'));
-			assert.equal(ui.confirmCalls.length, 2, 'the push asked for its own confirmation');
-			assert.match(ui.confirmCalls[1]!.message, /Force push main to origin\/main\?/);
+			assert.equal(ui.confirmCalls.length, 1, 'pressing Force Push is the confirmation - no second modal');
+			assert.doesNotMatch(ui.transcript, /Force push main to origin\/main\?/, 'the modal is not asked twice');
 		} finally {
 			other.repo.cleanup();
 		}
@@ -206,7 +208,11 @@ describe('controller - reword flows', () => {
 		try {
 			const before = other.shas.v04;
 			const ui = new FakeUI({ inputs: ['then undone'], asks: [ACTIONS.undo] });
-			await controllerFor(ui, other.repo).rewordCommit(other.repo.dir, [before], 'append');
+			const controller = controllerFor(ui, other.repo);
+			await controller.rewordCommit(other.repo.dir, [before], 'append');
+			// The report is handed over, so the command is done before the
+			// Undo button can be pressed; `settled()` waits for that follow-up.
+			await controller.settled();
 
 			assert.equal(ui.confirmCalls.length, 2, 'reword + undo confirmations');
 			assert.match(ui.confirmCalls[1]!.message, /Undo "Renamed the message of /);
@@ -683,12 +689,14 @@ describe('controller - fast-forward flows', () => {
 			await repo.commit('main moved on too', { 'main.txt': 'm\n' });
 
 			const ui = new FakeUI({ confirms: [true, true], asks: [ACTIONS.forcePush] });
-			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+			const controller = controllerFor(ui, repo);
+			await controller.fastForward(repo.dir, [target], { askBranch: false });
+			await controller.settled();
 
 			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.forcePush), ui.transcript);
 			assert.equal(await repo.remoteBranchSha(remoteDir, 'main'), target);
-			assert.equal(ui.confirmCalls.length, 3, 'move + move anyway + push');
-			assert.match(ui.confirmCalls[2]!.message, /Force push main to origin\/main\?/);
+			assert.equal(ui.confirmCalls.length, 2, 'move + move anyway - the Force Push button already answered the push');
+			assert.doesNotMatch(ui.transcript, /Force push main to origin\/main\?/);
 		} finally {
 			repo.cleanup();
 		}
@@ -799,7 +807,9 @@ describe('controller - force push flows', () => {
 			const localBefore = await repo.sha('main');
 
 			const ui = new FakeUI({ asks: [ACTIONS.undo] });
-			await controllerFor(ui, repo).forcePush(repo.dir, []);
+			const controller = controllerFor(ui, repo);
+			await controller.forcePush(repo.dir, []);
+			await controller.settled();
 
 			assert.equal(ui.confirmCalls.length, 2);
 			assert.match(ui.confirmCalls[1]!.options!.detail!, new RegExp(`origin/main -> ${remoteBefore!.slice(0, 10)}`));
@@ -1555,7 +1565,9 @@ describe('controller - squash flows', () => {
 		const { repo, shas } = await createLinearRepo();
 		try {
 			const ui = new FakeUI({ inputs: ['combined'], asks: [ACTIONS.undo] });
-			await controllerFor(ui, repo).squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+			const controller = controllerFor(ui, repo);
+			await controller.squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+			await controller.settled();
 
 			assert.equal(await repo.branchSha('main'), shas.v04, 'undo restored the original tip');
 			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.3', 'v0.2', 'v0.1']);

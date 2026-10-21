@@ -9,7 +9,7 @@
 import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
-import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type QuickPickChoice, type UI } from './ui';
+import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type AskOptions, type QuickPickChoice, type UI } from './ui';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -175,6 +175,64 @@ export class Controller {
 
 	private get settings(): Settings {
 		return this.options.settings;
+	}
+
+	/**
+	 * Result reports that are still on screen, and the follow-ups they started.
+	 * Every entry is removed once its follow-up is over - a report nobody
+	 * answered stays in the set, which is exactly right: it is not work.
+	 */
+	private readonly pendingReports = new Set<Promise<void>>();
+
+	/**
+	 * Resolves when every result report of this controller has been answered
+	 * and its follow-up has run to completion (including reports a *follow-up*
+	 * started, e.g. the force push a squash offers).
+	 *
+	 * Nobody in production has to call this - the whole point of
+	 * {@link reportResult} is that a command does not wait for its report. It
+	 * is here for the tests: they drive the flows with a scripted UI and need
+	 * to know when the Undo/Force Push that was picked *after* the command
+	 * returned is done. With the real editor that moment is simply "whenever
+	 * the user clicks", so awaiting it there would be the very bug.
+	 */
+	async settled(): Promise<void> {
+		while (this.pendingReports.size > 0) {
+			await Promise.all([...this.pendingReports]);
+		}
+	}
+
+	/**
+	 * **The one way to report a finished operation.**
+	 *
+	 * Work is done, the journal entry is written and the refresh is scheduled,
+	 * so the command has no reason to stay pending - and a pending command is
+	 * exactly what VS Code draws as a progress bar for an action of the Source
+	 * Control Graph (it wraps every action of that view in `withProgress`).
+	 *
+	 * `ui.ask` resolves only when the notification goes away, which never
+	 * happens under Do Not Disturb, while it is hovered, or while the window is
+	 * unfocused; awaiting it is therefore the recurring "endless progress
+	 * bar". This helper hands the report over instead, runs `followUp` when the
+	 * user picks an action, logs (and swallows) a failing follow-up, and
+	 * registers the whole thing on {@link settled}.
+	 *
+	 * A genuine *question* - one whose answer the flow needs before it can go
+	 * on, e.g. "install git-filter-repo now?" - is still awaited directly with
+	 * `await this.ui.ask(...)`.
+	 */
+	private reportResult(
+		headline: string,
+		options: AskOptions,
+		followUp?: (chosen: string | undefined) => Promise<void> | void,
+	): void {
+		const done = followUpWithoutWaiting(
+			this.ui.ask(headline, options),
+			followUp ?? (() => undefined),
+			(error) => this.ui.log(`The follow-up of a result report failed: ${toErrorMessage(error)}`),
+		);
+		this.pendingReports.add(done);
+		void done.then(() => this.pendingReports.delete(done));
 	}
 
 	contextFor(cwd: string): RepoContext {
@@ -355,14 +413,19 @@ export class Controller {
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
-		const chosen = await this.ui.ask(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined });
-		if (chosen === ACTIONS.forcePush) {
-			await this.forcePush(cwd, [], 'lease');
-		} else if (chosen === ACTIONS.forcePushHard) {
-			await this.forcePush(cwd, [], 'force');
-		} else if (chosen === ACTIONS.undo) {
-			await this.undoLast(ctx, true);
-		}
+		// A report, not a question: the rewrite is done and journaled, so the
+		// command ends here (an awaited notification is the "endless progress
+		// bar" - see reportResult). Picking Force Push *is* the confirmation of
+		// the push: the modal asks the same question a second time otherwise.
+		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
+			if (chosen === ACTIONS.forcePush) {
+				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true });
+			} else if (chosen === ACTIONS.forcePushHard) {
+				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true });
+			} else if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
 	}
 
 	// ------------------------------------------------------------- squash
@@ -546,14 +609,18 @@ export class Controller {
 		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${previewSubject(result.message)}"`
 			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
-		const chosen = await this.ui.ask(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined });
-		if (chosen === ACTIONS.forcePush) {
-			await this.forcePush(cwd, [], 'lease');
-		} else if (chosen === ACTIONS.forcePushHard) {
-			await this.forcePush(cwd, [], 'force');
-		} else if (chosen === ACTIONS.undo) {
-			await this.undoLast(ctx, true);
-		}
+		// Report, not question - and the Force Push button the user just
+		// pressed is the answer to "push anyway?", so the flow does not ask it
+		// again in a modal dialog.
+		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
+			if (chosen === ACTIONS.forcePush) {
+				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true });
+			} else if (chosen === ACTIONS.forcePushHard) {
+				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true });
+			} else if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
 	}
 
 	// ------------------------------------------------------------- feature 2
@@ -860,19 +927,22 @@ export class Controller {
 			actions.push(ACTIONS.showBackups);
 		}
 
-		const chosen = await this.ui.ask(
+		this.reportResult(
 			removedBackup
 				? `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}"); the redundant backup "${removedBackup}" was removed - nothing was lost.`
 				: `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}")${result.backup ? `, old tip kept on ${result.backup.name}` : ''}.`,
 			{ actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined },
+			async (chosen) => {
+				if (chosen === ACTIONS.forcePush) {
+					// The button was already answered: no second modal.
+					await this.forcePush(cwd, [], undefined, result.branch, { confirmed: true });
+				} else if (chosen === ACTIONS.undo) {
+					await this.undoLast(ctx, true);
+				} else if (chosen === ACTIONS.showBackups) {
+					await this.showBackups(cwd);
+				}
+			},
 		);
-		if (chosen === ACTIONS.forcePush) {
-			await this.forcePush(cwd, [], undefined, result.branch);
-		} else if (chosen === ACTIONS.undo) {
-			await this.undoLast(ctx, true);
-		} else if (chosen === ACTIONS.showBackups) {
-			await this.showBackups(cwd);
-		}
 	}
 
 	// ------------------------------------------------- feature 4: push / sync
@@ -1156,8 +1226,10 @@ export class Controller {
 
 			case 'force-push': {
 				// The existing flow: --force-with-lease by default, its own
-				// confirmation, its own journal entry (the remote sha before the push).
-				await this.forcePush(cwd, [], 'lease', report.branch);
+				// journal entry (the remote sha before the push). No modal
+				// confirmation: the row the user picked says exactly what the
+				// modal would ask, so asking twice is one dialog too many.
+				await this.forcePush(cwd, [], 'lease', report.branch, { confirmed: true });
 				return true;
 			}
 
@@ -1201,7 +1273,23 @@ export class Controller {
 
 	// ------------------------------------------------------------- feature 3
 
-	async forcePush(cwd: string, args: readonly unknown[], mode?: ForcePushMode, branch?: string): Promise<void> {
+	/**
+	 * "Force Push" - the one flow that overwrites a ref on the server.
+	 *
+	 * `options.confirmed` says the answer to "push anyway?" has already been
+	 * given: it is passed by the `Force Push` button of a result report and by
+	 * the *Force Push (with lease)* entry of the push/sync diagnosis, where the
+	 * user clicked exactly that. Without it the modal confirmation is shown, as
+	 * for any force push started from a menu - two dialogs for one decision is
+	 * what this option removes.
+	 */
+	async forcePush(
+		cwd: string,
+		args: readonly unknown[],
+		mode?: ForcePushMode,
+		branch?: string,
+		options: { confirmed?: boolean } = {},
+	): Promise<void> {
 		await this.guard('Force push', async () => {
 			const ctx = this.contextFor(cwd);
 			await assertStartable(ctx);
@@ -1216,7 +1304,7 @@ export class Controller {
 			const plan = await planForcePush(ctx, { branch: target, mode });
 			const effectiveMode: ForcePushMode = mode ?? this.settings.forcePushMode;
 
-			if (this.settings.confirmDestructiveOperations) {
+			if (this.settings.confirmDestructiveOperations && options.confirmed !== true) {
 				const confirmed = await this.ui.confirm(`Force push ${plan.branch} to ${plan.remote}/${plan.remoteBranch}?`, {
 					confirmLabel: effectiveMode === 'lease' ? 'Force Push (with lease)' : 'Force Push',
 					destructive: true,
@@ -1233,6 +1321,8 @@ export class Controller {
 					this.ui.log('Force push cancelled by the user.');
 					return;
 				}
+			} else if (options.confirmed === true && this.settings.confirmDestructiveOperations) {
+				this.ui.log('Force push: already confirmed by the action that started it - no second dialog.');
 			}
 
 			const result: ForcePushResult = await this.ui.withProgress(`Pushing ${plan.branch}`, (report) => {
@@ -1249,15 +1339,17 @@ export class Controller {
 				].filter(Boolean).join('\n'),
 			);
 
-			const chosen = await this.ui.ask(
+			this.reportResult(
 				result.createdRemoteBranch
 					? `Created ${result.remote}/${result.remoteBranch}.`
 					: `${result.remote}/${result.remoteBranch} now points at ${shorten(result.localSha)} (${result.ahead} ahead, ${result.behind} behind were overwritten).`,
 				{ actions: [ACTIONS.undo] },
+				async (chosen) => {
+					if (chosen === ACTIONS.undo) {
+						await this.undoLast(ctx, true);
+					}
+				},
 			);
-			if (chosen === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
 		});
 	}
 
@@ -1478,17 +1570,19 @@ export class Controller {
 			];
 			this.ui.log(lines.join('\n'));
 
-			const chosen = await this.ui.ask(
+			this.reportResult(
 				found.best
 					? `Proper base for "${materialized.label}": ${shorten(found.best.sha)} (${found.best.label}). ${found.evaluated.length} candidates were probed - see the output log.`
 					: `None of the ${found.evaluated.length} probed commits accepts "${materialized.label}". See the output log.`,
 				{ actions: found.best ? [ACTIONS.applyPatch, ACTIONS.openLog] : [ACTIONS.openLog] },
+				async (chosen) => {
+					if (chosen === ACTIONS.applyPatch) {
+						await this.applyPatchAtProperBase(cwd, args);
+					} else if (chosen === ACTIONS.openLog) {
+						await this.ui.showOutput?.();
+					}
+				},
 			);
-			if (chosen === ACTIONS.applyPatch) {
-				await this.applyPatchAtProperBase(cwd, args);
-			} else if (chosen === ACTIONS.openLog) {
-				await this.ui.showOutput?.();
-			}
 		});
 	}
 
@@ -2007,16 +2101,18 @@ export class Controller {
 				'  then run the commands above, or install the tool and use this command again.',
 			].join('\n'),
 		);
-		const chosen = await this.ui.ask(
+		this.reportResult(
 			`${plan.analysis.deadPaths.length} dead path(s) found, but git-filter-repo is not installed - nothing was rewritten.`,
 			{ detail: plan.commands.script, actions: [ACTIONS.copyCommands, ACTIONS.openLog] },
+			async (chosen) => {
+				if (chosen === ACTIONS.copyCommands) {
+					await this.ui.copy(plan.commands.script);
+					await this.ui.message('info', `Copied ${plan.commands.all.filter((line) => !line.startsWith('#')).length} commands - the dead-path list is at ${plan.pathsFile}.`);
+				} else if (chosen === ACTIONS.openLog) {
+					await this.ui.showOutput?.();
+				}
+			},
 		);
-		if (chosen === ACTIONS.copyCommands) {
-			await this.ui.copy(plan.commands.script);
-			await this.ui.message('info', `Copied ${plan.commands.all.filter((line) => !line.startsWith('#')).length} commands - the dead-path list is at ${plan.pathsFile}.`);
-		} else if (chosen === ACTIONS.openLog) {
-			await this.ui.showOutput?.();
-		}
 	}
 
 	/** Backup bundle -> filter-repo -> remotes -> rescan -> journal -> offer the push. */
@@ -2144,21 +2240,26 @@ export class Controller {
 			? `Cleaned the history: ${analysis.deadPaths.length} dead path(s) removed${analysis.deadBytes ? ` (${formatBytes(analysis.deadBytes)})` : ''}.`
 			: `Cleaned the history: ${analysis.deadPaths.length - keptAlive.length} of ${analysis.deadPaths.length} dead path(s) removed - ${keptAlive.length} remain${keptByRecovery ? ` (${keptByRecovery})` : ''}.`;
 		const actions = facts.remotes.length > 0 ? [ACTIONS.forcePush, ACTIONS.openLog] : [ACTIONS.openLog];
-		const chosen = await this.ui.ask(headline, {
-			detail: [
-				plan.bundleFile ? `Backup bundle: ${plan.bundleFile}` : '',
-				facts.remotes.length > 0
-					? 'The remotes still have the OLD history (and with it the dead files) until every branch and tag is force-pushed.'
-					: '',
-				recoveryNote,
-			].filter(Boolean).join('\n'),
-			actions,
-		});
-		if (chosen === ACTIONS.forcePush) {
-			await this.forcePush(ctx.git.cwd, []);
-		} else if (chosen === ACTIONS.openLog) {
-			await this.ui.showOutput?.();
-		}
+		this.reportResult(
+			headline,
+			{
+				detail: [
+					plan.bundleFile ? `Backup bundle: ${plan.bundleFile}` : '',
+					facts.remotes.length > 0
+						? 'The remotes still have the OLD history (and with it the dead files) until every branch and tag is force-pushed.'
+						: '',
+					recoveryNote,
+				].filter(Boolean).join('\n'),
+				actions,
+			},
+			async (chosen) => {
+				if (chosen === ACTIONS.forcePush) {
+					await this.forcePush(ctx.git.cwd, [], undefined, undefined, { confirmed: true });
+				} else if (chosen === ACTIONS.openLog) {
+					await this.ui.showOutput?.();
+				}
+			},
+		);
 	}
 
 	/** Runs the external rewrite tool; injectable through {@link ControllerOptions}. */
@@ -2219,17 +2320,19 @@ export class Controller {
 				createBranchCore(ctx, { name: trimmed, startPoint: start }),
 			);
 			this.ui.log([`Created branch ${result.name} at ${shorten(result.sha)}`, ...result.notes.map((note) => `  ${note}`)].join('\n'));
-			const chosen = await this.ui.ask(
+			this.reportResult(
 				`Branch "${result.name}" now points at ${shorten(result.sha)}.`,
 				{ actions: [ACTIONS.checkout, ACTIONS.undo], detail: result.notes.join('\n') || undefined },
+				async (chosen) => {
+					if (chosen === ACTIONS.checkout) {
+						// An object, not a bare string: the resolver reads branch names out of
+						// menu arguments, and a plain string would be taken for a commit.
+						await this.checkoutBranch(cwd, [{ branch: result.name }]);
+					} else if (chosen === ACTIONS.undo) {
+						await this.undoLast(ctx, true);
+					}
+				},
 			);
-			if (chosen === ACTIONS.checkout) {
-				// An object, not a bare string: the resolver reads branch names out of
-				// menu arguments, and a plain string would be taken for a commit.
-				await this.checkoutBranch(cwd, [{ branch: result.name }]);
-			} else if (chosen === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
 		});
 	}
 
@@ -2243,10 +2346,11 @@ export class Controller {
 			}
 			const result = await this.ui.withProgress(`Checking out ${branch}`, () => checkoutBranchCore(ctx, branch));
 			this.ui.log(`Checked out ${result.to}${result.from ? ` (was ${result.from})` : ''}`);
-			const chosen = await this.ui.ask(`"${result.to}" is checked out.`, { actions: [ACTIONS.undo] });
-			if (chosen === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
+			this.reportResult(`"${result.to}" is checked out.`, { actions: [ACTIONS.undo] }, async (chosen) => {
+				if (chosen === ACTIONS.undo) {
+					await this.undoLast(ctx, true);
+				}
+			});
 		});
 	}
 
@@ -2338,13 +2442,15 @@ export class Controller {
 					.filter(Boolean)
 					.join('\n'),
 			);
-			const chosen = await this.ui.ask(`"${result.from}" is now called "${result.to}".`, {
-				actions: [ACTIONS.undo],
-				detail: result.notes.join('\n') || undefined,
-			});
-			if (chosen === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
+			this.reportResult(
+				`"${result.from}" is now called "${result.to}".`,
+				{ actions: [ACTIONS.undo], detail: result.notes.join('\n') || undefined },
+				async (chosen) => {
+					if (chosen === ACTIONS.undo) {
+						await this.undoLast(ctx, true);
+					}
+				},
+			);
 		});
 	}
 
@@ -2414,13 +2520,15 @@ export class Controller {
 					.filter(Boolean)
 					.join('\n'),
 			);
-			const chosen = await this.ui.ask(
+			this.reportResult(
 				`Deleted branch "${result.name}"${result.deletedRemoteBranch ? ` and ${result.deletedRemoteBranch}` : ''}.`,
 				{ actions: [ACTIONS.undo], detail: result.notes.join('\n') || undefined },
+				async (chosen) => {
+					if (chosen === ACTIONS.undo) {
+						await this.undoLast(ctx, true);
+					}
+				},
 			);
-			if (chosen === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
 		});
 	}
 
@@ -2585,7 +2693,7 @@ export class Controller {
 				return;
 			}
 
-			const chosenAction = await this.ui.ask(
+			this.reportResult(
 				result.deleted.length === 1
 					? `Removed the redundant branch "${result.deleted[0]!.name}".`
 					: `Removed ${result.deleted.length} redundant branches: ${result.deleted.map((b) => b.name).join(', ')}.`,
@@ -2596,10 +2704,12 @@ export class Controller {
 						...result.skipped.map((entry) => `Kept ${entry.name}: ${entry.reason}`),
 					].join('\n') || undefined,
 				},
+				async (chosenAction) => {
+					if (chosenAction === ACTIONS.undo) {
+						await this.undoLast(ctx, true);
+					}
+				},
 			);
-			if (chosenAction === ACTIONS.undo) {
-				await this.undoLast(ctx, true);
-			}
 		});
 	}
 
@@ -2752,17 +2862,19 @@ export class Controller {
 				].filter((line) => line !== '').join('\n'),
 			);
 
-			const chosen = await this.ui.ask(
+			this.reportResult(
 				points.length === 0 && journal.length === 0
 					? 'No recovery points yet - they are created automatically before a rewrite or a branch move.'
 					: `${points.length} recovery point(s) and ${journal.length} journaled operation(s) - listed in the output log.`,
 				{ actions: journal.length > 0 ? [ACTIONS.undo, ACTIONS.openLog] : [ACTIONS.openLog] },
+				async (chosen) => {
+					if (chosen === ACTIONS.undo) {
+						await this.undoLastOperation(cwd);
+					} else if (chosen === ACTIONS.openLog) {
+						await this.ui.showOutput?.();
+					}
+				},
 			);
-			if (chosen === ACTIONS.undo) {
-				await this.undoLastOperation(cwd);
-			} else if (chosen === ACTIONS.openLog) {
-				await this.ui.showOutput?.();
-			}
 		});
 	}
 
@@ -2882,13 +2994,15 @@ export class Controller {
 			if (!build.hasProposals) {
 				// Half one is a build problem: the manifest has to declare the
 				// proposal and contribute the menus.
-				const chosen = await this.ui.ask(
+				this.reportResult(
 					'The installed build cannot show the graph commit menu: it does not declare the proposed API. Install the graph build with "npm run package:graph".',
 					{ detail: status.steps.join('\n'), actions: [ACTIONS.openLog] },
+					async (chosen) => {
+						if (chosen === ACTIONS.openLog) {
+							await this.ui.showOutput?.();
+						}
+					},
 				);
-				if (chosen === ACTIONS.openLog) {
-					await this.ui.showOutput?.();
-				}
 				return;
 			}
 
@@ -2939,12 +3053,15 @@ export class Controller {
 
 			status = assessGraphMenu(build, await argv.read(), product ? await product.read() : undefined);
 			if (status.ready) {
-				const chosen = await this.ui.ask('Graph commit menu enabled. Restart VS Code, then right-click a commit in Source Control > Graph.', {
-					actions: [ACTIONS.openLog],
-				});
-				if (chosen === ACTIONS.openLog) {
-					await this.ui.showOutput?.();
-				}
+				this.reportResult(
+					'Graph commit menu enabled. Restart VS Code, then right-click a commit in Source Control > Graph.',
+					{ actions: [ACTIONS.openLog] },
+					async (chosen) => {
+						if (chosen === ACTIONS.openLog) {
+							await this.ui.showOutput?.();
+						}
+					},
+				);
 				return;
 			}
 

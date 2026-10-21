@@ -66,7 +66,9 @@ describe('controller - remove redundant branches flow', () => {
 		const { repo, shas } = await repoWithLeftover();
 		try {
 			const ui = new FakeUI({ asks: ACTIONS.undo });
-			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+			const controller = controllerFor(ui, repo);
+			await controller.removeRedundantBranches(repo.dir);
+			await controller.settled();
 
 			assert.equal(await repo.branchSha('old'), shas.v02, 'Undo restored the branch at its old tip');
 			assert.deepEqual(await repo.ctx.safety.readJournal(), [], 'the journal entry is consumed');
@@ -217,9 +219,12 @@ describe('controller - remove redundant branches flow, remote branches', () => {
 	it('pushes the remote branch back when the user picks Undo', async () => {
 		const { repo, remoteDir, fixSha } = await repoWithMergedRemoteBranch();
 		try {
-			// `asks: ACTIONS.undo` means the Undo runs before the flow returns.
+			// The report is handed over without waiting, so the Undo it offers
+			// runs after the command returned - `settled()` waits for it.
 			const ui = new FakeUI({ picks: ['Remove them locally and on the remote'], asks: ACTIONS.undo });
-			await controllerFor(ui, repo).removeRedundantBranches(repo.dir);
+			const controller = controllerFor(ui, repo);
+			await controller.removeRedundantBranches(repo.dir);
+			await controller.settled();
 
 			assert.equal(await repo.remoteBranchSha(remoteDir, 'fix/x'), fixSha, 'Undo pushed the branch back');
 			assert.equal(await repo.hasRef('refs/remotes/origin/fix/x'), true, 'the tracking ref is back too');
@@ -268,8 +273,9 @@ describe('controller - the view is refreshed when the graph changes', () => {
 			// "Undo" is chosen in the notification - the part that used to run
 			// after the command had already returned and left a stale view.
 			const ui = new FakeUI({ inputs: ['one commit'], asks: ACTIONS.undo });
-			await controllerFor(ui, repo, DEFAULT_SETTINGS, () => events.push(events.length))
-				.squashSelectedCommits(repo.dir, [shas.v03, shas.v04]);
+			const controller = controllerFor(ui, repo, DEFAULT_SETTINGS, () => events.push(events.length));
+			await controller.squashSelectedCommits(repo.dir, [shas.v03, shas.v04]);
+			await controller.settled();
 
 			assert.equal(await repo.sha('main'), shas.v04, 'the undo restored the original tip');
 			assert.ok(events.length >= 2, `squash and undo both refresh the view, got ${events.length}`);

@@ -115,6 +115,50 @@ describe('followUpWithoutWaiting', () => {
 		assert.deepEqual(handled, ['Undo'], 'the follow-up runs when the button is eventually clicked');
 	});
 
+	it('returns a promise for the follow-up itself, and never rejects', async () => {
+		// The controller tracks these to know when the work that outlived a
+		// command is over (its `settled()`); nothing may await it otherwise.
+		let answer: (chosen: string | undefined) => void = () => undefined;
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const handled: (string | undefined)[] = [];
+		const done = followUpWithoutWaiting(
+			new Promise<string | undefined>((resolve) => {
+				answer = resolve;
+			}),
+			async (chosen) => {
+				handled.push(chosen);
+				await gate;
+			},
+		);
+		let settled = false;
+		void done.then(() => {
+			settled = true;
+		});
+		await tick();
+		assert.equal(settled, false, 'it only settles once the answer arrived');
+
+		answer('Undo');
+		await tick();
+		assert.deepEqual(handled, ['Undo'], 'the follow-up started');
+		assert.equal(settled, false, 'and it is still running');
+
+		release();
+		await tick();
+		assert.equal(settled, true, 'it settles when the follow-up is over');
+	});
+
+	it('resolves (instead of rejecting) when the follow-up or the notification fails', async () => {
+		const failed = await followUpWithoutWaiting(Promise.reject(new Error('no toast')), () => undefined, () => undefined);
+		assert.equal(failed, undefined);
+		const threw = await followUpWithoutWaiting('Undo', () => {
+			throw new Error('the undo blew up');
+		}, () => undefined);
+		assert.equal(threw, undefined);
+	});
+
 	it('reports a failing follow-up instead of leaking an unhandled rejection', async () => {
 		const errors: unknown[] = [];
 		followUpWithoutWaiting(

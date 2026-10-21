@@ -4,6 +4,52 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.19
+
+### Fixed
+
+- **No operation waits for its own result report any more - the endless
+  progress bar is gone from every flow.** An operation handed its result to
+  VS Code and then *awaited* the notification. VS Code resolves that promise
+  only when the notification goes away - 10 s for an info toast, and never
+  under Do Not Disturb, while the mouse hovers it, or while the window is
+  unfocused - so the command stayed pending, and an action started from the
+  built-in **Source Control Graph** runs under a progress indicator that lasts
+  exactly as long as the command's promise. That is the spinner that kept
+  turning after a reword, a squash, a fast-forward, a force push, a branch
+  rename / delete / checkout, a fast-forward cleanup, a redundant-branch
+  removal, Show Backups, Find Proper Base or the graph-menu setup was long
+  done. Every one of them now hands the report over without waiting (one
+  helper, `Controller.reportResult`, which is also the only way to do it - a
+  comment in `AGENTS.md` says so), and the *Undo* / *Force Push* / *Open
+  Worktree* buttons still run their follow-up when they are clicked later.
+  This is the same bug class as 0.4.10 (plain messages) and 0.4.16 (the patch
+  report), which had only been fixed where it was reported. A genuine question
+  - whose answer the flow needs before it can go on, e.g. "install
+  git-filter-repo now?" - is still awaited, as it must be.
+- **Force Push is confirmed once, not twice.** After a squash, a fast-forward,
+  a rewrite, a Clean History or a push/sync repair the result report offers
+  **Force Push**; pressing it *is* the answer to "overwrite the remote?", and
+  the flow then opened the modal dialog asking the very same question again.
+  The already-given answer is now passed through
+  (`forcePush(..., { confirmed: true })`), so the button does the push. A
+  force push started from a menu or the Command Palette still asks for its
+  modal confirmation - that one is the first and only gate.
+
+### Tests
+
+- New `endlessProgress.test.ts` stands in for the notification that is never
+  dismissed (what the real adapter does under Do Not Disturb) and requires
+  Rename Commit Message, Squash, Fast-Forward, Force Push, Remove Redundant
+  Branches, Create / Check Out / Rename / Delete Branch and Show Backups to
+  finish anyway; the same file pins that the report's Force Push button does
+  not ask again (reword, squash, fast-forward, push/sync repair) while a
+  force push from a menu still asks, and that a follow-up that fails is
+  logged instead of becoming an unhandled rejection.
+- `followUpWithoutWaiting` now returns a promise for the follow-up itself
+  (it never rejects), which is what lets the controller - and the tests that
+  drive it - know when the work that outlived a command is over.
+
 ## 0.4.18
 
 ### Changed

@@ -60,7 +60,9 @@ describe('controller - create branch flow', () => {
 		const { repo, shas } = await linear();
 		const ui = new FakeUI({ inputs: [], asks: [ACTIONS.checkout] });
 
-		await controllerFor(ui, repo).createBranch(repo.dir, graphCommit(repo, shas.v02, 'v0.2'));
+		const controller = controllerFor(ui, repo);
+		await controller.createBranch(repo.dir, graphCommit(repo, shas.v02, 'v0.2'));
+		await controller.settled();
 
 		assert.equal(ui.inputCalls.length, 1);
 		assert.match(ui.inputCalls[0]!.prompt, /New branch at [0-9a-f]{7} - "v0\.2"/);
@@ -137,7 +139,9 @@ describe('controller - create branch flow', () => {
 		const { repo } = await linear();
 		const ui = new FakeUI({ inputs: ['scratch'], asks: [ACTIONS.undo], confirms: [true] });
 
-		await controllerFor(ui, repo).createBranch(repo.dir, []);
+		const controller = controllerFor(ui, repo);
+		await controller.createBranch(repo.dir, []);
+		await controller.settled();
 
 		assert.equal(await repo.hasBranch('scratch'), false);
 		assert.equal(await repo.api.headBranch(), 'main');
@@ -211,7 +215,9 @@ describe('controller - rename branch flow', () => {
 		const topicSha = await withPushedTopic(repo, shas);
 		const ui = new FakeUI({ inputs: ['feature/topic'], picks: [1], confirms: [true, true], asks: [ACTIONS.undo] });
 
-		await controllerFor(ui, repo).renameBranch(repo.dir, graphRef(repo, 'topic'));
+		const controller = controllerFor(ui, repo);
+		await controller.renameBranch(repo.dir, graphRef(repo, 'topic'));
+		await controller.settled();
 
 		assert.equal(await repo.branchSha('topic'), topicSha, 'the old local name is back');
 		assert.equal(await repo.hasBranch('feature/topic'), false);
@@ -291,7 +297,9 @@ describe('controller - rename branch flow', () => {
 		const mainSha = await repo.sha('main');
 		const ui = new FakeUI({ inputs: ['other'], confirms: [true, true], asks: [ACTIONS.undo] });
 
-		await controllerFor(ui, repo).renameBranch(repo.dir, graphRef(repo, 'main'));
+		const controller = controllerFor(ui, repo);
+		await controller.renameBranch(repo.dir, graphRef(repo, 'main'));
+		await controller.settled();
 
 		assert.equal(await repo.branchSha('main'), mainSha, 'the renamed branch is back');
 		assert.equal(await repo.branchSha('other'), shas.v01, 'the overwritten branch points where it did');
@@ -334,7 +342,9 @@ describe('controller - delete branch flow', () => {
 		await repo.gitOk(['branch', 'stale', shas.v02]);
 		const ui = new FakeUI({ confirms: [true, true], asks: [ACTIONS.undo] });
 
-		await controllerFor(ui, repo).deleteBranch(repo.dir, graphRef(repo, 'stale'));
+		const controller = controllerFor(ui, repo);
+		await controller.deleteBranch(repo.dir, graphRef(repo, 'stale'));
+		await controller.settled();
 
 		assert.equal(await repo.branchSha('stale'), shas.v02);
 	});
@@ -345,7 +355,9 @@ describe('controller - delete branch flow', () => {
 		await repo.gitOk(['push', '--quiet', '-u', 'origin', 'stale:stale']);
 		const ui = new FakeUI({ picks: [1], confirms: [true, true], asks: [ACTIONS.undo] });
 
-		await controllerFor(ui, repo).deleteBranch(repo.dir, graphRef(repo, 'stale'));
+		const controller = controllerFor(ui, repo);
+		await controller.deleteBranch(repo.dir, graphRef(repo, 'stale'));
+		await controller.settled();
 
 		assert.equal(ui.pickCalls[0]!.options!.placeholder, 'stale tracks origin/stale');
 		assert.equal(ui.pickCalls[0]!.items[1]!.label, 'Delete the local and the remote branch');
@@ -386,7 +398,9 @@ describe('controller - delete branch flow', () => {
 		assert.equal(refused.messages.at(-1)!.message, '"wip" was kept.');
 
 		const insisted = new FakeUI({ confirms: [true, true], asks: [ACTIONS.undo] });
-		await controllerFor(insisted, repo).deleteBranch(repo.dir, graphRef(repo, 'wip'));
+		const insistedController = controllerFor(insisted, repo);
+		await insistedController.deleteBranch(repo.dir, graphRef(repo, 'wip'));
+		await insistedController.settled();
 		assert.equal(insisted.confirmCalls[1]!.options!.confirmLabel, 'Delete Anyway');
 		assert.equal(insisted.askCalls[0]!.message, 'Deleted branch "wip".', 'the forced delete happened');
 		assert.equal(insisted.progressTitles.filter((t) => t === 'Deleting wip').length, 2, 'tried once, then with force');
@@ -477,7 +491,9 @@ describe('controller - check out branch flow', () => {
 		await repo.gitOk(['branch', 'other', shas.v02]);
 		const ui = new FakeUI({ asks: [ACTIONS.undo], confirms: [true] });
 
-		await controllerFor(ui, repo).checkoutBranch(repo.dir, graphRef(repo, 'other'));
+		const controller = controllerFor(ui, repo);
+		await controller.checkoutBranch(repo.dir, graphRef(repo, 'other'));
+		await controller.settled();
 
 		assert.equal(await repo.api.headBranch(), 'main');
 		assert.equal(await repo.sha('HEAD'), shas.v04);

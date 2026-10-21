@@ -5,10 +5,10 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.18.vsix
+code --install-extension dist/git-easy-context-operations-0.4.19.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.19+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) For the `+graph` build,
@@ -189,7 +189,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.18+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.19+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -283,12 +283,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.18.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.18.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.19.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.19.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.18+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.19+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.19+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -300,7 +300,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.18.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.19.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing (and
