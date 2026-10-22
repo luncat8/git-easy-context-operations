@@ -4,6 +4,57 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.20
+
+### Fixed
+
+- **The `+graph` build now installs as `0.4.20+graph`, so VS Code actually
+  asks for the reload that makes it run.** Installing
+  `git-easy-context-operations-0.4.19+graph.vsix` over
+  `git-easy-context-operations-0.4.19.vsix` (or the other way round) replaced
+  the extension on disk but showed only *"Completed installing extension."* -
+  no *Reload Now* / *Restart Extensions* - and the previously loaded build kept
+  running, so the Source Control Graph menus never appeared and the install
+  looked like a no-op. The build now stamps the graph manifest with
+  `"version": "<version>+graph"`; the `.vsix` file name is unchanged.
+  Anyone still on the 0.4.19 pair has to reload once by hand
+  (*Developer: Reload Window*) to get out of the old state.
+
+  Why the version was the problem: VS Code decides whether an install needs a
+  reload by comparing version **strings** - `getRuntimeState()` in
+  `src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts`
+  returns the reload state only when
+  `extension.version !== runningExtension.version` (or the target platform
+  differs), and the *Install from VSIX...* command turns exactly that state
+  into its *Reload Now* / *Restart Extensions* notification
+  (`extensions.contribution.ts`). A VSIX install of the *same* version still
+  deletes and re-extracts the extension folder
+  (`InstallExtensionInProfileTask.doRun` in
+  `src/vs/platform/extensionManagement/node/extensionManagementService.ts`),
+  so the files on disk were new, the running extension host was old, and
+  nothing told the user. That is a VS Code behaviour worth reporting upstream
+  (the same-version case can only be detected by the install, not by the
+  version comparison); the analysis and a ready issue text are in
+  `docs/vscode-same-version-vsix.md`.
+
+  Why build metadata and not another suffix: VS Code validates the manifest
+  version with semver, so four-part versions (`0.4.20.1`,
+  `0.4.20.1-graph`) are rejected outright; a prerelease (`0.4.20-graph`)
+  sorts *below* `0.4.20` and makes the Extensions view offer an "update" back
+  to the publishable build; `0.4.20+graph` is semver-equal to `0.4.20` (no
+  update nag) while still being a different string (which triggers the
+  reload prompt). The Extensions view shows the graph build as
+  `0.4.20+graph`.
+
+### Build
+
+- `scripts/graph-version.mjs` centralises the version mapping and
+  `scripts/check-graph-version.mjs` pins it in `npm test` (so CI fails if the
+  two builds would ever share a version again); `npm run package:graph` refuses
+  to package a manifest whose version does not match `<version>+graph`, and
+  `build.py` restores and rejects a leftover graph version the same way it
+  already did for `enabledApiProposals`.
+
 ## 0.4.19
 
 ### Fixed

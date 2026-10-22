@@ -7,3 +7,7 @@ out/
 # dist/ (both the JS bundle and the built .vsix files) is tracked on purpose:
 # the Source Control Graph menu only exists in the +graph build, so the artifact
 # ships with the repository (see README -> Install).
+
+# Python bytecode (build.py)
+__pycache__/
+*.pyc

@@ -13,11 +13,17 @@
  *   node scripts/apply-graph-menu.mjs off     # back to a publishable manifest
  *   node scripts/apply-graph-menu.mjs status
  *
+ * "On" also stamps the graph build version (`0.4.20` -> `0.4.20+graph`, see
+ * `graph-version.mjs`): with the same version string as the publishable build,
+ * VS Code replaces the extension on disk but never asks for the reload that
+ * makes the new build run - the graph menus just never appear.
+ *
  * The script is idempotent and keeps the rest of package.json untouched.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fromGraphVersion, isGraphVersion, toGraphVersion } from './graph-version.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = path.join(ROOT, 'package.json');
@@ -153,21 +159,25 @@ function isEnabled(manifest) {
 
 function turnOn() {
 	const manifest = read();
+	manifest.version = toGraphVersion(manifest.version);
 	manifest.enabledApiProposals = [...new Set([...(manifest.enabledApiProposals ?? []), ...PROPOSALS])];
 	manifest.contributes.menus = { ...manifest.contributes.menus, ...structuredClone(GRAPH_MENUS) };
 	write(manifest);
-	console.log(`Graph menu enabled in ${path.relative(ROOT, MANIFEST)}.`);
+	console.log(`Graph menu enabled in ${path.relative(ROOT, MANIFEST)} (version ${manifest.version}).`);
 	console.log('Build and install the graph build, then allow the proposal - no command line needed:');
-	console.log('  npm run package');
+	console.log(`  npm run package:graph          # -> dist/${manifest.name}-${manifest.version}.vsix`);
 	console.log(`  code --install-extension dist/${manifest.name}-${manifest.version}.vsix`);
 	console.log('  - or, without touching any command line, inside the editor run');
 	console.log('    "Git Easy Ops: Enable Source Control Graph Menu..." and pick product.json.');
+	console.log('Accept the "Restart Extensions" / "Reload Window" prompt after installing:');
+	console.log('only the different version string makes VS Code offer it.');
 	console.log('Run "npm run graph-menu:off" before publishing - VS Code rejects a');
 	console.log('published manifest that asks for proposed APIs.');
 }
 
 function turnOff() {
 	const manifest = read();
+	manifest.version = fromGraphVersion(manifest.version);
 	if (Array.isArray(manifest.enabledApiProposals)) {
 		const remaining = manifest.enabledApiProposals.filter((p) => !PROPOSALS.includes(p));
 		if (remaining.length === 0) {
@@ -186,7 +196,11 @@ function turnOff() {
 function status() {
 	const manifest = read();
 	const enabled = isEnabled(manifest);
+	const publishableVersion = fromGraphVersion(manifest.version);
 	console.log(`Source Control Graph menu: ${enabled ? 'ON' : 'OFF'}`);
+	console.log(`  version: ${manifest.version}${isGraphVersion(manifest.version)
+		? ' (graph build)'
+		: ` (publishable; the graph build would be ${toGraphVersion(publishableVersion)})`}`);
 	console.log(`  enabledApiProposals: ${JSON.stringify(manifest.enabledApiProposals ?? [])}`);
 	console.log(`  proposed menu keys: ${Object.keys(GRAPH_MENUS).filter((k) => manifest.contributes?.menus?.[k]).join(', ') || '(none)'}`);
 	console.log('  Allow the proposal for the extension id in either of these:');

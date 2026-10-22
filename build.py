@@ -16,6 +16,11 @@ Two artifacts land in `dist/`:
     <name>-<version>.vsix          publishable (Marketplace / Open VSX)
     <name>-<version>+graph.vsix    the same extension plus the Source Control
                                    Graph menus (proposed API, install by hand)
+
+The graph build also declares `"version": "<version>+graph"`. VS Code only
+asks for the reload that makes an installed build run when the version string
+changes, so reusing the publishable version made the graph menus silently
+never appear after installing one build over the other.
 """
 
 from __future__ import annotations
@@ -240,13 +245,22 @@ def apply_graph_menu(state: str) -> None:
 
 def assert_publishable_manifest() -> None:
     """A manifest that asks for proposed APIs cannot be published - never leave
-    one behind, even when a build crashed halfway through."""
+    one behind, even when a build crashed halfway through. The same goes for
+    the graph version (`<version>+graph`): publishing that would look like a
+    new release that is semver-equal to the real one."""
+    data = manifest()
+    if data.get("enabledApiProposals") or "+" in str(data.get("version", "")):
+        warn("package.json still carries the graph build - restoring the publishable manifest")
+        apply_graph_menu("off")
     data = manifest()
     if data.get("enabledApiProposals"):
-        warn("package.json still asks for proposed APIs - restoring the publishable manifest")
-        apply_graph_menu("off")
-    if manifest().get("enabledApiProposals"):
         die("package.json still declares enabledApiProposals - run: node scripts/apply-graph-menu.mjs off")
+    if "+" in str(data.get("version", "")):
+        die(
+            f"package.json still carries the graph version {data['version']} - "
+            "run: node scripts/apply-graph-menu.mjs off",
+            "If the version was edited by hand, restore it from git: git checkout -- package.json",
+        )
 
 
 def build_vsix(script: str, label: str) -> Path | None:

@@ -19,9 +19,11 @@ npm install
 npm run package:graph
 ```
 
-This installs the graph flavor in `package.json` temporarily, bundles with esbuild,
-runs `vsce`, and restores the manifest. Result:
-`dist/git-easy-context-operations-<version>+graph.vsix`
+This installs the graph flavor in `package.json` temporarily (menus *and* the
+`<version>+graph` version string - see the version rules below), bundles with
+esbuild, runs `vsce`, and restores the manifest. Result:
+`dist/git-easy-context-operations-<version>+graph.vsix`, which VS Code shows as
+`<version>+graph`.
 
 Install in VS Code:
 ```bash
@@ -43,6 +45,28 @@ npm run package
   - **Purpose**: This ensures the user can inspect the version number in VS Code's Extensions view to verify whether the newly built extension is actually installed or if an older build is still cached/active.
 - **VSIX Output Location**:
   - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/...vsix`).
+- **The graph build must carry its own version string** (`0.4.20+graph`):
+  - `node scripts/apply-graph-menu.mjs on` stamps it and `off` restores it; the
+    mapping lives in `scripts/graph-version.mjs`, the artifact keeps its name
+    (`dist/<name>-<version>+graph.vsix`).
+  - **Never let the publishable build and the graph build of one release share
+    a version.** VS Code decides whether an install needs a reload by comparing
+    version *strings* (`getRuntimeState()` in
+    `src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts`:
+    `extension.version !== runningExtension.version`), and the *Install from
+    VSIX...* notification is derived from that state. With the same version the
+    install replaces the extension folder but VS Code shows only "Completed
+    installing extension." - no reload button - and the old build keeps
+    running. That was the 0.4.19 report: graph menus never appeared until a
+    manual reload.
+  - Do not "fix" this with `0.4.20.1` / `0.4.20.1-graph` (four segments are not
+    semver - VS Code rejects the manifest) or `0.4.20-graph` (a prerelease
+    sorts *below* `0.4.20`, so the Extensions view offers to "update" back to
+    the build without graph menus). `+graph` is semver-equal (`semver.eq`) but
+    a different string, which is exactly what the reload check looks at.
+  - `build.py` refuses to leave a `+graph` version (or `enabledApiProposals`)
+    in `package.json`, so a crashed build cannot produce a publishable
+    manifest that looks like a graph one.
 
 ## The UI rules that keep regressing
 

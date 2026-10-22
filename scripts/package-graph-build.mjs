@@ -10,11 +10,17 @@
  * manifests that declare `enabledApiProposals`, so this flavour is built
  * separately and installed by hand. The script patches package.json, builds,
  * packages and always restores package.json afterwards.
+ *
+ * The graph build also carries its own version - `<version>+graph`, e.g.
+ * `0.4.20+graph` (see `graph-version.mjs`). Without a different version string
+ * VS Code replaces the extension files but never offers the reload that makes
+ * the new build run, so the graph menus silently never appear.
  */
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fromGraphVersion, toGraphVersion } from './graph-version.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = path.join(ROOT, 'package.json');
@@ -25,7 +31,9 @@ const cli = process.argv.find((arg) => arg.startsWith('--cli='))?.slice('--cli='
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const extensionId = `${manifest.publisher}.${manifest.name}`;
-const outFile = path.join(ROOT, 'dist', `${manifest.name}-${manifest.version}+graph.vsix`);
+const publishableVersion = fromGraphVersion(manifest.version);
+const graphVersion = toGraphVersion(publishableVersion);
+const outFile = path.join(ROOT, 'dist', `${manifest.name}-${graphVersion}.vsix`);
 
 function run(command, args, label) {
 	console.log(`\n== ${label}`);
@@ -39,6 +47,15 @@ let patched = false;
 try {
 	run(process.execPath, [PATCHER, 'on'], 'Enable the Source Control Graph menus in package.json');
 	patched = true;
+
+	// The patcher stamps the graph version; refuse to package a manifest that
+	// would install as "the same version" - that is the bug this build avoids.
+	const patchedManifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+	if (patchedManifest.version !== graphVersion) {
+		throw new Error(`package.json version is ${patchedManifest.version}, expected ${graphVersion}`);
+	}
+	console.log(`\n== Version\n   graph build ${graphVersion} (publishable build: ${publishableVersion})`);
+
 	run(process.execPath, [path.join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit'], 'Type-check');
 	run(process.execPath, [path.join(ROOT, 'esbuild.js'), '--production'], 'Bundle');
 	run(process.execPath, [
@@ -103,5 +120,5 @@ Without the grant, "Git Easy Ops" in the Source Control sidebar always works -
 its Graph group shows the same commits, refs and operations.
 
 To go back to the publishable build:
-     ${cli} --install-extension dist/${manifest.name}-${manifest.version}.vsix
+     ${cli} --install-extension dist/${manifest.name}-${publishableVersion}.vsix
 `);
