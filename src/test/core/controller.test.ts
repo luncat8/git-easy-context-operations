@@ -411,10 +411,10 @@ describe('controller - fast-forward flows', () => {
 			assert.match(ui.chooseCalls[0]!.message, /Move main to [0-9a-f]{7}\?/);
 			assert.deepEqual(
 				ui.chooseCalls[0]!.options.choices.map((choice) => choice.label),
-				['Cancel', 'Move and clean up redundant branches…', 'Move', 'Move and remove "old"'],
-				'Cancel | clean up redundant branches | Move | remove redundant backup',
+				['Move and clean up redundant branches…', 'Move', 'Move and remove "old"', 'Cancel'],
+				'clean up redundant branches | Move | remove redundant backup | Cancel',
 			);
-			assert.equal(ui.chooseCalls[0]!.options.choices[1]!.primary, true, 'the cleanup flow is the default action');
+			assert.equal(ui.chooseCalls[0]!.options.choices[0]!.primary, true, 'the cleanup flow is the default action');
 			assert.match(ui.chooseCalls[0]!.options.detail!, /Fast-forward: 1 commit is added, nothing is lost\./);
 			assert.match(ui.chooseCalls[0]!.options.detail!, /kept on branch "old"/);
 			assert.match(ui.askCalls[0]!.message, /main now points at/);
@@ -630,7 +630,7 @@ describe('controller - fast-forward flows', () => {
 			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
 
 			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
-			assert.equal(ui.chooseCalls[0]!.options.choices[3]!.label, 'Move and remove "old-2"');
+			assert.equal(ui.chooseCalls[0]!.options.choices[2]!.label, 'Move and remove "old-2"');
 			assert.equal(await repo.hasBranch('old-2'), false, 'the newly created backup was removed');
 			assert.equal(await repo.sha('old'), shas.v03, 'the pre-existing branch is untouched');
 			assert.equal(await repo.sha('main'), target);
@@ -1111,6 +1111,25 @@ describe('controller - apply patch automatically', () => {
 		} finally {
 			source.repo.cleanup();
 			target.repo.cleanup();
+		}
+	});
+
+	it('reports an explicitly selected already-applied patch as information without changing refs', async () => {
+		const { repo, sideSha } = await withSideBranch();
+		try {
+			const patchPath = `${repo.root}/already.patch`;
+			fs.writeFileSync(patchPath, await repo.gitOk(['format-patch', '-1', '--stdout', sideSha]), 'utf8');
+			const before = await repo.sha('HEAD');
+			const ui = new FakeUI({ files: [patchPath] });
+			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec }).applyPatchAutomatically(repo.dir);
+			assert.equal(ui.messages.length, 1);
+			assert.equal(ui.messages[0]!.kind, 'info');
+			assert.match(ui.messages[0]!.message, /already applied/);
+			assert.doesNotMatch(ui.allLogs(), /failed:/);
+			assert.equal(await repo.sha('HEAD'), before);
+			assert.equal(await repo.hasBranch('geco/side-change'), false);
+		} finally {
+			repo.cleanup();
 		}
 	});
 

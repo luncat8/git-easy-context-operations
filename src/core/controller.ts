@@ -711,10 +711,10 @@ export class Controller {
 							`The cleanup option checks out ${branch} if the worktree is clean, then lets you review redundant branch names. Remote deletion and a normal push are separately confirmed.`,
 						].join('\n'),
 						choices: [
-							{ label: 'Cancel', value: 'cancel' },
 							{ label: 'Move and clean up redundant branches…', value: 'move-clean', primary: true },
 							{ label: 'Move', value: 'move' },
 							{ label: `Move and remove "${actualBackupName}"`, value: 'move-remove' },
+							{ label: 'Cancel', value: 'cancel' },
 						],
 					});
 					if (choice === undefined || choice === 'cancel') {
@@ -3202,6 +3202,11 @@ export class Controller {
 		} catch (error) {
 			if (isGecoError(error) && error.code === 'cancelled') {
 				this.ui.log(`${label}: cancelled.`);
+				return;
+			}
+			if (isGecoError(error) && error.code === 'already-applied') {
+				this.ui.log(`${label}: ${error.userMessage}`);
+				await this.ui.message('info', `${label}: ${error.message}`, error.detail);
 				return;
 			}
 			const message = toErrorMessage(error);

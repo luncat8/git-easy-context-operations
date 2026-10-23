@@ -74,7 +74,7 @@ The built-in **Source Control Graph** needs a proposed VS Code API
 (`contribSourceControlHistoryItemMenu`), which a published extension cannot
 declare - so the repository ships a second build for it. *Install* from -graph.vsix to enable it.
 That build reports itself as `<version>+graph` in the Extensions view (e.g.
-`0.4.20+graph`); the distinct version is what makes VS Code offer the
+`0.4.21+graph`); the distinct version is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build - accept it, otherwise the previous build keeps running.
 

@@ -4,6 +4,17 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.21
+
+### Fixed
+
+- An explicitly selected patch already present in the repository is reported as information, not a failed operation. Remembered-patch fallback behavior is unchanged.
+- Confirmation dialogs supply the affirmative action first and an explicit Cancel close affordance last (including custom cancel labels). Multi-action dialogs put the primary action first, so Enter selects it; Escape/window close cancels. Native platform layout remains controlled by VS Code.
+
+### Planning
+
+- Added `docs/next-actions-and-saved-decisions.md`: opt-in saved decisions, including repeatable destructive approvals, with a complete action-state settings view and reset controls. Persistence is not implemented in this release. Additional Git-action ideas are deferred in `docs/deferred-context-actions.md`.
+
 ## 0.4.20
 
 ### Fixed

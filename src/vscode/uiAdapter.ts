@@ -69,22 +69,26 @@ export class VsCodeUI implements UI {
 		const confirmLabel = options?.confirmLabel ?? 'OK';
 		// A modal warning dialog is the only place VS Code lets an extension
 		// stop the user before something irreversible happens.
-		const chosen = await vscode.window.showWarningMessage(message, { modal: true, detail: options?.detail }, confirmLabel);
-		return chosen === confirmLabel;
+		const accept: vscode.MessageItem = { title: confirmLabel };
+		const cancel: vscode.MessageItem = { title: options?.cancelLabel ?? 'Cancel', isCloseAffordance: true };
+		const chosen = await vscode.window.showWarningMessage(message, { modal: true, detail: options?.detail }, accept, cancel);
+		return chosen === accept;
 	}
 
-	/**
-	 * A modal dialog with several buttons - the shape the fast-forward flow
-	 * wants: cancel, clean up redundant refs, move only, or remove the old backup.
-	 * Dismissing the dialog (Esc) resolves to `undefined`.
-	 */
+	/** Affirmative actions first; the close affordance stays last and Esc cancels. */
 	async choose(message: string, options: ChooseOptions): Promise<string | undefined> {
-		const picked = await vscode.window.showWarningMessage(
+		// Put the declared primary action first so Enter uses it. VS Code owns
+		// native platform layout; isCloseAffordance prevents an extra Cancel.
+		const actions = options.choices.filter((choice) => choice.value !== 'cancel');
+		const ordered = [...actions.filter((choice) => choice.primary), ...actions.filter((choice) => !choice.primary)];
+		const buttons = ordered.map((choice) => ({ title: choice.label, value: choice.value }));
+		const cancel = { title: options.choices.find((choice) => choice.value === 'cancel')?.label ?? 'Cancel', isCloseAffordance: true };
+		const picked = await vscode.window.showWarningMessage<vscode.MessageItem>(
 			message,
 			{ modal: true, detail: options.detail },
-			...options.choices.map((choice) => choice.label),
+			...buttons, cancel,
 		);
-		return options.choices.find((choice) => choice.label === picked)?.value;
+		return buttons.find((button) => button === picked)?.value;
 	}
 
 	async ask(message: string, options: AskOptions): Promise<string | undefined> {
