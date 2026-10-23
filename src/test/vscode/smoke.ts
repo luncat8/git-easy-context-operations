@@ -46,6 +46,10 @@ const EXPECTED_COMMANDS = [
 	'geco.explainMenus',
 	'geco.enableGraphMenu',
 	'geco.customizeMenus',
+	'geco.manageDialogDecisions',
+	'geco.dialogDecisionsClearAll',
+	'geco.dialogDecisionToggle',
+	'geco.dialogDecisionReset',
 	'geco.menuResetAll',
 	'geco.menuCopyItemName',
 ];
@@ -85,6 +89,8 @@ async function testManifest(): Promise<void> {
 	assert.equal(contributes.views.scm[0].id, 'geco.history');
 	assert.equal(contributes.views.scm[1].id, 'geco.menuEditor');
 	assert.equal(contributes.views.scm[1].visibility, 'hidden');
+	assert.equal(contributes.views.scm[2].id, 'geco.dialogDecisions');
+	assert.equal(contributes.views.scm[2].visibility, 'hidden');
 	assert.equal(contributes.viewsWelcome[0].view, 'geco.history');
 	assert.ok(contributes.commands.length >= EXPECTED_COMMANDS.length - 1, 'commands are contributed');
 	assert.equal(contributes.configuration.title, 'Git Easy Ops');

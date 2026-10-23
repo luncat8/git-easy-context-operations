@@ -9,7 +9,8 @@
 import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
-import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type AskOptions, type QuickPickChoice, type UI } from './ui';
+import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type AskOptions, type ConfirmOptions, type QuickPickChoice, type UI } from './ui';
+import { dialogDecisionById, type DialogDecisionId, type DialogDecisionMemory } from './dialogDecisions';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -147,6 +148,14 @@ export interface ControllerOptions {
 	 * a broken or already-applied file never becomes the remembered one.
 	 */
 	lastPatchFile?: PatchFileMemory;
+	/**
+	 * Where saved dialog decisions live (extension workspace state in
+	 * production, an in-memory store in tests). Absent means nothing can be
+	 * saved or skipped — every question is asked exactly as before. Only
+	 * consulted while `geco.rememberDialogDecisions` is on; see
+	 * `confirmDecision` and `src/core/dialogDecisions.ts`.
+	 */
+	dialogDecisions?: DialogDecisionMemory;
 }
 
 /**
@@ -242,6 +251,76 @@ export class Controller {
 		});
 	}
 
+	/**
+	 * The one way an eligible confirmation is asked.
+	 *
+	 * With `geco.rememberDialogDecisions` off (the default), or without a
+	 * decision store, this is exactly `ui.confirm` — existing behaviour is
+	 * unchanged. With the mode on:
+	 *
+	 * - a saved answer for this repository skips the dialog (and only this
+	 *   dialog — every state check, recovery point and journal entry of the
+	 *   operation still runs);
+	 * - otherwise the dialog offers `<label>` first (the Enter default) and
+	 *   `<label> (always)` second; only the explicit "always" pick saves,
+	 *   one-time approval / cancel / dismissal never do;
+	 * - a store that fails to read means "ask normally" (plain confirm, no
+	 *   "always" offer) and a store that fails to write leaves the one-time
+	 *   answer standing while the failure is reported — never the reverse.
+	 *
+	 * Ineligible questions never come through here; they call `ui.confirm`
+	 * directly, forever (see the registry in `dialogDecisions.ts`).
+	 */
+	private async confirmDecision(
+		repoPath: string,
+		id: DialogDecisionId,
+		message: string,
+		options?: ConfirmOptions,
+	): Promise<boolean> {
+		const def = dialogDecisionById(id);
+		const store = this.options.dialogDecisions;
+		if (!def || def.kind !== 'eligible' || !this.settings.rememberDialogDecisions || !store || !repoPath) {
+			return this.ui.confirm(message, options);
+		}
+		let saved: string | undefined;
+		try {
+			saved = await store.get(repoPath, id);
+		} catch (error) {
+			this.ui.log(`Saved decisions: reading "${id}" failed (${toErrorMessage(error)}); asking normally.`);
+			return this.ui.confirm(message, options);
+		}
+		if (saved === 'yes') {
+			this.ui.log(`Saved decision: "${def.action}" was answered "always ${def.confirmLabel}" for this repository — skipping its confirmation (Manage Dialog Decisions… can reset it).`);
+			return true;
+		}
+		if (!this.ui.choose) {
+			return this.ui.confirm(message, options);
+		}
+		const confirmLabel = options?.confirmLabel ?? 'OK';
+		const chosen = await this.ui.choose(message, {
+			detail: [
+				options?.detail ?? '',
+				`"${confirmLabel} (always)" saves this answer for this repository while "Remember dialog decisions" is on. It skips only this question — repository checks, recovery points and journaling still run. Reset it any time with "Git Easy Ops: Manage Dialog Decisions…".`,
+			].filter(Boolean).join('\n\n'),
+			choices: [
+				{ label: confirmLabel, value: 'once', primary: true },
+				{ label: `${confirmLabel} (always)`, value: 'always' },
+				{ label: options?.cancelLabel ?? 'Cancel', value: 'cancel' },
+			],
+		});
+		if (chosen === 'always') {
+			try {
+				await store.save(repoPath, id);
+				this.ui.log(`Saved decision: "${def.action}" is now "always ${def.confirmLabel}" for this repository.`);
+			} catch (error) {
+				this.ui.log(`Saved decisions: saving "${id}" failed (${toErrorMessage(error)}); continuing with the one-time answer only.`);
+				await this.ui.message('warn', `The "${def.action}" answer could not be saved, so it applies this once only.`, 'See the Git Easy Ops output log for the reason.');
+			}
+			return true;
+		}
+		return chosen === 'once';
+	}
+
 	// ------------------------------------------------------------- feature 1
 
 	async rewordCommit(cwd: string, args: readonly unknown[], flow: RewordFlow): Promise<void> {
@@ -275,7 +354,7 @@ export class Controller {
 			const upstream = await ctx.git.upstream(branch);
 
 			if (this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(`Rename the message of ${info.shortSha} on ${branch}?`, {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, 'reword.rename', `Rename the message of ${info.shortSha} on ${branch}?`, {
 					confirmLabel: 'Rename',
 					destructive: true,
 					detail: [
@@ -553,7 +632,7 @@ export class Controller {
 			// Keep the dialog on one screen: clip every subject and list at
 			// most ten commits by name.
 			const listed = infos.slice(0, 10);
-			const confirmed = await this.ui.confirm(`Squash ${infos.length} commits into one on ${branch}?`, {
+			const confirmed = await this.confirmDecision(ctx.git.cwd, 'squash.confirm', `Squash ${infos.length} commits into one on ${branch}?`, {
 				confirmLabel: 'Squash',
 				destructive: true,
 				detail: [
@@ -724,7 +803,7 @@ export class Controller {
 					removeBackup = choice === 'move-remove' || choice === 'move-clean';
 					cleanRedundantAfterMove = choice === 'move-clean';
 				} else {
-					const confirmed = await this.ui.confirm(`Move ${branch} to ${targetInfo.shortSha}?`, {
+					const confirmed = await this.confirmDecision(ctx.git.cwd, 'fastForward.move', `Move ${branch} to ${targetInfo.shortSha}?`, {
 						confirmLabel: isFastForward ? 'Move' : 'Move anyway',
 						destructive: !isFastForward,
 						detail: [
@@ -754,7 +833,7 @@ export class Controller {
 				if (!isGecoError(error) || error.code !== 'not-fast-forward') {
 					throw error;
 				}
-				const forced = await this.askForForce(error, branch, targetInfo.shortSha);
+				const forced = await this.askForForce(ctx, error, branch, targetInfo.shortSha);
 				if (!forced) {
 					return;
 				}
@@ -887,9 +966,9 @@ export class Controller {
 		].join('\n'));
 	}
 
-	private async askForForce(error: GecoError, branch: string, target: string): Promise<boolean> {
+	private async askForForce(ctx: RepoContext, error: GecoError, branch: string, target: string): Promise<boolean> {
 		this.ui.log(`"${branch}" diverged from ${target}: ${error.message}`);
-		return this.ui.confirm(`"${branch}" has commits that ${target} does not. Move it anyway?`, {
+		return this.confirmDecision(ctx.git.cwd, 'fastForward.moveAnyway', `"${branch}" has commits that ${target} does not. Move it anyway?`, {
 			confirmLabel: 'Move anyway',
 			destructive: true,
 			detail: `${error.detail ?? ''}\n\nThe old tip is still moved onto the backup branch first, so nothing is lost.`,
@@ -1104,7 +1183,7 @@ export class Controller {
 					return false;
 				}
 				if (this.settings.confirmDestructiveOperations) {
-					const confirmed = await this.ui.confirm(`Abort the unfinished ${operation.label}?`, {
+					const confirmed = await this.confirmDecision(ctx.git.cwd, 'pushSync.abortUnfinished', `Abort the unfinished ${operation.label}?`, {
 						confirmLabel: 'Abort it',
 						destructive: true,
 						detail: [
@@ -1132,6 +1211,8 @@ export class Controller {
 				}
 				// A lock that is *held* looks exactly like a stale one, so this is
 				// the one repair that always asks - whatever the settings say.
+				// It is registry-ineligible for saved decisions for the same
+				// reason ('pushSync.removeLock' in dialogDecisions.ts).
 				const confirmed = await this.ui.confirm(`Remove ${lock.name}?`, {
 					confirmLabel: 'Remove the lock file',
 					destructive: true,
@@ -1161,7 +1242,7 @@ export class Controller {
 					await this.ui.message('warn', 'The worktree has uncommitted changes, so a rebase cannot start.', 'Commit or stash them, then run "Git Easy Ops: Diagnose Push / Sync Trouble..." again.');
 					return false;
 				}
-				const confirmed = await this.ui.confirm(`Rebase "${branch}" onto ${sync.upstream.ref}?`, {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, 'pushSync.rebaseOntoUpstream', `Rebase "${branch}" onto ${sync.upstream.ref}?`, {
 					confirmLabel: 'Rebase',
 					detail: [
 						...sync.localOnly.map((commit) => `${commit.shortSha} ${commit.subject}${commit.alreadyThere ? '   (already on the remote - dropped)' : '   (replayed)'}`),
@@ -1197,7 +1278,7 @@ export class Controller {
 				if (!sync || !branch || !sync.upstream.sha) {
 					return false;
 				}
-				const confirmed = await this.ui.confirm(`Point "${branch}" at ${sync.upstream.ref}?`, {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, 'pushSync.moveOntoUpstream', `Point "${branch}" at ${sync.upstream.ref}?`, {
 					confirmLabel: 'Move the branch',
 					detail: [
 						`${branch}: ${shorten(sync.head)} -> ${shorten(sync.upstream.sha)}`,
@@ -1305,7 +1386,7 @@ export class Controller {
 			const effectiveMode: ForcePushMode = mode ?? this.settings.forcePushMode;
 
 			if (this.settings.confirmDestructiveOperations && options.confirmed !== true) {
-				const confirmed = await this.ui.confirm(`Force push ${plan.branch} to ${plan.remote}/${plan.remoteBranch}?`, {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, effectiveMode === 'lease' ? 'forcePush.lease' : 'forcePush.force', `Force push ${plan.branch} to ${plan.remote}/${plan.remoteBranch}?`, {
 					confirmLabel: effectiveMode === 'lease' ? 'Force Push (with lease)' : 'Force Push',
 					destructive: true,
 					detail: [
@@ -1397,7 +1478,7 @@ export class Controller {
 			}
 
 			if (this.settings.confirmDestructiveOperations && destination === 'current') {
-				const confirmed = await this.ui.confirm('Apply this patch to the current branch?', {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, 'patch.applyToCurrent', 'Apply this patch to the current branch?', {
 					confirmLabel: 'Apply',
 					detail: this.describeBase(base, materialized.label, destination, branchName),
 				});
@@ -1884,7 +1965,7 @@ export class Controller {
 					+ 'are rewritten too, so Undo of earlier operations stops working. The bundle is the way back.';
 			}
 			if (this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(confirmation.message, {
+				const confirmed = await this.confirmDecision(ctx.git.cwd, 'cleanHistory.rewrite', confirmation.message, {
 					confirmLabel: 'Clean History',
 					destructive: true,
 					detail: confirmation.detail,
@@ -2211,7 +2292,7 @@ export class Controller {
 		// Undo of *earlier* operations stops working - the user decides).
 		let recoveryNote = '';
 		if (facts.recoveryRefs.length > 0) {
-			const drop = await this.ui.confirm(
+			const drop = await this.confirmDecision(ctx.git.cwd, 'cleanHistory.dropRecoveryPoints',
 				`Drop the ${facts.recoveryRefs.length} Git Easy Ops recovery point(s) and reclaim the space?`,
 				{
 					confirmLabel: 'Drop & GC',
@@ -2385,7 +2466,7 @@ export class Controller {
 				return;
 			}
 			if (await ctx.git.refExists(`refs/heads/${to}`)) {
-				const overwrite = await this.ui.confirm(`A branch called "${to}" already exists. Overwrite it?`, {
+				const overwrite = await this.confirmDecision(ctx.git.cwd, 'branch.renameOverwrite', `A branch called "${to}" already exists. Overwrite it?`, {
 					confirmLabel: 'Overwrite',
 					cancelLabel: 'Cancel',
 					destructive: true,
@@ -2414,7 +2495,7 @@ export class Controller {
 				}
 				remote = choice;
 				if (remote !== 'keep' && this.settings.confirmDestructiveOperations) {
-					const confirmed = await this.ui.confirm(`Push the rename to ${upstreamInfo.remote}?`, {
+					const confirmed = await this.confirmDecision(ctx.git.cwd, 'branch.renamePushRemote', `Push the rename to ${upstreamInfo.remote}?`, {
 						confirmLabel: remote === 'rename' ? 'Rename on the Remote' : 'Push New Name',
 						cancelLabel: 'Local Only',
 						destructive: remote === 'rename',
@@ -2485,7 +2566,9 @@ export class Controller {
 			}
 
 			if (this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(
+				const confirmed = await this.confirmDecision(
+					ctx.git.cwd,
+					deleteRemote && inspection.upstream ? 'branch.deleteEverywhere' : 'branch.deleteLocal',
 					deleteRemote && inspection.upstream ? `Delete "${branch}" locally and ${inspection.upstream} on the remote?` : `Delete branch "${branch}"?`,
 					{
 						confirmLabel: deleteRemote ? 'Delete Everywhere' : 'Delete Branch',
@@ -2648,7 +2731,9 @@ export class Controller {
 			// second modal would only repeat it; only the checkbox-less fallback
 			// needs the modal as its gate.
 			if (!reviewedInCheckboxList && this.settings.confirmDestructiveOperations) {
-				const confirmed = await this.ui.confirm(
+				const confirmed = await this.confirmDecision(
+					ctx.git.cwd,
+					'branch.removeRedundant',
 					chosen.length === 1 ? `Delete the redundant branch "${chosen[0]!.name}"?` : `Delete ${chosen.length} redundant branches?`,
 					{
 						confirmLabel: chosen.length === 1 ? 'Delete Branch' : 'Delete Branches',
@@ -2728,7 +2813,7 @@ export class Controller {
 			if (!isGecoError(error) || error.code !== 'unmerged-branch') {
 				throw error;
 			}
-			const insist = await this.ui.confirm(`${error.message} Delete it anyway?`, {
+			const insist = await this.confirmDecision(ctx.git.cwd, 'branch.deleteUnmergedAnyway', `${error.message} Delete it anyway?`, {
 				confirmLabel: 'Delete Anyway',
 				cancelLabel: 'Keep It',
 				destructive: true,

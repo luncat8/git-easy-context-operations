@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -214,6 +214,30 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "geco.manageDialogDecisions",
+        "title": "Manage Dialog Decisions...",
+        "category": "Git Easy Ops",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "geco.dialogDecisionsClearAll",
+        "title": "Clear All Saved Decisions...",
+        "category": "Git Easy Ops",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "geco.dialogDecisionToggle",
+        "title": "Enable or Reset Saved Decision",
+        "category": "Git Easy Ops",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "geco.dialogDecisionReset",
+        "title": "Reset Saved Decision to Default",
+        "category": "Git Easy Ops",
+        "icon": "$(discard)"
+      },
+      {
         "command": "geco.menuResetAll",
         "title": "Restore Default Menu Items",
         "category": "Git Easy Ops",
@@ -246,6 +270,14 @@
         },
         {
           "command": "geco.menuCopyItemName",
+          "when": "false"
+        },
+        {
+          "command": "geco.dialogDecisionToggle",
+          "when": "false"
+        },
+        {
+          "command": "geco.dialogDecisionReset",
           "when": "false"
         }
       ],
@@ -338,6 +370,11 @@
         {
           "command": "geco.menuResetAll",
           "when": "view == geco.menuEditor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "geco.dialogDecisionsClearAll",
+          "when": "view == geco.dialogDecisions",
           "group": "navigation@1"
         }
       ],
@@ -501,6 +538,16 @@
           "command": "geco.menuCopyItemName",
           "when": "view == geco.menuEditor && viewItem == geco.menuRow",
           "group": "1_copy@1"
+        },
+        {
+          "command": "geco.dialogDecisionToggle",
+          "when": "view == geco.dialogDecisions && viewItem =~ /^geco\\.dialogDecision\\.(enabled|default)/",
+          "group": "1_decision@1"
+        },
+        {
+          "command": "geco.dialogDecisionReset",
+          "when": "view == geco.dialogDecisions && viewItem == geco.dialogDecision.enabled",
+          "group": "1_decision@2"
         }
       ],
       "geco.commitSubmenu": [
@@ -673,6 +720,12 @@
           "name": "Git Easy Ops Menu Editor",
           "contextualTitle": "Git Easy Ops Menu Editor",
           "visibility": "hidden"
+        },
+        {
+          "id": "geco.dialogDecisions",
+          "name": "Git Easy Ops Dialog Decisions",
+          "contextualTitle": "Git Easy Ops Dialog Decisions",
+          "visibility": "hidden"
         }
       ]
     },
@@ -791,6 +844,11 @@
           },
           "scope": "window",
           "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them. When the setting is absent, the built-in defaults apply: **Search and Replace in Commit Message...** is hidden out of the box; an empty list `[]` means \"show everything\"."
+        },
+        "geco.rememberDialogDecisions": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow a dialog answer to be saved per repository and reused for that exact question (\"Force Push (always)\"), managed in [Git Easy Ops: Manage Dialog Decisions...](command:geco.manageDialogDecisions). Off by default: while off, nothing is saved or skipped. Saved answers live in workspace state (never synced), Undo and other non-repeatable questions can never be saved, and force push with lease / `--force` are separate decisions."
         }
       }
     }

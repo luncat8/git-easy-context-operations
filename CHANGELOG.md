@@ -4,6 +4,46 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.22
+
+### Added
+
+- **Saved dialog decisions (opt-in, off by default).** With the new
+  `geco.rememberDialogDecisions` setting on, eligible confirmations offer a
+  second button ("Force Push (always)") next to the ordinary one; picking it
+  saves that affirmative answer for that repository only, and the same
+  question is skipped next time. One-time answers, Cancel and dismissal
+  never save anything, the ordinary button stays first, and skipping a
+  question skips nothing else - repository checks, recovery points and
+  journaling still run. **Git Easy Ops: Manage Dialog Decisions...** opens a
+  native checkbox view listing every question with its state (Default /
+  Enabled — always "…" / Saved — inactive), per-row reset and
+  **Clear All Saved Decisions...** for the whole workspace. Force push with
+  lease and hard `--force` are separate decisions, as are deleting a branch
+  locally and everywhere. Undo, removing a lock file, rewriting without a
+  backup bundle, installing git-filter-repo, editing the editor's config
+  files and the fast-forward cleanup choice can never be saved and always
+  ask, with the reason recorded in the registry
+  (`src/core/dialogDecisions.ts`). Decisions live in workspace state, scoped
+  by canonical repository, never synced; invalid or outdated entries and
+  storage failures fall back to asking. The reviewed specification is
+  `docs/next-actions-and-saved-decisions.md`.
+
+### Fixed
+
+- **A window that does not know the new views yet no longer breaks the
+  extension.** VS Code fixes the list of contributed views when a window
+  opens, so after an update that adds one (here: the *Dialog Decisions*
+  view) a window that is still running the previous manifest - an extension
+  updated in place, "Restart Extensions", a development host left open -
+  rejects `createTreeView` with `No view is registered with id:
+  geco.dialogDecisions`. That error used to escape `activate` and take the
+  whole extension with it: no commands, no git hooks, no graph. A missing
+  view is now logged, remembered and reported once - **"Reload Window ..."**
+  finishes the update - and everything else starts normally
+  (`src/core/viewAvailability.ts`). Ordinary failures are still rethrown, so
+  a genuinely broken manifest is not hidden as an update artifact.
+
 ## 0.4.21
 
 ### Fixed
@@ -13,7 +53,7 @@ the project uses [semantic versioning](https://semver.org/).
 
 ### Planning
 
-- Added `docs/next-actions-and-saved-decisions.md`: opt-in saved decisions, including repeatable destructive approvals, with a complete action-state settings view and reset controls. Persistence is not implemented in this release. Additional Git-action ideas are deferred in `docs/deferred-context-actions.md`.
+- Added `docs/next-actions-and-saved-decisions.md`: opt-in saved decisions, including repeatable destructive approvals, with a complete action-state settings view and reset controls. Persistence was not implemented in that release (it arrived in 0.4.22). Additional Git-action ideas are deferred in `docs/deferred-context-actions.md`.
 
 ## 0.4.20
 

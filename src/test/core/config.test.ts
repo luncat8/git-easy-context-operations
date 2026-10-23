@@ -30,6 +30,7 @@ describe('config - defaults', () => {
 		assert.equal(DEFAULT_SETTINGS.backupRefPrefix, 'refs/geco/');
 		assert.equal(DEFAULT_SETTINGS.forcePushMode, 'lease');
 		assert.equal(DEFAULT_SETTINGS.confirmDestructiveOperations, true);
+		assert.equal(DEFAULT_SETTINGS.rememberDialogDecisions, false, 'saved dialog decisions are opt-in');
 		assert.equal(DEFAULT_SETTINGS.preserveCommitterDateOnReword, true);
 		assert.equal(DEFAULT_SETTINGS.applyPatchDestination, 'newBranch');
 		assert.equal(DEFAULT_SETTINGS.threeWayApply, true);

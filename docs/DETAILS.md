@@ -284,6 +284,50 @@ until you open it.
   startup (or with the extension disabled) everything is visible until the state
   is applied - fail-open by design.
 
+### Manage Dialog Decisions...
+
+Saved dialog decisions are **off by default** (`geco.rememberDialogDecisions`).
+Turned on, an eligible confirmation gains a second button -
+**Force Push | Force Push (always) | Cancel** - and picking "(always)" saves
+that one affirmative answer **for that repository**, so the same question is
+skipped next time. The ordinary button stays first (Enter never enrols), and
+a one-time answer, Cancel or dismissal never saves anything.
+
+`Git Easy Ops: Manage Dialog Decisions...` reveals the hidden **"Git Easy Ops
+Dialog Decisions"** view: one native-tree row per question the extension can
+ask, showing **Default (not enabled)**, **Enabled — always "<label>"**, or
+**Saved — inactive: mode disabled** while the master switch is off. Tick a
+row to enable it (destructive answers ask once more, in a modal that is
+itself never rememberable), untick it - or use **Reset Saved Decision to
+Default** - to ask again. Ineligible rows (Undo, removing a lock file,
+rewriting without a backup bundle, installing git-filter-repo, writing the
+editor's config files, the fast-forward cleanup *choice*) carry no checkbox
+and say why they always ask; inputs, pickers and result-report buttons are
+listed as not applicable. **Clear All Saved Decisions...** wipes every
+repository's decisions in this workspace after a fresh confirmation naming
+that scope; it does not change the master switch.
+
+The dialog-decisions view is contributed by `package.json`, and VS Code only
+knows the views of the manifest the window loaded. A window that is still
+running the previous build - an extension updated in place, *Restart
+Extensions*, a development host left open - answers the view creation with
+`No view is registered with id: geco.dialogDecisions`. **That is expected after
+an update, not a failure:** the extension logs it, reports it once with a
+**Reload Window** button, and starts everything else normally (no reload
+required for the commands themselves, only for the view). See
+`src/core/viewAvailability.ts`.
+
+Boundaries, all pinned by tests: force push with lease and hard `--force`
+are separate decisions; deleting locally never approves deleting on the
+remote; a saved answer is about the *question*, so the branch/commit/remote
+still come from each run, and repository checks, lease checks, recovery
+points and journaling all still run. Decisions live in extension workspace
+state (`geco.dialogDecisions.v1`, per canonical repository, never synced -
+no SHAs, texts or credentials), unknown or outdated entries read as unset,
+and a store that fails to read or write falls back to asking / to the
+one-time answer. The full specification and inventory is
+[next-actions-and-saved-decisions.md](next-actions-and-saved-decisions.md).
+
 ## Install
 
 The built artifacts are **committed to this repository**, so a clone is enough -
@@ -335,7 +379,9 @@ do that before publishing).
   branches, and a journal in `.git/geco/journal.json`.
 - Destructive steps show a **confirmation with the concrete plan** (which commits
   change, which branch moves, what the remote will lose). Turn it off with
-  `geco.confirmDestructiveOperations`.
+  `geco.confirmDestructiveOperations`, or save individual answers per
+  repository with `geco.rememberDialogDecisions` (off by default; Undo, lock
+  removal and rewriting without a backup bundle can never be saved).
 - Ref updates are **atomic** (`update-ref <ref> <new> <expected>`): if something
   else moved the branch in the meantime, the operation fails instead of clobbering.
 - **Deleting a branch** refuses the one you have checked out, and refuses a branch
@@ -376,7 +422,8 @@ do that before publishing).
 | `geco.defaultBackupBranchName` | `old` | Where the old branch tip is parked (`old-2`, `old-3`, ... if taken). |
 | `geco.backupRefPrefix` | `refs/geco/` | Prefix for hidden recovery refs. |
 | `geco.forcePushMode` | `lease` | Default for **Force Push**: `lease` or `force`. |
-| `geco.confirmDestructiveOperations` | `true` | Ask before rewriting/moving/pushing. |
+| `geco.confirmDestructiveOperations` | `true` | Ask before rewriting/moving/pushing. Saved decisions (below) are only consulted where this switch would otherwise show its question. |
+| `geco.rememberDialogDecisions` | `false` | Allow "(always)" answers to eligible confirmations, saved per repository and managed by **Manage Dialog Decisions...**. Off: nothing is saved or skipped. |
 | `geco.preserveCommitterDateOnReword` | `true` | Keep committer dates when rewording. |
 | `geco.commitPickerLimit` | `50` | Commits listed in the picker. |
 | `geco.patchBaseCandidateLimit` | `40` | Candidate bases probed for a patch. |
@@ -423,6 +470,9 @@ output channel, tree view, commands. `src/test/core/` contains the engine tests
   reports that the old one stayed - change the default branch on the host first.
 - Renaming a branch does not rewrite anything: the commits keep their shas, so no
   force-push is needed for the local rename itself.
+- A view added by an update only appears after the window is reloaded: a window
+  that was already open keeps the view list it loaded, so the extension reports
+  the missing view once ("Reload Window") instead of failing to activate.
 - **Clean History (Remove Dead Paths)...** needs
   [`git-filter-repo`](https://github.com/newren/git-filter-repo) - without it the extension offers to
   install it (pip / Homebrew / `apt`/`dnf`/`pacman` when sudo works without a password; PEP 668

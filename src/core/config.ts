@@ -27,6 +27,13 @@ export interface Settings {
 	showGraphMenuHint: boolean;
 	graphCommitLimit: number;
 	showGraphLanes: boolean;
+	/**
+	 * Master switch for saved dialog decisions (`docs/next-actions-and-saved-decisions.md`):
+	 * only while it is on may a dialog offer "<action> (always)", and only then
+	 * is a saved answer ever used. Off by default; the decisions themselves
+	 * live in workspace state, managed by "Manage Dialog Decisions…".
+	 */
+	rememberDialogDecisions: boolean;
 	/** Row ids hidden from the context menus by "Customize Context Menus...". */
 	hiddenMenuItems: string[];
 }
@@ -51,6 +58,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	showGraphMenuHint: 'geco.showGraphMenuHint',
 	graphCommitLimit: 'geco.graphCommitLimit',
 	showGraphLanes: 'geco.showGraphLanes',
+	rememberDialogDecisions: 'geco.rememberDialogDecisions',
 	hiddenMenuItems: 'geco.hiddenMenuItems',
 };
 
@@ -70,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	showGraphMenuHint: true,
 	graphCommitLimit: 200,
 	showGraphLanes: true,
+	rememberDialogDecisions: false,
 	hiddenMenuItems: [],
 };
 
@@ -131,6 +140,7 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
 		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
 		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),
+		rememberDialogDecisions: asBoolean(source.rememberDialogDecisions, DEFAULT_SETTINGS.rememberDialogDecisions),
 		hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
 	};
 }

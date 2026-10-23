@@ -13,16 +13,21 @@ import type { Settings } from './core/config';
 import { HIDDEN_MENU_ITEMS_FULL_KEY, HIDDEN_MENU_ITEMS_SETTING, contextKeysFor, defaultHiddenIds, effectiveHiddenList, parseHiddenItems } from './core/menuVisibility';
 import { GRAPH_MENU_VISIBLE_CONTEXT_KEY, isGraphMenuVisible } from './core/graphMenu';
 import { reportWithoutWaiting } from './core/ui';
+import { describeUnavailableViews, isMissingViewError } from './core/viewAvailability';
 import { affectsGeco, readSettings, resolveGitPath } from './vscode/settings';
 import { VsCodeUI } from './vscode/uiAdapter';
 import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
 import { MenuEditorProvider, commandTitlesFromManifest, type MenuEditorNode } from './vscode/menuEditorTree';
+import { DialogDecisionsProvider, type DecisionRowNode } from './vscode/dialogDecisionsTree';
+import { WorkspaceDialogDecisionStore, canonicalRepoKey } from './vscode/dialogDecisionStore';
+import { countDecisionRepositories, dialogDecisionById, type DialogDecisionId } from './core/dialogDecisions';
 import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 
 const VIEW_ID = 'geco.history';
 const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
+const DIALOG_DECISIONS_VIEW_ID = 'geco.dialogDecisions';
 const GRAPH_HINT_KEY = 'geco.graphMenuHintShown';
 /** Workspace-state key: repository path -> last patch file auto-applied there. */
 const LAST_PATCH_FILES_KEY = 'geco.lastPatchFileByRepo';
@@ -186,7 +191,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	};
 
-	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile);
+	// Saved dialog decisions: workspace state, scoped per repository, never
+	// synced. The store is shared by every rebuilt runtime; its change hook
+	// repaints the management view (declared further down).
+	let dialogDecisionsView: DialogDecisionsProvider | undefined;
+	const dialogDecisionStore = new WorkspaceDialogDecisionStore(context.workspaceState, () => dialogDecisionsView?.refresh());
+
+	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile, dialogDecisionStore);
 
 	const createdTree = new GecoHistoryProvider({
 		controller: () => runtime.controller,
@@ -196,12 +207,67 @@ export function activate(context: vscode.ExtensionContext): void {
 	});
 	tree = createdTree;
 	context.subscriptions.push(createdTree);
+
+	// --- Views the window may not know yet ---------------------------------
+	// A view id only exists in the workbench after the window loaded the
+	// `package.json` that declares it. A window that is still running the
+	// previous manifest - "Restart Extensions", an in-place extension update,
+	// a development host left open - answers `createTreeView` with
+	// "No view is registered with id: geco.dialogDecisions". Left uncaught,
+	// that error aborts `activate`: no commands, no git hooks, no tree. An
+	// optional view is never worth the whole extension, so a missing view is
+	// logged, remembered, and reported once with the action that repairs it
+	// (a reload registers the new manifest) while everything else starts.
+	const unavailableViews: string[] = [];
+	const noteUnavailableView = (label: string, why: string): void => {
+		if (!unavailableViews.includes(label)) {
+			unavailableViews.push(label);
+		}
+		output.appendLine(
+			`The "${label}" view is not available in this window (${why}). `
+			+ 'The window is still using the view list it loaded when it opened; reload it to finish updating.',
+		);
+	};
+	const reportUnavailableViews = (): void => {
+		const report = describeUnavailableViews(unavailableViews);
+		if (!report) {
+			return;
+		}
+		reportWithoutWaiting(async () => {
+			const chosen = await vscode.window.showWarningMessage(report.message, { detail: report.detail }, report.action);
+			if (chosen === report.action) {
+				await vscode.commands.executeCommand('workbench.action.reloadWindow');
+			}
+		});
+	};
+	const openTreeView = <T>(id: string, label: string, options: vscode.TreeViewOptions<T>): vscode.TreeView<T> | undefined => {
+		try {
+			const view = vscode.window.createTreeView(id, options);
+			context.subscriptions.push(view);
+			return view;
+		} catch (error) {
+			if (!isMissingViewError(error)) {
+				throw error;
+			}
+			noteUnavailableView(label, error instanceof Error ? error.message : String(error));
+			return undefined;
+		}
+	};
+	/** Reveal a hidden view; a window that predates it is told how to get it. */
+	const focusTreeView = async (id: string, label: string): Promise<void> => {
+		try {
+			await vscode.commands.executeCommand(`${id}.focus`);
+		} catch (error) {
+			noteUnavailableView(label, error instanceof Error ? error.message : String(error));
+			reportUnavailableViews();
+		}
+	};
+
 	// `canSelectMany` is what makes multi-select (Ctrl/Shift-click) work in the
 	// Graph group: VS Code then hands a context-menu command the clicked node
 	// plus every selected node, which is how "Squash Selected Commits..." sees
 	// the whole selection.
-	const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: createdTree, showCollapseAll: true, canSelectMany: true });
-	context.subscriptions.push(treeView);
+	openTreeView(VIEW_ID, 'Git Easy Ops', { treeDataProvider: createdTree, showCollapseAll: true, canSelectMany: true });
 
 	// --- Customize Context Menus -------------------------------------------
 	// The hidden "Git Easy Ops Menu Editor" view plus the context-key state machine.
@@ -229,17 +295,81 @@ export function activate(context: vscode.ExtensionContext): void {
 		onLog: (message) => output.appendLine(message),
 	});
 	context.subscriptions.push(menuEditor);
-	const menuEditorView = vscode.window.createTreeView(MENU_EDITOR_VIEW_ID, {
+	const menuEditorView = openTreeView(MENU_EDITOR_VIEW_ID, 'Git Easy Ops Menu Editor', {
 		treeDataProvider: menuEditor,
 		manageCheckboxStateManually: true,
 	});
-	context.subscriptions.push(
-		menuEditorView,
-		menuEditorView.onDidChangeCheckboxState((event) => {
+	if (menuEditorView) {
+		context.subscriptions.push(menuEditorView.onDidChangeCheckboxState((event) => {
 			void menuEditor.handleCheckboxChange(event.items);
-		}),
-	);
+		}));
+	}
 	applyMenus();
+
+	// --- Manage Dialog Decisions -------------------------------------------
+	// The hidden "Git Easy Ops Dialog Decisions" view: one row per question,
+	// checkbox = saved answer. Enabling a destructive answer asks a fresh
+	// modal confirmation here — that confirmation is deliberately not one
+	// of the rememberable dialogs, and unchecking/resetting (the safe
+	// direction) never asks.
+	const enableDialogDecision = async (id: DialogDecisionId): Promise<boolean> => {
+		if (!activeRepo) {
+			return false;
+		}
+		const def = dialogDecisionById(id);
+		if (!def || def.kind !== 'eligible') {
+			return false;
+		}
+		if (def.destructive) {
+			const accept: vscode.MessageItem = { title: def.confirmLabel ?? 'Enable' };
+			const cancel: vscode.MessageItem = { title: 'Cancel', isCloseAffordance: true };
+			const chosen = await vscode.window.showWarningMessage(
+				`Always answer "${def.action}" with "${def.confirmLabel}" for this repository?`,
+				{
+					modal: true,
+					detail: `Future runs skip the question ${def.question} for ${activeRepo} while "Remember dialog decisions" (geco.rememberDialogDecisions) is on. `
+						+ 'Only that question is skipped: repository checks, recovery points and journaling still run, and the target of each run is still picked by that run. '
+						+ 'Reset it any time in this view (uncheck the row, or "Reset Saved Decision to Default").',
+				},
+				accept,
+				cancel,
+			);
+			if (chosen !== accept) {
+				output.appendLine(`Saved decision not enabled: "${def.action}" (confirmation declined).`);
+				return false;
+			}
+		}
+		await dialogDecisionStore.save(activeRepo, id);
+		output.appendLine(`Saved decision enabled: "${def.action}" -> always "${def.confirmLabel}" for ${activeRepo}.`);
+		return true;
+	};
+	const dialogDecisionsProvider = new DialogDecisionsProvider({
+		masterEnabled: () => readSettings().rememberDialogDecisions,
+		repoPath: () => (activeRepo ? canonicalRepoKey(activeRepo) : undefined),
+		raw: () => dialogDecisionStore.raw(),
+		setEnabled: async (id, enabled) => {
+			if (!activeRepo) {
+				return false;
+			}
+			if (!enabled) {
+				await dialogDecisionStore.reset(activeRepo, id);
+				return true;
+			}
+			return enableDialogDecision(id);
+		},
+		onLog: (message) => output.appendLine(message),
+	});
+	dialogDecisionsView = dialogDecisionsProvider;
+	context.subscriptions.push(dialogDecisionsProvider);
+	const dialogDecisionsTreeView = openTreeView(DIALOG_DECISIONS_VIEW_ID, 'Git Easy Ops Dialog Decisions', {
+		treeDataProvider: dialogDecisionsProvider,
+		manageCheckboxStateManually: true,
+	});
+	if (dialogDecisionsTreeView) {
+		context.subscriptions.push(dialogDecisionsTreeView.onDidChangeCheckboxState((event) => {
+			void dialogDecisionsProvider.handleCheckboxChange(event.items);
+		}));
+	}
 
 	const setRepoContext = () => {
 		void vscode.commands.executeCommand('setContext', 'geco.repositoryOpen', Boolean(activeRepo));
@@ -315,6 +445,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (repoPath && repoPath !== activeRepo) {
 			activeRepo = repoPath;
 			setRepoContext();
+			dialogDecisionsProvider.refresh();
 			scheduleRefresh('the active repository changed');
 			void watchRepository(repoPath);
 		}
@@ -405,7 +536,60 @@ export function activate(context: vscode.ExtensionContext): void {
 		// "Customize Context Menus..." - works with no repository open (the
 		// editor is about the menus, not about git), reveals the hidden view.
 		vscode.commands.registerCommand('geco.customizeMenus', async () => {
-			await vscode.commands.executeCommand(`${MENU_EDITOR_VIEW_ID}.focus`);
+			await focusTreeView(MENU_EDITOR_VIEW_ID, 'Git Easy Ops Menu Editor');
+		}),
+		// "Manage Dialog Decisions..." - works with no repository open (the
+		// view then explains what is missing), reveals the hidden view.
+		vscode.commands.registerCommand('geco.manageDialogDecisions', async () => {
+			await focusTreeView(DIALOG_DECISIONS_VIEW_ID, 'Git Easy Ops Dialog Decisions');
+		}),
+		vscode.commands.registerCommand('geco.dialogDecisionToggle', async (node?: DecisionRowNode) => {
+			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !activeRepo) {
+				return;
+			}
+			if (node.saved) {
+				await dialogDecisionStore.reset(activeRepo, node.def.id);
+				output.appendLine(`Saved decision reset: "${node.def.action}" asks every time again.`);
+			} else {
+				await enableDialogDecision(node.def.id);
+			}
+			dialogDecisionsProvider.refresh();
+		}),
+		vscode.commands.registerCommand('geco.dialogDecisionReset', async (node?: DecisionRowNode) => {
+			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !activeRepo) {
+				return;
+			}
+			await dialogDecisionStore.reset(activeRepo, node.def.id);
+			output.appendLine(`Saved decision reset: "${node.def.action}" asks every time again.`);
+			dialogDecisionsProvider.refresh();
+		}),
+		vscode.commands.registerCommand('geco.dialogDecisionsClearAll', async () => {
+			// A fresh, never-rememberable confirmation with the full scope in
+			// the text: this clears every repository in this workspace, not
+			// just the one in the view, and it does not touch the master switch.
+			const repositories = countDecisionRepositories(dialogDecisionStore.raw());
+			if (repositories === 0) {
+				reportWithoutWaiting(() => vscode.window.showInformationMessage('Git Easy Ops: there are no saved dialog decisions in this workspace.'));
+				return;
+			}
+			const accept: vscode.MessageItem = { title: 'Clear All Saved Decisions' };
+			const cancel: vscode.MessageItem = { title: 'Cancel', isCloseAffordance: true };
+			const chosen = await vscode.window.showWarningMessage(
+				`Clear every saved dialog decision in this workspace (${repositories} repositor${repositories === 1 ? 'y' : 'ies'})?`,
+				{
+					modal: true,
+					detail: 'Every question returns to "Default (not enabled)" and will be asked again. The "Remember dialog decisions" setting itself is not changed.',
+				},
+				accept,
+				cancel,
+			);
+			if (chosen !== accept) {
+				return;
+			}
+			await dialogDecisionStore.clearAll();
+			output.appendLine('Saved dialog decisions cleared for every repository in this workspace.');
+			dialogDecisionsProvider.refresh();
+			reportWithoutWaiting(() => vscode.window.showInformationMessage('Git Easy Ops: all saved dialog decisions were cleared.'));
 		}),
 		vscode.commands.registerCommand('geco.menuCopyItemName', async (node?: MenuEditorNode) => {
 			if (node?.nodeKind !== 'row') return;
@@ -472,16 +656,20 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!affectsGeco(event)) {
 				return;
 			}
-			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile);
+			runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile, dialogDecisionStore);
 			output.appendLine('Settings reloaded.');
 			scheduleRefresh('settings changed');
 			// Hidden-menu items changed here or in another window: converge.
 			applyMenus();
 			menuEditor.refresh();
+			dialogDecisionsProvider.refresh();
 		}),
 	);
 
 	maybeShowEntryPointHint(context, runtime.settings, output);
+	// Everything else is wired by now, so a window that predates one of the
+	// views gets a single actionable report instead of a failed activation.
+	reportUnavailableViews();
 	output.appendLine(`Git Easy Ops ready (git: ${resolveGitPath(runtime.settings) ?? 'git from PATH'}).`);
 }
 
@@ -515,12 +703,13 @@ function buildRuntime(
 	ui: VsCodeUI,
 	onRepositoryChanged: () => void,
 	lastPatchFile: PatchFileMemory,
+	dialogDecisions?: WorkspaceDialogDecisionStore,
 ): Runtime {
 	const exec = createGitExec({ gitPath: resolveGitPath(settings) });
 	// The process runner for everything that is not git itself: the
 	// git-filter-repo probe/rewrite of "Clean History" and its installers.
 	const processExec = createProcessExec({});
-	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec, onRepositoryChanged, lastPatchFile }) };
+	return { settings, exec, processExec, controller: new Controller({ ui, settings, exec, processExec, onRepositoryChanged, lastPatchFile, dialogDecisions }) };
 }
 
 function contains(parent: string, child: string): boolean {

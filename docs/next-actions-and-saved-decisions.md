@@ -1,89 +1,204 @@
-# Plan: remembered dialog decisions
+# Saved dialog decisions — implemented specification
 
-Status: revised proposal, not implemented. Additional Git-action ideas are [deferred for later review](deferred-context-actions.md); they are not part of this work.
+Status: **implemented in 0.4.22**. Additional Git-action ideas remain
+[deferred for later review](deferred-context-actions.md); they are not part of
+this work.
+
+This document is the reviewed specification the code implements. Review
+changes relative to the original proposal are marked **[review]** so the
+reasoning stays visible; everything else is the agreed direction, now with
+exact ids, files and tests.
 
 ## Agreed direction
 
-- Saving decisions is disabled by default.
-- Repeatable choices may be saved even for dangerous actions, including force push. Danger alone does not make a decision ineligible.
-- Settings should show the complete action list and current state, not hide remembered answers in opaque storage.
+- Saving decisions is disabled by default (`geco.rememberDialogDecisions`, `false`).
+- Repeatable choices may be saved even for dangerous actions, including force
+  push. Danger alone does not make a decision ineligible.
+- Settings show the complete action list and current state, not remembered
+  answers hidden in opaque storage.
 - Undo cannot have a reusable default decision and must not save one.
-- Provide a reset control that returns saved decisions to the default/unset state.
+- Reset controls return saved decisions to the default/unset state.
+
+## Review improvements (what changed and why)
+
+1. **Precedence with `geco.confirmDestructiveOperations` is now defined.**
+   That older switch already suppresses the confirmations it gates. A saved
+   decision is only consulted where a confirmation would otherwise be shown,
+   so turning confirmations off keeps working exactly as before and nothing
+   can be "learned" from a dialog that never appeared. Ungated questions
+   (e.g. rebase-onto-upstream, unmerged-delete) consult their saved decision
+   whenever they are asked. Neither switch changes the other.
+2. **First release saves only binary (yes/no) answers.** A multi-choice
+   dialog does not have one stable answer: the Fast-Forward cleanup dialog
+   *selects side-effects* (move, move+remove backup, move+clean up), so it is
+   recorded as ineligible with that reason instead of pretending "yes" could
+   capture it. Multi-choice enrolment would need per-answer ids and is future
+   work, not a silent generalisation.
+3. **Repository identity is concrete.** The scope key is the canonical
+   (real-path, normalised) repository root supplied by the VS Code layer
+   (`canonicalRepoKey`). Linked worktrees opened through that root share its
+   scope; different repositories never do. An empty/unresolvable identity
+   fails closed: ask, never approve, never save.
+4. **The management view is an explicit settings surface.** Editing it is
+   allowed while the master switch is off — rows show *inactive: mode
+   disabled*, enabling there only *stores* an answer, and dialogs neither
+   offer "(always)" nor use a stored answer until the mode is turned on.
+   (The original "no saved answer is newly written while off" applies to
+   dialogs; a settings surface the user deliberately opened is the exception,
+   otherwise inactive rows could never be prepared or reviewed.)
+5. **Enabling a destructive row in the view asks once more.** VS Code cannot
+   put a checkbox in a native modal, so the view uses the same native
+   checkbox-tree pattern as the Menu Editor; for destructive questions the
+   extension adds a fresh modal confirmation (itself never rememberable)
+   before the checkbox takes effect. Unchecking/resetting is the safe
+   direction and never asks.
+6. **The inventory is by question, not by command.** Every `ui.confirm` /
+   `ui.choose` call site maps to exactly one stable id (table below).
+   Inputs, pickers, checkbox lists and result-report buttons are inventoried
+   as named not-applicable rows instead of being silently absent.
 
 ## Settings and state model
 
-Proposed master setting: `geco.rememberDialogDecisions`, default `false`.
+Master setting: `geco.rememberDialogDecisions`, default `false`, linked from
+its description to **Git Easy Ops: Manage Dialog Decisions…**, which reveals
+the hidden **Git Easy Ops Dialog Decisions** view (native tree, keyboard
+navigable; no raw JSON UI).
 
-Add a dedicated **Dialog Decisions** settings view, opened by **Git Easy Ops: Manage Dialog Decisions…** and linked from the master setting description. The small action inventory should fit in one list. Do not present a raw JSON map as the main interface.
+Each row shows a human-readable action name, exactly which question it
+controls, and one of:
 
-Each action row shows:
+- **Default (not enabled)** — no saved choice; ask every time.
+- **Enabled — always "\<label\>"** — the saved affirmative answer in use.
+- **Saved — inactive: mode disabled** — stored, but unused while the mode is off.
+- **Default — not eligible** — with the recorded reason (Undo & friends).
+- **Not applicable** — inputs/pickers/reports; there is no answer to save.
 
-- A human-readable action name and explanation of exactly which question it controls.
-- **Default (not enabled)**: no saved choice; ask every time.
-- **Enabled — <saved answer>**: the explicit answer to use when the mode is on.
-- A reset-to-default control and, for eligible actions, a control to configure the answer.
-- For Undo and other genuinely non-repeatable questions: **Default — not eligible**, with an explanation, rather than a misleading enabled toggle.
+The view header identifies the repository being edited. Per-row reset is the
+row's checkbox/context command ("Reset Saved Decision to Default");
+**Clear All Saved Decisions…** (view toolbar / Command Palette) clears every
+repository's decisions *in this workspace* after a fresh, non-rememberable
+confirmation that names that scope. Reset never touches the master switch.
 
-When the master switch is off, saved rows remain visible but are marked **inactive: mode disabled**. No saved answer is used or newly written. Re-enabling resumes saved choices; resetting deletes them.
+"Enabled" means an exact answer is configured, never "saving might happen
+later": enabling requires the explicit "(always)" button in a dialog or an
+explicit enable in the view (plus the extra modal for destructive rows).
+Cancel, Escape, window-close and dismissal never become saved answers, and
+the ordinary action stays first, so Enter never enrols.
 
-“Enabled” must mean that an exact answer is configured, not merely that saving might happen later. For a yes/no confirmation, enabling requires explicit approval of the affirmative answer. For a multi-choice dialog, enabling requires selecting the answer. Cancel, Escape, window-close and dismissal never become saved answers.
+## Inventory (stable ids — storage keys, never renamed)
 
-Inventory every current action, including actions without a reusable confirmation (shown as not applicable). Where an action has distinct questions, show named subrows: one broad action toggle must not silently answer all its prompts. Existing preferences, such as patch destination, stay ordinary settings rather than creating conflicting defaults.
+Eligible (saved answer = the affirmative button):
 
-## Enabling from a dialog
+| Id | Question it controls |
+|---|---|
+| `reword.rename` | Rename the message of \<commit\> on \<branch\>? |
+| `squash.confirm` | Squash \<N\> commits into one on \<branch\>? |
+| `fastForward.move` | Move \<branch\> to \<commit\>? (plain two-button form) |
+| `fastForward.moveAnyway` | \<branch\> has commits that \<target\> does not. Move it anyway? |
+| `forcePush.lease` | Force push … with `--force-with-lease` |
+| `forcePush.force` | Force push … with hard `--force` (never approved by the lease row) |
+| `patch.applyToCurrent` | Apply this patch to the current branch? |
+| `pushSync.abortUnfinished` | Abort the unfinished merge/rebase/…? |
+| `pushSync.rebaseOntoUpstream` | Rebase \<branch\> onto \<upstream\>? |
+| `pushSync.moveOntoUpstream` | Point \<branch\> at \<upstream\>? |
+| `cleanHistory.rewrite` | Remove \<N\> dead path(s) from the entire history? |
+| `cleanHistory.dropRecoveryPoints` | Drop recovery points and reclaim space? (separate from the rewrite) |
+| `branch.renameOverwrite` | A branch called \<name\> already exists. Overwrite it? |
+| `branch.renamePushRemote` | Push the rename to \<remote\>? (remote handling is still picked fresh each time) |
+| `branch.deleteLocal` | Delete branch \<name\>? |
+| `branch.deleteEverywhere` | Delete \<name\> locally and on the remote? (never approved by the local-only row) |
+| `branch.deleteUnmergedAnyway` | \<branch\> has unmerged commits. Delete it anyway? |
+| `branch.removeRedundant` | Delete redundant branch(es)? — fallback modal only; the checkbox list itself is never skipped |
 
-When the master mode is on, eligible dialogs may offer:
+Ineligible (stay interactive, reason recorded in the registry):
 
-`Force Push | Force Push (always) | Cancel`
+| Id | Why |
+|---|---|
+| `undo.confirm` | Restores the specific journal entry picked at that moment; a standing yes could roll back unreviewed work. Result-report Undo buttons likewise never run automatically. |
+| `pushSync.removeLock` | A lock that looks stale may be held right now; safety must be judged fresh. |
+| `cleanHistory.rewriteWithoutBundle` | Only asked after the backup bundle failed; proceeding leaves no way back, so consent is fresh for that failure. |
+| `cleanHistory.installFilterRepo` | Installs software via a machine-specific command chosen at that moment. |
+| `cleanHistory.removeLinkedWorktrees` | Which worktrees exist and what they hold is fresh state. |
+| `fastForward.cleanupChoice` | Selects side-effects, not yes/no (review point 2). |
+| `graphMenu.updateEditorConfig` | Writes the editor's own `product.json`/`argv.json`, picked at that moment, outside any repository. |
 
-The ordinary action remains first and is the Enter default; enrolling in persistent behavior always requires the explicit “always” action. Multi-choice dialogs must identify which answer is being saved; avoid doubling every button in a crowded dialog and link to Manage Dialog Decisions when necessary.
+Not applicable: `result.followUps` (optional report buttons, never
+automatic), `input.textEntry` (fresh text each time), `selection.pickers`
+(fresh selection each time; preferences such as
+`geco.applyPatchDestination` stay ordinary settings). Commands with no
+question of their own (Create Branch, Check Out, Copy SHA, Show Backups…)
+only ever meet these rows.
 
-A checkbox would be cleaner, but VS Code's public native message-dialog API does not expose one. Prefer native dialogs and the settings view over introducing a custom dialog solely for a checkbox.
+## Safety boundaries (unchanged from the proposal, now enforced by tests)
 
-The settings view must explain that enabling a destructive choice skips future confirmations for that specific question. Saving is explicit consent, not inferred from frequent use.
+- Force push with lease and hard `--force` are separate ids/rows; lease
+  approval never authorises hard force or escalation after a rejected lease.
+- A decision is about the question, not arguments: future targets come from
+  the current run's selections.
+- Skipping a confirmation skips nothing else: repository-state checks,
+  target validation, lease checks, recovery backups and journaling all run.
+- A different question never inherits approval (`branch.deleteLocal` does
+  not approve `branch.deleteEverywhere`; the redundant-branch checkbox list
+  is the review itself and is never skipped).
+- Already-answered internal calls (`forcePush(..., { confirmed: true })`
+  from a result report or picker row) neither ask nor save — one decision,
+  one confirmation.
 
-## Dangerous actions and safety boundaries
+## Storage and failure behaviour
 
-Force Push, Move Anyway, overwrite, deletion and history-rewrite confirmations may qualify when their answer has a stable meaning. Review each actual prompt individually rather than excluding it solely because it is destructive.
+- Typed, versioned registry in `src/core/dialogDecisions.ts`: stable ids,
+  allowed answer (`yes` only), per-question `policyVersion`. Unknown ids,
+  unknown answers and stale policy versions parse as unset.
+- Storage is extension **workspace state** under `geco.dialogDecisions.v1`,
+  keyed by canonical repository identity; never synced, never in settings.
+  No credentials, dialog text, SHAs or file contents are stored.
+- Read failure → ask normally (plain confirm, no "(always)" offer). Write
+  failure → the explicitly chosen one-time action proceeds; the failure is
+  logged and reported, nothing is pretended saved. Missing repository
+  identity → ask. The management view repaints after every write/reset.
 
-- Keep force push with lease and hard `--force` as separate decision IDs and separate settings rows. Saving approval for one must never approve the other or authorize escalation after a rejected lease.
-- Save a decision about the question, not command arguments: future targets still come from the user's current command selection.
-- Saving approval skips only the named confirmation. Continue all repository-state checks, target validation, operation preconditions, lease checks, recovery backups and journaling that the operation normally requires.
-- A new conflict, dirty worktree, changed remote or different question must not inherit approval from a superficially similar prompt. Revalidate after asynchronous work where required.
-- Multi-step cleanup approvals must not silently authorize unrelated remote deletion, worktree removal or other sub-actions. Each reusable approval needs its own documented policy.
-- Undo, optional result follow-ups, conflict-resolution choices and prompts requiring fresh file/ref selections are not reusable defaults. Do not turn an Undo result button into an automatic operation.
-- Ineligible safety/security questions stay interactive. Record the specific reason in the inventory rather than treating all dangerous Git operations as ineligible.
+## Where it lives
 
-## Storage and reset
+| Piece | File |
+|---|---|
+| Registry, parser, in-memory store, row-state machine | `src/core/dialogDecisions.ts` |
+| Asking path (skip / offer "(always)" / save) | `Controller.confirmDecision` in `src/core/controller.ts` |
+| Master setting | `rememberDialogDecisions` in `src/core/config.ts` + `package.json` |
+| Workspace-state store, canonical repo key | `src/vscode/dialogDecisionStore.ts` |
+| Management view | `src/vscode/dialogDecisionsTree.ts`, wired in `src/extension.ts` |
+| Tests | `src/test/core/dialogDecisions.test.ts` (+ manifest/config suites) |
 
-- Use a typed, versioned registry of stable prompt IDs, allowed answers and eligibility. Do not key decisions by localized button text.
-- Store decisions in extension workspace state, scoped by canonical repository identity for multi-root workspaces. The management view clearly identifies the repository being edited. Do not sync approvals across repositories or machines.
-- Do not store credentials, dialog text, SHAs or file contents as decisions.
-- Invalid, unknown or obsolete answers mean unset. A policy-version change returns that prompt to Default rather than reusing consent with changed semantics.
-- Provide per-row **Reset to Default** and **Clear All Saved Decisions…**. The latter clears every repository's decisions in this workspace after a fresh, non-rememberable confirmation. Clearly label that scope.
-- Reset removes saved values, including inactive ones, but does not change the master switch. The resulting action state is Default (not enabled).
-- If saving fails, perform only the explicitly selected one-time action; report/log that persistence failed. If reading fails, ask normally. Update displayed state after writes and resets.
+## Acceptance tests (all covered)
 
-## Implementation sequence
+- Fresh installation: mode off, every action Default, existing behaviour
+  unchanged (the whole pre-existing suite runs with the mode off).
+- "(always)" is the second button; Enter/the ordinary button, Cancel,
+  Escape and dismissal save nothing; an explicit "(always)" saves and the
+  next run of the *same* repository skips only that question.
+- Lease approval never authorises hard force; master off ignores stored
+  answers and re-enabling resumes them; per-row reset restores Default
+  (including inactive rows); invalid data, policy changes, missing identity
+  and storage failure fall back to asking, not approval.
+- Undo remains ineligible and still asks with the mode on.
+- Manual verification still owed on real VS Code: native dialog button
+  order/focus per platform and screen-reader/keyboard access to every row
+  of the management view (the view is a native tree, like the Menu Editor).
 
-1. Inventory all existing actions and their questions; record repeatable answers, scope and ineligibility reasons. Include force-push variants and Undo explicitly.
-2. Implement the typed registry and repository-scoped workspace-state store.
-3. Add the disabled-by-default master setting and complete action-state management view with accessible labels, keyboard navigation, per-row reset and clear-all.
-4. Wire eligible prompts to the store, including explicit “always” consent where it fits. Keep result notifications non-blocking and preserve the one-decision/one-confirmation rule.
-5. Document exactly what saved approval skips and how to disable or reset it.
+## Updating into the new view
 
-## Acceptance tests
-
-- Fresh installation: mode off, every action Default, existing behavior unchanged.
-- Enable one answer: settings shows Enabled with its exact answer; only its corresponding question is skipped.
-- Force-push approval never authorizes hard force or bypasses a rejected lease; normal safety checks still run.
-- One-time approval, Cancel, Escape and dismissal never save anything. Enter uses the ordinary action, not “always”.
-- Undo remains ineligible. Result follow-ups never run automatically.
-- Master off ignores stored choices; re-enable resumes them. Per-row reset and clear-all restore unset state, including inactive values.
-- Invalid data, policy changes, missing repository identity and storage failure fall back to asking, not approval.
-- Multi-root repositories remain isolated; settings shows the active scope and refreshes after a change.
-- Manually verify native dialog keyboard behavior on supported platforms and screen-reader/keyboard access to every settings row.
+The management view is new in this release, and VS Code resolves the
+contributed-view list once per window. A window that was loaded before the
+update answers `window.createTreeView('geco.dialogDecisions', ...)` with
+`No view is registered with id: geco.dialogDecisions`
+(microsoft/vscode#265001; *Developer: Reload Window* is the fix). The asking
+path, the store and every command work without the view, so the extension
+records the missing view, reports it once with a **Reload Window** button and
+continues activation - the view cannot take the extension down with it.
+Covered by `src/test/core/viewAvailability.test.ts`.
 
 ## Native dialog limitation
 
-The extension supplies affirmative-first order and an explicit final close affordance. VS Code and the OS control actual native placement and focus; the public API cannot guarantee physical left/right ordering on every platform.
+The extension supplies affirmative-first order and an explicit final close
+affordance. VS Code and the OS control actual native placement and focus;
+the public API cannot guarantee physical left/right ordering on every
+platform.

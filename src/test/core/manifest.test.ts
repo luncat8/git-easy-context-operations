@@ -158,7 +158,7 @@ describe('manifest - menus', () => {
 		assert.ok(when.some((w) => /viewItem =~ \/\^geco\\\.commit/.test(w)), 'no commit item menu');
 		assert.ok(when.some((w) => /viewItem =~ \/\^geco\\\.branch/.test(w)), 'no branch item menu');
 		for (const entry of itemContext) {
-			assert.match(entry.when ?? '', /^view == geco\.(history|menuEditor) && /, 'item menus must be scoped to our view');
+			assert.match(entry.when ?? '', /^view == geco\.(history|menuEditor|dialogDecisions) && /, 'item menus must be scoped to our view');
 		}
 	});
 
@@ -301,13 +301,13 @@ describe('manifest - menus', () => {
 	it('scopes title menus to our own views', () => {
 		for (const entry of manifest.contributes.menus['view/title'] ?? []) {
 			// The toolbar buttons may additionally require an open repository -
-			// but never another view. The menu editor contributes its own view
-			// (its reset button lives on the editor's toolbar). The only other
+			// but never another view. The menu editor and the dialog-decisions
+			// view contribute their own (their toolbar buttons live there). The only other
 			// extra condition a title entry may carry is the missing-graph-menu
 			// help's "not while the graph menus are on screen" gate below.
 			assert.match(
 				entry.when ?? '',
-				/^view == geco\.(history|menuEditor)( && geco\.repositoryOpen)?( && !geco\.graphMenuVisible)?( && \(!geco\.menuFilter.*)?$/,
+				/^view == geco\.(history|menuEditor|dialogDecisions)( && geco\.repositoryOpen)?( && !geco\.graphMenuVisible)?( && \(!geco\.menuFilter.*)?$/,
 				entry.command,
 			);
 		}
@@ -456,13 +456,17 @@ describe('manifest - menus', () => {
 describe('manifest - views and configuration', () => {
 	it('contributes the history view in the Source Control container with a welcome message', () => {
 		const views = manifest.contributes.views.scm ?? [];
-		assert.equal(views.length, 2);
+		assert.equal(views.length, 3);
 		assert.equal(views[0]!.id, 'geco.history');
 		assert.equal(views[0]!.name, 'Git Easy Ops');
 		// The menu editor ships hidden: it costs nothing until the user asks
 		// for it ("Customize Context Menus..." focuses and reveals it).
 		assert.equal(views[1]!.id, 'geco.menuEditor');
 		assert.equal(views[1]!.visibility, 'hidden');
+		// The Dialog Decisions view ships hidden the same way: it costs
+		// nothing until "Manage Dialog Decisions..." focuses it.
+		assert.equal(views[2]!.id, 'geco.dialogDecisions');
+		assert.equal(views[2]!.visibility, 'hidden');
 		assert.equal(manifest.contributes.viewsWelcome.length, 1);
 		assert.equal(manifest.contributes.viewsWelcome[0]!.view, 'geco.history');
 		assert.match(manifest.contributes.viewsWelcome[0]!.contents, /No Git repository/);
