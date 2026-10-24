@@ -430,3 +430,120 @@ describe('fastForwardBranch - detached HEAD', () => {
 		assert.equal(await repo.branchSha('main'), f2);
 	});
 });
+
+describe('fastForwardBranch - checkoutAfterMove', () => {
+	test('ends on the moved branch when it was not the checked out one', async () => {
+		const { repo, f2 } = await withFeatureBranch();
+		await repo.checkout('feature');
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOut, false, 'main was not the checked out branch at the move');
+		assert.equal(result.checkedOutAfter, true, 'the worktree ended on main');
+		assert.equal(result.worktreeUpdated, true);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+		assert.equal(await repo.branchSha('main'), f2);
+		assert.equal(repo.read('f2.txt'), '2\n', 'the worktree shows the moved history');
+		assert.deepEqual(await repo.statusLines(), []);
+		assert.match(result.notes.join('\n'), /Checked out main after moving it to/);
+		// The old feature branch is no longer checked out: it can be deleted.
+		await repo.gitOk(['branch', '-D', 'feature']);
+		assert.equal(await repo.hasBranch('feature'), false);
+	});
+
+	test('one undo restores the old tip AND leaves the moved branch again', async () => {
+		const { repo, shas, f2 } = await withFeatureBranch();
+		await repo.checkout('feature');
+
+		await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+
+		const journal = await repo.ctx.safety.readJournal();
+		assert.equal(journal.length, 1, 'the checkout is part of the move entry, not a second one');
+		const undo = journal[0].undo;
+		assert.equal(undo.type, 'refs');
+		assert.deepEqual(undo.refs, [{ ref: 'refs/heads/main', restoreTo: shas.v04, expected: f2, resetHard: true }]);
+		assert.equal(undo.checkoutRef, 'feature');
+
+		await repo.ctx.safety.undo(journal[0]);
+
+		assert.equal(await repo.branchSha('main'), shas.v04, 'main is back where it was');
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'feature', 'and the worktree is back on feature');
+		assert.deepEqual(await repo.statusLines(), [], 'the worktree matches feature, no stale files');
+		assert.equal(await repo.hasBranch('old'), false, 'the backup branch went with the undo');
+	});
+
+	test('keeps a dirty worktree where it is and explains it in the notes', async () => {
+		const { repo, shas, f2 } = await withFeatureBranch();
+		await repo.checkout('feature');
+		repo.write('scratch.txt', 'wip\n');
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOutAfter, false);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'feature', 'the worktree was not disturbed');
+		assert.equal(await repo.branchSha('main'), f2, 'but the move itself stands');
+		assert.match(result.notes.join('\n'), /uncommitted changes.*main.*was not checked out/s);
+		assert.equal((await repo.ctx.safety.readJournal()).length, 1);
+		assert.ok(shas.v04);
+	});
+
+	test('a modified tracked file keeps the worktree in place', async () => {
+		const { repo, f2 } = await withFeatureBranch();
+		await repo.checkout('feature');
+		// git checkout would carry the change over to main, which a
+		// fast-forward must not do silently.
+		repo.write('a.txt', 'a changed\n');
+		await repo.gitOk(['add', 'a.txt']);
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOutAfter, false);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'feature');
+		assert.equal(await repo.branchSha('main'), f2, 'the move itself stands');
+		assert.match(result.notes.join('\n'), /uncommitted changes/);
+	});
+
+	test('does not check out a branch that is checked out in another worktree', async () => {
+		const { repo, f2 } = await withFeatureBranch();
+		// Leave main free, then check it out in a linked worktree.
+		await repo.checkout('feature');
+		await repo.gitOk(['worktree', 'add', '--quiet', '../main-wt', 'main']);
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOutAfter, false);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'feature', 'the worktree was not disturbed');
+		assert.equal(await repo.branchSha('main'), f2, 'the move itself stands');
+		assert.match(result.notes.join('\n'), /checked out in another worktree/);
+	});
+
+	test('checks out the moved branch from a detached, clean HEAD', async () => {
+		const { repo, shas, f2 } = await withFeatureBranch();
+		await repo.checkout(shas.v04);
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOutAfter, true);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+		assert.equal(await repo.branchSha('main'), f2);
+		const undo = (await repo.ctx.safety.readJournal())[0]!.undo;
+		assert.equal(undo.type, 'refs');
+		assert.equal(undo.checkoutRef, undefined, 'a detached start has no branch to return to');
+	});
+
+	test('does nothing different when the branch is already checked out', async () => {
+		const { repo, f2 } = await withFeatureBranch();
+		await repo.checkout('main');
+
+		const result = await fastForwardBranch(repo.ctx, { target: f2, branch: 'main', checkoutAfterMove: true });
+
+		assert.equal(result.checkedOut, true);
+		assert.equal(result.checkedOutAfter, false);
+		assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+		assert.equal(result.notes.filter((note) => note.includes('Checked out main')).length, 0);
+		const undo = (await repo.ctx.safety.readJournal())[0]!.undo;
+		assert.equal(undo.type, 'refs');
+		assert.equal(undo.checkoutRef, undefined, 'no checkout to undo: the user was already on main');
+	});
+});

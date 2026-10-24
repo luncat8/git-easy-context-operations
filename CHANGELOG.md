@@ -4,6 +4,38 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.23
+
+### Changed
+
+- **Fast-forward ends on the moved branch, so the old names can really go.**
+  When the moved branch (usually `main`) was not the checked out one, the
+  worktree now checks it out after the move - clean worktrees only, and never
+  when the branch is checked out in another worktree. Before, the worktree
+  stayed on the branch you were on: exactly the name the move made redundant,
+  and a checked-out branch is never offered for deletion, so "Remove Redundant
+  Branches" left it behind as a leftover. Now a plain *Move* leaves you on
+  `main`, and the former feature branch (and the redundant `old` backup) can
+  be removed right after, with the same command. The checkout is part of the
+  move's own journal entry: one "Undo Last Operation" restores the old tip
+  *and* leaves the branch again. When the worktree has uncommitted changes it
+  is left where it is, and the report says so
+  (`src/core/fastForward.ts`, `checkoutAfterMove`).
+
+### Fixed
+
+- **A diverged fast-forward no longer asks the same question twice.** When
+  the move was not a real fast-forward (the branch has commits the target
+  does not contain), the first confirmation already said so - "NOT a
+  fast-forward: N commits would be left behind" with a *Move anyway* button.
+  Answering it now performs the forced move instead of the flow catching its
+  own `not-fast-forward` error and repeating the question verbatim. The
+  follow-up "...Move it anyway?" dialog is still asked when the force question
+  was not answered live: when confirmations are off, when the first answer
+  came from a saved dialog decision (a saved *Move* still never authorizes a
+  forced move on its own - `fastForward.moveAnyway` keeps its own gate), or
+  when the branch diverges only after the user confirmed the plain move.
+
 ## 0.4.22
 
 ### Added

@@ -271,6 +271,36 @@ describe('dialog decisions - controller flows', () => {
 		}
 	});
 
+	it('a saved "Move" decision never authorizes a forced move of a diverged branch', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			// Diverge: main has a commit that the feature tip does not have.
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature', await repo.sha('main')]);
+			const featureSha = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			await repo.commit('main moved on too', { 'main.txt': 'm\n' });
+
+			const store = new InMemoryDialogDecisionStore();
+			store.save(repo.dir, 'fastForward.move');
+
+			// The saved "Move" skips its own dialog - but the branch is
+			// diverged, so the force question keeps its own gate instead of
+			// riding on the saved plain-move approval.
+			const ui = new FakeUI();
+			await new Controller({ ui, settings: ON, exec: repo.exec, dialogDecisions: store })
+				.fastForward(repo.dir, [featureSha], { askBranch: false });
+
+			assert.equal(ui.confirmCalls.length, 0, 'no two-button dialog at all');
+			assert.equal(ui.chooseCalls.length, 1, `exactly one question left: ${ui.transcript}`);
+			assert.match(ui.chooseCalls[0]!.message, /has commits that .* does not\. Move it anyway\?/);
+			assert.match(ui.allLogs(), /Saved decision.*skipping its confirmation/);
+			assert.equal(await repo.sha('main'), featureSha, 'the confirmed forced move ran');
+			assert.equal(store.get(repo.dir, 'fastForward.moveAnyway'), undefined, 'the one-time answer saved nothing');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
 	it('Undo still asks even with the mode on and other decisions saved', async () => {
 		const { repo } = await createLinearRepo();
 		try {

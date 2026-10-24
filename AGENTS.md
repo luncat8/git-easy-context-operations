@@ -45,7 +45,7 @@ npm run package
   - **Purpose**: This ensures the user can inspect the version number in VS Code's Extensions view to verify whether the newly built extension is actually installed or if an older build is still cached/active.
 - **VSIX Output Location**:
   - All `.vsix` artifacts must be placed in the `dist/` directory (e.g. `dist/...vsix`).
-- **The graph build must carry its own version string** (`0.4.22+graph`):
+- **The graph build must carry its own version string** (`0.4.23+graph`):
   - `node scripts/apply-graph-menu.mjs on` stamps it and `off` restores it; the
     mapping lives in `scripts/graph-version.mjs`, the artifact keeps its name
     (`dist/<name>-<version>+graph.vsix`).

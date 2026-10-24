@@ -271,30 +271,31 @@ export class Controller {
 	 * Ineligible questions never come through here; they call `ui.confirm`
 	 * directly, forever (see the registry in `dialogDecisions.ts`).
 	 */
-	private async confirmDecision(
+	/** The answer of one eligible confirmation, and how it was given. */
+	private async confirmDecisionInfo(
 		repoPath: string,
 		id: DialogDecisionId,
 		message: string,
 		options?: ConfirmOptions,
-	): Promise<boolean> {
+	): Promise<{ confirmed: boolean; saved: boolean }> {
 		const def = dialogDecisionById(id);
 		const store = this.options.dialogDecisions;
 		if (!def || def.kind !== 'eligible' || !this.settings.rememberDialogDecisions || !store || !repoPath) {
-			return this.ui.confirm(message, options);
+			return { confirmed: await this.ui.confirm(message, options), saved: false };
 		}
 		let saved: string | undefined;
 		try {
 			saved = await store.get(repoPath, id);
 		} catch (error) {
 			this.ui.log(`Saved decisions: reading "${id}" failed (${toErrorMessage(error)}); asking normally.`);
-			return this.ui.confirm(message, options);
+			return { confirmed: await this.ui.confirm(message, options), saved: false };
 		}
 		if (saved === 'yes') {
 			this.ui.log(`Saved decision: "${def.action}" was answered "always ${def.confirmLabel}" for this repository — skipping its confirmation (Manage Dialog Decisions… can reset it).`);
-			return true;
+			return { confirmed: true, saved: true };
 		}
 		if (!this.ui.choose) {
-			return this.ui.confirm(message, options);
+			return { confirmed: await this.ui.confirm(message, options), saved: false };
 		}
 		const confirmLabel = options?.confirmLabel ?? 'OK';
 		const chosen = await this.ui.choose(message, {
@@ -316,9 +317,18 @@ export class Controller {
 				this.ui.log(`Saved decisions: saving "${id}" failed (${toErrorMessage(error)}); continuing with the one-time answer only.`);
 				await this.ui.message('warn', `The "${def.action}" answer could not be saved, so it applies this once only.`, 'See the Git Easy Ops output log for the reason.');
 			}
-			return true;
+			return { confirmed: true, saved: false };
 		}
-		return chosen === 'once';
+		return { confirmed: chosen === 'once', saved: false };
+	}
+
+	private async confirmDecision(
+		repoPath: string,
+		id: DialogDecisionId,
+		message: string,
+		options?: ConfirmOptions,
+	): Promise<boolean> {
+		return (await this.confirmDecisionInfo(repoPath, id, message, options)).confirmed;
 	}
 
 	// ------------------------------------------------------------- feature 1
@@ -772,6 +782,16 @@ export class Controller {
 
 			let removeBackup = false;
 			let cleanRedundantAfterMove = false;
+			// True when the confirmation the user just answered already made
+			// clear this is not a fast-forward (it said "NOT a fast-forward..."
+			// and its button was "Move anyway"): that live answer is the
+			// approval of the forced move, and the force question must not be
+			// asked a second time for the same decision. A saved answer is not
+			// fresh eyes on the divergence, and neither is a confirmation that
+			// was never shown, so both keep the force question as its own gate
+			// (as does a branch that diverges only after the user answered).
+			let forceApproved = false;
+			const checkedOutBefore = (await ctx.git.headBranch()) === branch;
 			if (this.settings.confirmDestructiveOperations) {
 				if (canRemoveBackup && this.ui.choose) {
 					// The clean-up the user usually wants in one step: move
@@ -787,7 +807,7 @@ export class Controller {
 							`The old tip is kept on branch "${actualBackupName}".`,
 							`"${actualBackupName}" is redundant: every commit of it is already on ${branch}, so removing it loses nothing.`,
 							'',
-							`The cleanup option checks out ${branch} if the worktree is clean, then lets you review redundant branch names. Remote deletion and a normal push are separately confirmed.`,
+							`The move checks out ${branch} when the worktree is clean, so the old branch names can be removed with "Remove Redundant Branches" afterwards. Remote deletion and a normal push are separately confirmed.`,
 						].join('\n'),
 						choices: [
 							{ label: 'Move and clean up redundant branches…', value: 'move-clean', primary: true },
@@ -803,7 +823,7 @@ export class Controller {
 					removeBackup = choice === 'move-remove' || choice === 'move-clean';
 					cleanRedundantAfterMove = choice === 'move-clean';
 				} else {
-					const confirmed = await this.confirmDecision(ctx.git.cwd, 'fastForward.move', `Move ${branch} to ${targetInfo.shortSha}?`, {
+					const outcome = await this.confirmDecisionInfo(ctx.git.cwd, 'fastForward.move', `Move ${branch} to ${targetInfo.shortSha}?`, {
 						confirmLabel: isFastForward ? 'Move' : 'Move anyway',
 						destructive: !isFastForward,
 						detail: [
@@ -814,12 +834,14 @@ export class Controller {
 								? `Fast-forward: ${counts.right === 1 ? '1 commit is' : `${counts.right} commits are`} added, nothing is lost.`
 								: `NOT a fast-forward: ${counts.left} commit${counts.left === 1 ? '' : 's'} on ${branch} would be left behind.`,
 							`The old tip is kept on branch "${actualBackupName}".`,
-						].join('\n'),
+							!checkedOutBefore ? `When the worktree is clean it is checked out to ${branch} afterwards, so the old branch names can be removed with "Remove Redundant Branches".` : '',
+						].filter(Boolean).join('\n'),
 					});
-					if (!confirmed) {
+					if (!outcome.confirmed) {
 						this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
 						return;
 					}
+					forceApproved = !isFastForward && !outcome.saved;
 				}
 			}
 
@@ -827,19 +849,22 @@ export class Controller {
 			try {
 				result = await this.ui.withProgress(`Moving ${branch}`, (report) => {
 					report(`moving ${branch} to ${targetInfo.shortSha}`);
-					return fastForwardBranch(ctx, { target, branch, backupName });
+					return fastForwardBranch(ctx, { target, branch, backupName, force: forceApproved, checkoutAfterMove: true });
 				});
 			} catch (error) {
 				if (!isGecoError(error) || error.code !== 'not-fast-forward') {
 					throw error;
 				}
+				// Reached when the force question was not answered yet: the
+				// confirmation was skipped (saved or off) or the branch
+				// diverged after the user approved the plain move.
 				const forced = await this.askForForce(ctx, error, branch, targetInfo.shortSha);
 				if (!forced) {
 					return;
 				}
 				result = await this.ui.withProgress(`Moving ${branch}`, (report) => {
 					report(`moving ${branch} to ${targetInfo.shortSha} (forced)`);
-					return fastForwardBranch(ctx, { target, branch, backupName, force: true });
+					return fastForwardBranch(ctx, { target, branch, backupName, force: true, checkoutAfterMove: true });
 				});
 			}
 
@@ -869,23 +894,10 @@ export class Controller {
 			}
 
 			if (cleanRedundantAfterMove && !result.alreadyAtTarget) {
-				// Leave the user on the branch that now owns the new history before
-				// scanning for duplicate names. This makes the former feature branch
-				// eligible for cleanup, while dirty worktrees are never disturbed.
-				const current = await ctx.git.headBranch();
-				if (current !== result.branch) {
-					if (await ctx.git.isDirty({ includeUntracked: true })) {
-						this.ui.log(`Kept the current checkout (${current ?? 'detached HEAD'}): the worktree has uncommitted changes.`);
-					} else {
-						await ctx.git.checkout(result.branch);
-						await ctx.safety.record({
-							kind: 'branch',
-							summary: `Checked out ${result.branch} after fast-forward cleanup`,
-							undo: { type: 'refs', refs: [], checkoutRef: current },
-						});
-						this.ui.log(`Checked out ${result.branch} after moving it to the selected commit.`);
-					}
-				}
+				// The move already checked the branch out when the worktree
+				// was clean (checkoutAfterMove), so the former feature branch
+				// is eligible for the scan below; dirty worktrees were left
+				// alone by the move, which logged why.
 				await this.cleanupRedundantAfterFastForward(ctx, result);
 			}
 

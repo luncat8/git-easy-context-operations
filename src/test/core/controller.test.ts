@@ -448,17 +448,21 @@ describe('controller - fast-forward flows', () => {
 		}
 	});
 
-	it('explains a diverged branch and only forces after a second confirmation', async () => {
+	it('explains a diverged branch and moves after one confirmation, not two', async () => {
 		const { repo, featureSha, mainOnlySha } = await diverged();
 		try {
-			const ui = new FakeUI({ confirms: [true, true] });
+			const ui = new FakeUI({ confirms: [true] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [featureSha], { askBranch: false });
 
 			assert.equal(ui.chooseCalls.length, 0, 'a diverged move keeps the old confirm - the backup would carry real commits');
-			assert.equal(ui.confirmCalls.length, 2);
+			// The dialog already says "NOT a fast-forward..." and its button
+			// is "Move anyway": that answer is the approval of the forced
+			// move, so the identical force question must not follow it.
+			assert.equal(ui.confirmCalls.length, 1, `one decision, one confirmation: ${ui.transcript}`);
+			assert.match(ui.confirmCalls[0]!.message, /^Move main to [0-9a-f]{7}\?$/);
+			assert.equal(ui.confirmCalls[0]!.options!.confirmLabel, 'Move anyway');
 			assert.match(ui.confirmCalls[0]!.options!.detail!, /NOT a fast-forward: 2 commits on main would be left behind\./);
-			assert.match(ui.confirmCalls[1]!.message, /has commits that .* does not\. Move it anyway\?/);
-			assert.equal(ui.confirmCalls[1]!.options!.destructive, true);
+			assert.equal(ui.confirmCalls[0]!.options!.destructive, true);
 			assert.equal(await repo.sha('main'), featureSha);
 			assert.equal(await repo.sha('old'), mainOnlySha, 'the discarded tip is on the backup branch');
 			assert.match(ui.allLogs(), /\(forced\)/);
@@ -468,13 +472,14 @@ describe('controller - fast-forward flows', () => {
 		}
 	});
 
-	it('stops at the second confirmation when the user declines the forced move', async () => {
+	it('declines the forced move at the "Move anyway" confirmation and nothing happens', async () => {
 		const { repo, featureSha, mainOnlySha } = await diverged();
 		try {
 			const before = await repo.sha('main');
-			const ui = new FakeUI({ confirms: [true, false] });
+			const ui = new FakeUI({ confirms: [false] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [featureSha], { askBranch: false });
 
+			assert.equal(ui.confirmCalls.length, 1, 'the refusal ends at the one confirmation');
 			assert.equal(await repo.sha('main'), before, 'main did not move');
 			assert.equal(await repo.hasBranch('old'), false, 'a refused move creates no backup branch');
 			assert.equal(mainOnlySha, before);
@@ -688,14 +693,14 @@ describe('controller - fast-forward flows', () => {
 			await repo.checkout('main');
 			await repo.commit('main moved on too', { 'main.txt': 'm\n' });
 
-			const ui = new FakeUI({ confirms: [true, true], asks: [ACTIONS.forcePush] });
+			const ui = new FakeUI({ confirms: [true], asks: [ACTIONS.forcePush] });
 			const controller = controllerFor(ui, repo);
 			await controller.fastForward(repo.dir, [target], { askBranch: false });
 			await controller.settled();
 
 			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.forcePush), ui.transcript);
 			assert.equal(await repo.remoteBranchSha(remoteDir, 'main'), target);
-			assert.equal(ui.confirmCalls.length, 2, 'move + move anyway - the Force Push button already answered the push');
+			assert.equal(ui.confirmCalls.length, 1, 'one "Move anyway" confirmation - and the Force Push button already answered the push');
 			assert.doesNotMatch(ui.transcript, /Force push main to origin\/main\?/);
 		} finally {
 			repo.cleanup();
@@ -709,12 +714,80 @@ describe('controller - fast-forward flows', () => {
 			const ui = new FakeUI({ picks: ['main'], inputs: ['old-main'] });
 			await controllerFor(ui, repo).fastForward(repo.dir, [featureSha], { askBranch: true });
 
-			// main is not checked out and the move is not a fast-forward, so it needs
-			// the second confirmation.
-			assert.equal(ui.confirmCalls.length, 2);
+			// The "Move anyway" confirmation already disclosed the divergence,
+			// so it is the one confirmation of the forced move.
+			assert.equal(ui.confirmCalls.length, 1, `one confirmation for the forced move: ${ui.transcript}`);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /NOT a fast-forward: 2 commits on main would be left behind\./);
 			assert.equal(await repo.sha('main'), featureSha);
-			assert.equal(await repo.sha('HEAD'), featureSha, 'HEAD stayed on feature');
+			// The clean worktree ends on the branch that was moved, so "feature"
+			// - the name the move made redundant - is no longer checked out.
+			assert.equal(await repo.api.headBranch(), 'main', 'the worktree moved to main with it');
+			assert.equal(await repo.sha('HEAD'), featureSha);
 			assert.equal(await repo.hasBranch('old-main'), true);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('a plain Move leaves the worktree on the moved branch, and the old names go with a redundant-branch cleanup', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			// The exact leftover scenario: on a feature branch, move main to
+			// its tip, then clean up the names the move made redundant.
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+
+			const ui = new FakeUI({ choices: ['move'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.sha('main'), target);
+			assert.equal(await repo.api.headBranch(), 'main', 'the worktree is on the moved branch');
+			assert.equal(await repo.hasBranch('feature'), true, 'a plain Move keeps the old name');
+			assert.equal(await repo.hasBranch('old'), true);
+
+			// With the worktree on main, the old names are no longer checked
+			// out, so the standalone cleanup can really remove them.
+			const cleanupUi = new FakeUI();
+			await controllerFor(cleanupUi, repo).removeRedundantBranches(repo.dir);
+			assert.equal(await repo.hasBranch('feature'), false, 'the former feature branch is gone - no leftover');
+			assert.equal(await repo.hasBranch('old'), false, 'the redundant backup is gone too');
+			assert.equal(await repo.sha('main'), target, 'the history itself is untouched');
+			assert.equal(await repo.api.headBranch(), 'main');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('keeps a dirty worktree where it is, and says so in the report', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			repo.write('uncommitted.txt', 'wip\n');
+
+			const ui = new FakeUI({ choices: ['move'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+
+			assert.equal(await repo.sha('main'), target, 'the move itself stands');
+			assert.equal(await repo.api.headBranch(), 'feature', 'the dirty worktree was not disturbed');
+			assert.equal((await repo.statusLines()).length, 1, 'the uncommitted file is still there');
+			assert.match(ui.allLogs(), /uncommitted changes.*main.*was not checked out/s, ui.allLogs());
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('still asks the force question once when confirmations are off', async () => {
+		const { repo, featureSha } = await diverged();
+		try {
+			const ui = new FakeUI({ confirms: [true] });
+			const controller = new Controller({ ui, settings: { ...DEFAULT_SETTINGS, confirmDestructiveOperations: false }, exec: repo.exec });
+			await controller.fastForward(repo.dir, [featureSha], { askBranch: false });
+
+			// No first dialog at all: the force question is the single gate.
+			assert.equal(ui.confirmCalls.length, 1, `exactly one question: ${ui.transcript}`);
+			assert.match(ui.confirmCalls[0]!.message, /has commits that .* does not\. Move it anyway\?/);
+			assert.equal(await repo.sha('main'), featureSha);
 		} finally {
 			repo.cleanup();
 		}
