@@ -8,7 +8,7 @@ import { describe, it } from 'node:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DEFAULT_SETTINGS } from '../../core/config';
-import { clearJournal } from '../../core/safety';
+import { clearJournal, journalOperations, type JournalEntry } from '../../core/safety';
 import { createLinearRepo, createTempRepo, TempRepo } from '../helpers/tempRepo';
 
 describe('safety - journal', () => {
@@ -99,6 +99,38 @@ describe('safety - journal', () => {
 		} finally {
 			repo.cleanup();
 		}
+	});
+
+	it('aggregates adjacent checkpoints without changing or dropping the detailed journal', () => {
+		const entry = (id: string, operationId?: string): JournalEntry => ({
+			id,
+			...(operationId ? { operationId } : {}),
+			kind: 'branch',
+			at: '2026-01-01T00:00:00.000Z',
+			repo: '/repo',
+			summary: id,
+			undo: { type: 'none', hint: 'nothing' },
+		});
+		const journal = [
+			entry('action-a-1', 'a'),
+			entry('action-a-2', 'a'),
+			entry('legacy'),
+			entry('action-b', 'b'),
+			// A repeated id after another action starts a new group. This keeps a
+			// hand-edited journal from undoing unrelated entries as one action.
+			entry('action-a-3', 'a'),
+		];
+
+		assert.equal(journalOperations(journal, false).length, 5, 'the checkbox off keeps every checkpoint visible');
+		const grouped = journalOperations(journal, true);
+		assert.deepEqual(grouped.map((operation) => operation.entries.map((item) => item.id)), [
+			['action-a-1', 'action-a-2'],
+			['legacy'],
+			['action-b'],
+			['action-a-3'],
+		]);
+		assert.deepEqual(grouped.flatMap((operation) => operation.entries), journal, 'aggregation is only a view');
+		assert.equal(new Set(grouped.map((operation) => operation.id)).size, grouped.length, 'separate groups always have unique row ids');
 	});
 });
 

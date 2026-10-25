@@ -67,6 +67,8 @@ export type UndoSpec =
 
 export interface JournalEntry {
 	id: string;
+	/** Shared by every checkpoint written by one controller action. */
+	operationId?: string;
 	kind: OperationKind;
 	/** ISO timestamp. */
 	at: string;
@@ -79,6 +81,36 @@ export interface UndoResult {
 	entry: JournalEntry;
 	restored: string[];
 	messages: string[];
+}
+
+/** One row in the undo picker; its entries stay in journal order (oldest first). */
+export interface JournalOperation {
+	id: string;
+	entries: JournalEntry[];
+}
+
+/**
+ * Present the detailed journal as user actions without changing what is stored.
+ * Only adjacent entries with the same operation id are combined: legacy entries
+ * have no id and remain individual, and a corrupt/hand-edited repeated id can
+ * never pull an unrelated action into the group.
+ */
+export function journalOperations(journal: readonly JournalEntry[], aggregate: boolean): JournalOperation[] {
+	const operations: JournalOperation[] = [];
+	for (const entry of journal) {
+		const operationId = aggregate && typeof entry.operationId === 'string' && entry.operationId ? entry.operationId : undefined;
+		const previous = operations[operations.length - 1];
+		const previousEntry = previous?.entries[previous.entries.length - 1];
+		if (operationId && previous && previousEntry?.operationId === operationId) {
+			previous.entries.push(entry);
+		} else {
+			// Include the first entry id as well: an interleaved/hand-edited journal
+			// may contain the same operation id in two separate groups, and tree row
+			// ids must still be unique.
+			operations.push({ id: operationId ? `operation:${operationId}:${entry.id}` : `entry:${entry.id}`, entries: [entry] });
+		}
+	}
+	return operations;
 }
 
 export interface RecoveryPoint {
@@ -106,7 +138,12 @@ export class SafetyNet {
 	 * what makes the view current while the result notification is still up.
 	 * Never let it break an operation: it is called inside a try/catch.
 	 */
-	constructor(private readonly git: Git, private readonly settings: Settings, private readonly onChanged?: () => void) {}
+	constructor(
+		private readonly git: Git,
+		private readonly settings: Settings,
+		private readonly onChanged?: () => void,
+		private readonly operationId?: string,
+	) {}
 
 	/** Announce a change; a broken listener must never fail the operation. */
 	private announceChange(): void {
@@ -143,7 +180,8 @@ export class SafetyNet {
 
 	async record(entry: { kind: OperationKind; summary: string; undo: UndoSpec; repo?: string; at?: string }): Promise<JournalEntry> {
 		const full: JournalEntry = {
-			id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+			id: createOperationId(),
+			...(this.operationId ? { operationId: this.operationId } : {}),
 			kind: entry.kind,
 			at: entry.at ?? new Date().toISOString(),
 			repo: entry.repo ?? this.git.cwd,
@@ -433,6 +471,11 @@ function isJournalEntry(value: unknown): value is JournalEntry {
 
 export function shorten(sha: string): string {
 	return sha.length > 10 ? sha.slice(0, 10) : sha;
+}
+
+/** Unique id for a journal entry or for all checkpoints of one user action. */
+export function createOperationId(): string {
+	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function timestamp(date: Date = new Date()): string {

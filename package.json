@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.23",
+  "version": "0.4.26",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -821,6 +821,11 @@
           "minimum": 1,
           "maximum": 1000,
           "markdownDescription": "How many operations to remember for **Undo Last Operation** (stored in `.git/geco/journal.json`)."
+        },
+        "geco.aggregateUndoLastOperation": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show one undo item per user action and restore all of its journal checkpoints together, back to the state before that action. Follow-up steps such as Force Push after a rewrite belong to the originating action. The detailed journal is still kept. Turn off to show and undo each checkpoint separately. Legacy entries written before action ids were introduced remain separate."
         },
         "geco.showGraphMenuHint": {
           "type": "boolean",

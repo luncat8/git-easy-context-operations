@@ -31,6 +31,7 @@ describe('config - defaults', () => {
 		assert.equal(DEFAULT_SETTINGS.forcePushMode, 'lease');
 		assert.equal(DEFAULT_SETTINGS.confirmDestructiveOperations, true);
 		assert.equal(DEFAULT_SETTINGS.rememberDialogDecisions, false, 'saved dialog decisions are opt-in');
+		assert.equal(DEFAULT_SETTINGS.aggregateUndoLastOperation, true, 'aggregated undo is the default');
 		assert.equal(DEFAULT_SETTINGS.preserveCommitterDateOnReword, true);
 		assert.equal(DEFAULT_SETTINGS.applyPatchDestination, 'newBranch');
 		assert.equal(DEFAULT_SETTINGS.threeWayApply, true);
@@ -52,6 +53,7 @@ describe('config - normalisation', () => {
 			worktreeFolder: 'wt',
 			threeWayApply: false,
 			journalMaxEntries: 5,
+			aggregateUndoLastOperation: true,
 			showGraphMenuHint: false,
 		});
 		assert.equal(settings.gitPath, '/usr/local/bin/git');
@@ -63,6 +65,7 @@ describe('config - normalisation', () => {
 		assert.equal(settings.applyPatchDestination, 'worktree');
 		assert.equal(settings.worktreeFolder, 'wt');
 		assert.equal(settings.journalMaxEntries, 5);
+		assert.equal(settings.aggregateUndoLastOperation, true);
 	});
 
 	it('replaces junk with the default instead of throwing', () => {
@@ -79,6 +82,7 @@ describe('config - normalisation', () => {
 			worktreeFolder: 7,
 			threeWayApply: undefined,
 			journalMaxEntries: Infinity,
+			aggregateUndoLastOperation: 'yes',
 			showGraphMenuHint: {},
 		});
 		assert.deepEqual(settings, { ...DEFAULT_SETTINGS, gitPath: DEFAULT_SETTINGS.gitPath });

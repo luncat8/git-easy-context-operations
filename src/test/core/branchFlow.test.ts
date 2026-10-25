@@ -73,6 +73,26 @@ describe('controller - create branch flow', () => {
 		assert.deepEqual(ui.askCalls[0]!.options.actions, [ACTIONS.checkout, ACTIONS.undo]);
 	});
 
+	it('aggregates the checkout follow-up with creating the branch', async () => {
+		const { repo, shas } = await linear({ aggregateUndoLastOperation: true });
+		const ui = new FakeUI({ inputs: ['feature'], asks: [ACTIONS.checkout] });
+		const controller = controllerFor(ui, repo);
+		await controller.createBranch(repo.dir, graphCommit(repo, shas.v02));
+		await controller.settled();
+
+		const journal = await repo.ctx.safety.readJournal();
+		assert.equal(journal.length, 2);
+		assert.equal(new Set(journal.map((entry) => entry.operationId)).size, 1, 'create + checkout is one user action');
+
+		const undoUi = new FakeUI();
+		await controllerFor(undoUi, repo).undoLastOperation(repo.dir);
+		assert.equal(undoUi.pickCalls.length, 0, 'one aggregated action needs no checkpoint picker');
+		assert.match(undoUi.confirmCalls[0]!.message, /^Undo 2 checkpoints/);
+		assert.equal(await repo.api.headBranch(), 'main');
+		assert.equal(await repo.hasBranch('feature'), false);
+		assert.deepEqual(await repo.ctx.safety.readJournal(), []);
+	});
+
 	it('accepts a typed name instead of the suggestion', async () => {
 		const { repo, shas } = await linear();
 		const ui = new FakeUI({ inputs: ['feature/new-button'], asks: [undefined] });

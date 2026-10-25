@@ -56,7 +56,13 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   upstream), warns that Sync merges the old history back in, and repairs what can
   be repaired. See [docs/STUCK-STATES.md](docs/STUCK-STATES.md).
 - **Undo** - recovery refs under `refs/geco/`, backup branches and a journal of
-  everything the extension did; **Undo Last Operation** rolls it back.
+  everything the extension did; **Undo Last Operation** rolls it back. By
+  default (`geco.aggregateUndoLastOperation` on) it shows one item per user
+  action and restores all of its checkpoints together (including squash plus
+  its force-push follow-up, create plus checkout, or a fast-forward plus its
+  cleanup). The detailed journal is still kept; turn the setting off for the
+  original checkpoint-by-checkpoint undo. Entries written before action ids
+  were introduced remain individual checkpoints.
 - **Customize the context menus** - switch every menu item on/off from a native
   checkbox tree (`Git Easy Ops: Customize Context Menus...`).
 - **Remember dialog answers (opt-in)** - with `geco.rememberDialogDecisions` on,

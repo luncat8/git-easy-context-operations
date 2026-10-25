@@ -17,7 +17,7 @@ import * as vscode from 'vscode';
 import type { Controller } from '../core/controller';
 import type { Settings } from '../core/config';
 import type { GraphCommitRow, GraphRefRow } from '../core/graphRows';
-import { shorten } from '../core/safety';
+import { journalOperations, shorten } from '../core/safety';
 
 export type GecoNodeKind = 'group' | 'commit' | 'branch' | 'backup' | 'journal';
 
@@ -259,13 +259,22 @@ export class GecoHistoryProvider implements vscode.TreeDataProvider<GecoTreeItem
 				}),
 			);
 		}
-		for (const entry of journal.slice().reverse().slice(0, 20)) {
+		const operations = journalOperations(journal, this.deps.settings().aggregateUndoLastOperation);
+		for (const operation of operations.slice().reverse().slice(0, 20)) {
+			const first = operation.entries[0]!;
+			const checkpoints = operation.entries.length > 1 ? `${operation.entries.length} checkpoints · ` : '';
 			items.push(
-				new GecoTreeItem(repoPath, 'journal', `${entry.kind}: ${entry.summary}`, {
-					description: new Date(entry.at).toLocaleString(),
-					tooltip: `${entry.summary}\n${entry.at}\nChoose "Undo Last Operation" to roll operations back, newest first.`,
+				new GecoTreeItem(repoPath, 'journal', `${first.kind}: ${first.summary}`, {
+					description: `${checkpoints}${new Date(first.at).toLocaleString()}`,
+					tooltip: [
+						first.summary,
+						first.at,
+						...operation.entries.slice(1).map((entry) => `Checkpoint: ${entry.kind}: ${entry.summary}`),
+						'Choose "Undo Last Operation" to roll operations back, newest first.',
+					].join('\n'),
 					icon: 'history',
 					contextValue: 'geco.backup',
+					id: `journal:${operation.id}`,
 				}),
 			);
 		}

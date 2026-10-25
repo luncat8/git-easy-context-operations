@@ -16,6 +16,8 @@ export interface RepoContext {
 
 export interface RepoContextOptions {
 	exec?: GitExec;
+	/** Optional action id stamped on every journal checkpoint written by this context. */
+	operationId?: string;
 	/**
 	 * Called whenever an operation changed the repository (journaled or undone).
 	 * The VS Code layer refreshes the tree view with it, so the graph is current
@@ -34,5 +36,5 @@ export function createRepoContext(
 	const resolved = normalizeSettings({ ...DEFAULT_SETTINGS, ...(settings ?? {}) } as Record<string, unknown>);
 	const gitExec = options.exec ?? createGitExec({ gitPath: resolved.gitPath });
 	const git = new Git(gitExec, cwd);
-	return { cwd, git, safety: new SafetyNet(git, resolved, options.onChanged), settings: resolved };
+	return { cwd, git, safety: new SafetyNet(git, resolved, options.onChanged, options.operationId), settings: resolved };
 }

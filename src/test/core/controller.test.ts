@@ -620,6 +620,52 @@ describe('controller - fast-forward flows', () => {
 		}
 	});
 
+	it('aggregated undo restores the state before a fast-forward and all of its cleanup', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature']);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			const oldMain = await repo.sha('main');
+			// An older, legacy entry makes the picker necessary and proves that
+			// enabling aggregation does not rewrite or hide the detailed journal.
+			await repo.ctx.safety.record({
+				kind: 'backup',
+				summary: 'Earlier standalone checkpoint',
+				undo: { type: 'none', hint: 'Nothing to restore.' },
+			});
+
+			const ui = new FakeUI({ choices: ['move-clean'] });
+			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
+			assert.equal(await repo.api.headBranch(), 'main');
+			assert.equal(await repo.hasBranch('feature'), false);
+			assert.equal(await repo.hasBranch('old'), false);
+
+			const journal = await repo.ctx.safety.readJournal();
+			assert.equal(journal.length, 4, 'one legacy entry plus three detailed checkpoints');
+			assert.equal(journal[0]!.operationId, undefined, 'old journals need no migration');
+			assert.ok(journal[1]!.operationId, 'new checkpoints know their user action');
+			assert.equal(new Set(journal.slice(1).map((entry) => entry.operationId)).size, 1, 'the whole composite action shares one id');
+
+			const undoUi = new FakeUI({ picks: [0] });
+			await controllerFor(undoUi, repo, { ...DEFAULT_SETTINGS, aggregateUndoLastOperation: true }).undoLastOperation(repo.dir);
+
+			assert.equal(undoUi.pickCalls[0]!.items.length, 2, 'the picker shows actions, not three checkpoints for the latest action');
+			assert.match(undoUi.pickCalls[0]!.items[0]!.label, /^fastForward - Moved main /);
+			assert.match(undoUi.pickCalls[0]!.items[0]!.description!, /3 checkpoints/);
+			assert.match(undoUi.confirmCalls[0]!.message, /^Undo 3 checkpoints, back to "Moved main /);
+			assert.match(undoUi.allMessages(), /3 checkpoints/);
+
+			assert.equal(await repo.sha('main'), oldMain, 'the moved branch is back at its old tip');
+			assert.equal(await repo.sha('feature'), target, 'the deleted feature branch is restored');
+			assert.equal(await repo.api.headBranch(), 'feature', 'the original checkout is restored too');
+			assert.equal(await repo.hasBranch('old'), false, 'the backup created by the action is gone again');
+			assert.deepEqual(await repo.statusLines(), [], 'the worktree matches the restored feature checkout');
+			assert.deepEqual((await repo.ctx.safety.readJournal()).map((entry) => entry.summary), ['Earlier standalone checkpoint']);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
 	it('offers to remove the suffixed backup when the base name is taken elsewhere', async () => {
 		const { repo, shas } = await createLinearRepo();
 		try {
@@ -1806,6 +1852,33 @@ describe('controller - squash flows', () => {
 			const rows = await controllerFor(new FakeUI(), repo).graphRows(repo.dir);
 			assert.deepEqual(rows.map((row) => row.subject), ['combined', 'v0.2', 'v0.1'], 'the squashed-away commits are gone');
 			assert.equal(await repo.hasRef((await repo.ctx.safety.listRecoveryPoints())[0]!.name), true, 'the recovery point is still there');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('aggregates a squash and its force-push follow-up into one action', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const remoteDir = await repo.addBareRemote('origin', ['main']);
+			const remoteBefore = await repo.remoteBranchSha(remoteDir, 'main');
+			const settings = { ...DEFAULT_SETTINGS, aggregateUndoLastOperation: true };
+			const ui = new FakeUI({ inputs: ['combined'], asks: [ACTIONS.forcePush] });
+			const controller = controllerFor(ui, repo, settings);
+			await controller.squashSelectedCommits(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }, { gecoKind: 'commit', sha: shas.v03 }]);
+			await controller.settled();
+
+			const journal = await repo.ctx.safety.readJournal();
+			assert.deepEqual(journal.map((entry) => entry.kind), ['squash', 'forcePush']);
+			assert.equal(new Set(journal.map((entry) => entry.operationId)).size, 1, 'the follow-up stays in the originating user action');
+
+			const undoUi = new FakeUI();
+			await controllerFor(undoUi, repo, settings).undoLastOperation(repo.dir);
+			assert.equal(undoUi.pickCalls.length, 0, 'one aggregated action needs no checkpoint picker');
+			assert.match(undoUi.confirmCalls[0]!.message, /^Undo 2 checkpoints/);
+			assert.equal(await repo.sha('main'), shas.v04, 'the squash is rolled back');
+			assert.equal(await repo.remoteBranchSha(remoteDir, 'main'), remoteBefore, 'the push is rolled back too');
+			assert.deepEqual(await repo.ctx.safety.readJournal(), []);
 		} finally {
 			repo.cleanup();
 		}

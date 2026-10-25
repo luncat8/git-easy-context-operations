@@ -4,6 +4,47 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.26
+
+### Changed
+
+- **Aggregate Undo is on by default.** 
+
+## 0.4.25
+
+### Fixed
+
+- **Aggregate Undo now includes follow-up steps in the action that offered them.**
+  Squash/reword/fast-forward/clean-history followed by their Force Push button,
+  push/sync diagnosis repairs, and Create Branch followed by Check Out previously
+  created fresh action ids, so the journal still showed separate `squash`,
+  `forcePush`, `branch`, ... rows even with
+  `geco.aggregateUndoLastOperation` enabled. These follow-ups now inherit the
+  originating action id. One aggregated Undo applies all of their checkpoints
+  newest-to-oldest; regression tests verify both the local history and remote
+  after undoing squash + push, and the original checkout after undoing create +
+  checkout. Separate menu commands remain separate actions, and legacy journal
+  entries without an action id remain individually undoable.
+- Refreshed the tracked development bundle; it had not contained the Aggregate
+  Undo implementation even though the 0.4.24 VSIX packages did.
+
+## 0.4.24
+
+### Added
+
+- **Optional aggregate Undo, one restore point per user action.** The new
+  `geco.aggregateUndoLastOperation` checkbox is off by default, preserving the
+  existing checkpoint-by-checkpoint behavior. Every journal checkpoint now also
+  records the controller action that created it. With the checkbox on, **Undo
+  Last Operation** and the journal rows in **Backups & Undo** show one item for
+  the whole action; choosing it applies every detailed undo step newest to
+  oldest, restoring the state from before the action. This covers the composite
+  fast-forward + backup removal + redundant-branch cleanup flow with one Undo,
+  including its branch checkout. The journal file and output log keep every
+  checkpoint, and legacy entries without an action id remain individually
+  undoable. An end-to-end regression test verifies the complete pre-action
+  branch/worktree state and the remaining journal.
+
 ## 0.4.23
 
 ### Changed

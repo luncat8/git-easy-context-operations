@@ -24,6 +24,8 @@ export interface Settings {
 	worktreeFolder: string;
 	threeWayApply: boolean;
 	journalMaxEntries: number;
+	/** Show and undo all checkpoints of one user action as a single operation. */
+	aggregateUndoLastOperation: boolean;
 	showGraphMenuHint: boolean;
 	graphCommitLimit: number;
 	showGraphLanes: boolean;
@@ -55,6 +57,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	worktreeFolder: 'geco.worktreeFolder',
 	threeWayApply: 'geco.threeWayApply',
 	journalMaxEntries: 'geco.journalMaxEntries',
+	aggregateUndoLastOperation: 'geco.aggregateUndoLastOperation',
 	showGraphMenuHint: 'geco.showGraphMenuHint',
 	graphCommitLimit: 'geco.graphCommitLimit',
 	showGraphLanes: 'geco.showGraphLanes',
@@ -75,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	worktreeFolder: '.geco-worktrees',
 	threeWayApply: true,
 	journalMaxEntries: 100,
+	aggregateUndoLastOperation: true,
 	showGraphMenuHint: true,
 	graphCommitLimit: 200,
 	showGraphLanes: true,
@@ -137,6 +141,7 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		worktreeFolder: asString(source.worktreeFolder, DEFAULT_SETTINGS.worktreeFolder).trim().replace(/^[/\\]+|[/\\]+$/g, '').trim() || '.geco-worktrees',
 		threeWayApply: asBoolean(source.threeWayApply, DEFAULT_SETTINGS.threeWayApply),
 		journalMaxEntries: asInt(source.journalMaxEntries, DEFAULT_SETTINGS.journalMaxEntries, 1, 1000),
+		aggregateUndoLastOperation: asBoolean(source.aggregateUndoLastOperation, DEFAULT_SETTINGS.aggregateUndoLastOperation),
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
 		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
 		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),

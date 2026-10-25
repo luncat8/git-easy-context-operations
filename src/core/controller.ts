@@ -71,7 +71,7 @@ import { assessGraphMenu, graphMenuFixOptions, GRAPH_MENU_PROPOSALS, type ArgvSt
 import { addProposedApi } from './argvJson';
 import { addProductProposals } from './productJson';
 import { buildGraphRows, refRowsAt, type GraphCommitRow, type GraphRefRow } from './graphRows';
-import { shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
+import { createOperationId, journalOperations, shorten, timestamp, type JournalEntry, type RecoveryPoint } from './safety';
 import { remoteToWebUrl } from './webLink';
 import {
 	analyzeDeadPaths,
@@ -247,6 +247,10 @@ export class Controller {
 	contextFor(cwd: string): RepoContext {
 		return createRepoContext(cwd, this.settings, {
 			exec: this.options.exec,
+			// One context belongs to one user action. Composite actions (notably
+			// fast-forward plus its optional cleanup) can therefore keep several
+			// detailed checkpoints while Undo presents them as one operation.
+			operationId: createOperationId(),
 			onChanged: () => this.options.onRepositoryChanged?.(),
 		});
 	}
@@ -508,9 +512,9 @@ export class Controller {
 		// the push: the modal asks the same question a second time otherwise.
 		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
 			if (chosen === ACTIONS.forcePush) {
-				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true });
+				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.forcePushHard) {
-				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true });
+				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.undo) {
 				await this.undoLast(ctx, true);
 			}
@@ -703,9 +707,9 @@ export class Controller {
 		// again in a modal dialog.
 		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
 			if (chosen === ACTIONS.forcePush) {
-				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true });
+				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.forcePushHard) {
-				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true });
+				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.undo) {
 				await this.undoLast(ctx, true);
 			}
@@ -875,8 +879,9 @@ export class Controller {
 				// true fast-forward: the backup is redundant by construction.
 				// deleteRedundantBranches still re-verifies everything
 				// (existence, tip, reachability, protected) right before it
-				// deletes, and it journals the removal as its own entry, so
-				// one Undo brings the backup back without touching the move.
+			// deletes, and it journals the removal as its own entry. With
+			// aggregate Undo off, one Undo brings the backup back without
+			// touching the move; with it on, the whole action is restored.
 				const removal = await this.ui.withProgress(`Removing ${backup.name}`, (report) => {
 					report('checking the backup branch is still redundant');
 					return deleteRedundantBranches(
@@ -1026,7 +1031,7 @@ export class Controller {
 			async (chosen) => {
 				if (chosen === ACTIONS.forcePush) {
 					// The button was already answered: no second modal.
-					await this.forcePush(cwd, [], undefined, result.branch, { confirmed: true });
+					await this.forcePush(cwd, [], undefined, result.branch, { confirmed: true, context: ctx });
 				} else if (chosen === ACTIONS.undo) {
 					await this.undoLast(ctx, true);
 				} else if (chosen === ACTIONS.showBackups) {
@@ -1322,7 +1327,7 @@ export class Controller {
 				// journal entry (the remote sha before the push). No modal
 				// confirmation: the row the user picked says exactly what the
 				// modal would ask, so asking twice is one dialog too many.
-				await this.forcePush(cwd, [], 'lease', report.branch, { confirmed: true });
+				await this.forcePush(cwd, [], 'lease', report.branch, { confirmed: true, context: ctx });
 				return true;
 			}
 
@@ -1381,10 +1386,13 @@ export class Controller {
 		args: readonly unknown[],
 		mode?: ForcePushMode,
 		branch?: string,
-		options: { confirmed?: boolean } = {},
+		options: { confirmed?: boolean; context?: RepoContext } = {},
 	): Promise<void> {
 		await this.guard('Force push', async () => {
-			const ctx = this.contextFor(cwd);
+			// A result-button / diagnosis follow-up is part of the action that
+			// offered it. Reusing its context keeps all checkpoints under one
+			// operation id; a menu invocation without a context starts a new one.
+			const ctx = options.context ?? this.contextFor(cwd);
 			await assertStartable(ctx);
 			let target = branch;
 			if (!target) {
@@ -2347,7 +2355,7 @@ export class Controller {
 			},
 			async (chosen) => {
 				if (chosen === ACTIONS.forcePush) {
-					await this.forcePush(ctx.git.cwd, [], undefined, undefined, { confirmed: true });
+					await this.forcePush(ctx.git.cwd, [], undefined, undefined, { confirmed: true, context: ctx });
 				} else if (chosen === ACTIONS.openLog) {
 					await this.ui.showOutput?.();
 				}
@@ -2420,7 +2428,7 @@ export class Controller {
 					if (chosen === ACTIONS.checkout) {
 						// An object, not a bare string: the resolver reads branch names out of
 						// menu arguments, and a plain string would be taken for a commit.
-						await this.checkoutBranch(cwd, [{ branch: result.name }]);
+						await this.checkoutBranch(cwd, [{ branch: result.name }], { context: ctx });
 					} else if (chosen === ACTIONS.undo) {
 						await this.undoLast(ctx, true);
 					}
@@ -2430,9 +2438,9 @@ export class Controller {
 	}
 
 	/** "Check Out Branch" - also offered as a follow-up action after creating one. */
-	async checkoutBranch(cwd: string, args: readonly unknown[]): Promise<void> {
+	async checkoutBranch(cwd: string, args: readonly unknown[], options: { context?: RepoContext } = {}): Promise<void> {
 		await this.guard('Check out branch', async () => {
-			const ctx = this.contextFor(cwd);
+			const ctx = options.context ?? this.contextFor(cwd);
 			const branch = await this.resolveBranchArg(ctx, args, 'Check out which branch?');
 			if (!branch) {
 				return;
@@ -2895,16 +2903,25 @@ export class Controller {
 			await this.ui.message('info', 'Nothing to undo: no Git Easy Ops operation was recorded for this repository.');
 			return;
 		}
-		const newestFirst = journal.slice().reverse();
+		const newestFirst = journalOperations(journal, this.settings.aggregateUndoLastOperation).reverse();
 		let index = 0;
 		if (!skipPicker && newestFirst.length > 1) {
 			const picked = await this.ui.pick(
-				newestFirst.map((item, i) => ({
-					label: `${item.kind} - ${item.summary}`,
-					description: `${new Date(item.at).toLocaleString()}${i > 0 ? ` - also undoes ${i} newer operation${i === 1 ? '' : 's'}` : ''}`,
-					value: i,
-				})),
-				{ title: 'Undo which operation?', placeholder: 'Newest first - an older entry also undoes the newer ones' },
+				newestFirst.map((item, i) => {
+					const first = item.entries[0]!;
+					const checkpoints = item.entries.length > 1 ? ` - ${item.entries.length} checkpoints` : '';
+					return {
+						label: `${first.kind} - ${first.summary}`,
+						description: `${new Date(first.at).toLocaleString()}${checkpoints}${i > 0 ? ` - also undoes ${i} newer operation${i === 1 ? '' : 's'}` : ''}`,
+						value: i,
+					};
+				}),
+				{
+					title: 'Undo which operation?',
+					placeholder: this.settings.aggregateUndoLastOperation
+						? 'Newest action first - an older action also undoes the newer ones'
+						: 'Newest first - an older entry also undoes the newer ones',
+				},
 			);
 			if (picked === undefined) {
 				return;
@@ -2912,20 +2929,25 @@ export class Controller {
 			index = picked;
 		}
 		// Undoing an older operation means undoing everything that came after it,
-		// otherwise the refs no longer line up and git refuses the update.
-		const entries = newestFirst.slice(0, index + 1);
+		// otherwise the refs no longer line up and git refuses the update. Within
+		// an aggregate, every checkpoint is likewise applied newest -> oldest.
+		const selectedOperations = newestFirst.slice(0, index + 1);
+		const entries = selectedOperations.flatMap((operation) => operation.entries.slice().reverse());
+		const oldest = entries[entries.length - 1]!;
 
 		if (this.settings.confirmDestructiveOperations) {
-			const confirmed = await this.ui.confirm(
-				entries.length === 1
-					? `Undo "${entries[0]!.summary}"?`
-					: `Undo ${entries.length} operations, back to "${entries[entries.length - 1]!.summary}"?`,
-				{
-					confirmLabel: 'Undo',
-					destructive: true,
-					detail: entries.map((entry) => `${entry.kind}: ${entry.summary}\n  ${describeUndo(entry).split('\n').join('\n  ')}`).join('\n\n'),
-				},
-			);
+			const question = entries.length === 1
+				? `Undo "${entries[0]!.summary}"?`
+				: selectedOperations.length === 1
+					? `Undo ${entries.length} checkpoints, back to "${oldest.summary}"?`
+					: this.settings.aggregateUndoLastOperation
+						? `Undo ${selectedOperations.length} operations (${entries.length} checkpoints), back to "${oldest.summary}"?`
+						: `Undo ${entries.length} operations, back to "${oldest.summary}"?`;
+			const confirmed = await this.ui.confirm(question, {
+				confirmLabel: 'Undo',
+				destructive: true,
+				detail: entries.map((entry) => `${entry.kind}: ${entry.summary}\n  ${describeUndo(entry).split('\n').join('\n  ')}`).join('\n\n'),
+			});
 			if (!confirmed) {
 				this.ui.log('Undo cancelled by the user.');
 				return;
@@ -2938,7 +2960,13 @@ export class Controller {
 			restored.push(...result.restored);
 			this.ui.log([`Undid: ${entry.summary}`, ...result.restored.map((r) => `  restored ${r}`), ...result.messages.map((m) => `  ${m}`)].join('\n'));
 		}
-		const summary = entries.length === 1 ? entries[0]!.summary : `${entries.length} operations (newest: ${entries[0]!.summary})`;
+		const summary = entries.length === 1
+			? entries[0]!.summary
+			: selectedOperations.length === 1
+				? `${oldest.summary} (${entries.length} checkpoints)`
+				: this.settings.aggregateUndoLastOperation
+					? `${selectedOperations.length} operations / ${entries.length} checkpoints (newest: ${entries[0]!.summary})`
+					: `${entries.length} operations (newest: ${entries[0]!.summary})`;
 		await this.ui.message('info', `Undone: ${summary}${restored.length > 0 ? ` (${restored.join(', ')})` : ''}`);
 	}
 
