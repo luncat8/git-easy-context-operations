@@ -51,6 +51,10 @@ export interface ParsedPatch {
 	authorEmail?: string;
 	authorDate?: string;
 	hasCombinedDiff: boolean;
+	/** Binary-file diff headers without an embedded payload; the files may be recovered beside a patch file. */
+	unavailableBinaryFiles: PatchFileEntry[];
+	/** Binary files that could not be recovered from beside the patch file. */
+	skippedBinaryPaths: string[];
 }
 
 const MAILBOX_HEADER = /^From ([0-9a-f]{7,64}) /;
@@ -201,7 +205,48 @@ export function parsePatch(raw: string): ParsedPatch {
 		authorEmail,
 		authorDate,
 		hasCombinedDiff,
+		unavailableBinaryFiles: [],
+		skippedBinaryPaths: [],
 	};
+}
+
+/**
+ * `git diff` without `--binary` emits only `Binary files ... differ` for a
+ * binary change. That header is not an applicable patch; remove it from the
+ * input to git while keeping its blob ids for base matching and possible
+ * sidecar recovery. Text changes in the same patch/mailbox remain intact.
+ * Binary sections with an actual `GIT binary patch` payload are left intact.
+ */
+function omitUnavailableBinarySections(raw: string): ParsedPatch {
+	const parsed = parsePatch(raw);
+	const starts: number[] = [];
+	const marker = /^diff --(?:git|cc|combined) .*$/gm;
+	for (let match = marker.exec(parsed.raw); match; match = marker.exec(parsed.raw)) {
+		starts.push(match.index);
+	}
+	if (starts.length === 0) {
+		return parsed;
+	}
+
+	let filtered = parsed.raw.slice(0, starts[0]);
+	const unavailable: PatchFileEntry[] = [];
+	for (let i = 0; i < starts.length; i++) {
+		const section = parsed.raw.slice(starts[i], starts[i + 1] ?? parsed.raw.length);
+		if (/^Binary files .* differ\s*$/m.test(section) && !/^GIT binary patch\s*$/m.test(section)) {
+			const entry = parsePatch(section).files[0];
+			if (entry) {
+				unavailable.push(entry);
+			}
+			continue;
+		}
+		filtered += section;
+	}
+	const result = parsePatch(filtered);
+	// Keep the old/new blob ids for base matching, but do not leave the
+	// unapplyable binary headers in the patch sent to git.
+	result.files.push(...unavailable);
+	result.unavailableBinaryFiles = unavailable;
+	return result;
 }
 
 function pathsFromDiffGit(line: string): { path: string; oldPath: string } {
@@ -278,6 +323,8 @@ export interface MaterializedPatch {
 	label: string;
 	/** The commit the patch was taken from, used as the first base candidate. */
 	sourceCommit?: string;
+	/** For file patches, the directory to search for binary blobs referenced by index hashes. */
+	sourceDirectory?: string;
 }
 
 export async function materializePatch(ctx: RepoContext, source: PatchSource): Promise<MaterializedPatch> {
@@ -338,7 +385,7 @@ export async function materializePatch(ctx: RepoContext, source: PatchSource): P
 			if (!patch.trim()) {
 				throw new GecoError('nothing-to-do', `Patch file "${source.path}" is empty.`);
 			}
-			return { patch, label: path.basename(absolute) };
+			return { patch, label: path.basename(absolute), sourceDirectory: path.dirname(absolute) };
 		}
 		case 'text': {
 			if (!source.patch.trim()) {
@@ -398,9 +445,16 @@ export interface FindBaseResult {
 }
 
 export async function findProperBase(ctx: RepoContext, options: FindBaseOptions): Promise<FindBaseResult> {
-	const parsed = parsePatch(options.patch);
+	const parsed = omitUnavailableBinarySections(options.patch);
 	if (parsed.files.length === 0) {
-		throw new GecoError('unsupported', 'This does not look like a patch (no file diffs found).');
+		const skipped = parsed.skippedBinaryPaths;
+		throw new GecoError(
+			'unsupported',
+			skipped.length > 0
+				? 'The patch contains no applicable files; its binary file diffs have no embedded data.'
+				: 'This does not look like a patch (no file diffs found).',
+			skipped.length > 0 ? `Skipped binary files: ${skipped.join(', ')}` : undefined,
+		);
 	}
 	if (parsed.hasCombinedDiff) {
 		throw new GecoError('unsupported', 'Combined (`--cc`) diffs cannot be applied. Re-create the patch with `git diff <parent> <commit>`.');
@@ -537,6 +591,11 @@ async function evaluateCandidate(ctx: RepoContext, parsed: ParsedPatch, candidat
 		}
 		return evaluation;
 	}
+	const mismatchedBinary = parsed.unavailableBinaryFiles.find((file) => mismatched.includes(file.path));
+	if (mismatchedBinary) {
+		evaluation.reason = `binary pre-image differs for ${mismatchedBinary.path}`;
+		return evaluation;
+	}
 
 	const indexFile = tempIndexPath('probe');
 	try {
@@ -569,6 +628,112 @@ async function evaluateCandidate(ctx: RepoContext, parsed: ParsedPatch, candidat
 
 function blobMatches(full: string, expected: string): boolean {
 	return full === expected || full.startsWith(expected) || expected.startsWith(full);
+}
+
+interface RecoveredBinaryFile {
+	entry: PatchFileEntry;
+	sourcePath: string;
+	expectedBlob: string;
+	/** Safe repository-relative target path, rooted in whichever worktree receives the patch. */
+	targetPath: string;
+}
+
+/** Find direct children of the patch directory whose Git blob id matches a missing binary section. */
+async function recoverableBinaryFiles(
+	git: Git,
+	parsed: ParsedPatch,
+	sourceDirectory?: string,
+): Promise<{ found: RecoveredBinaryFile[]; skipped: PatchFileEntry[] }> {
+	if (parsed.unavailableBinaryFiles.length === 0) {
+		return { found: [], skipped: [] };
+	}
+	const candidates: string[] = [];
+	if (sourceDirectory) {
+		try {
+			for (const item of await fsp.readdir(sourceDirectory, { withFileTypes: true })) {
+				if (item.isFile()) {
+					candidates.push(path.join(sourceDirectory, item.name));
+				}
+			}
+		} catch {
+			// A missing/inaccessible sidecar directory simply means the binaries
+			// remain skipped; it must not prevent the text parts from applying.
+		}
+	}
+
+	const found: RecoveredBinaryFile[] = [];
+	const skipped: PatchFileEntry[] = [];
+	for (const entry of parsed.unavailableBinaryFiles) {
+		const relativeTarget = entry.path || entry.oldPath;
+		const absoluteTarget = path.resolve(git.cwd, relativeTarget);
+		const relativeCheck = path.relative(git.cwd, absoluteTarget);
+		if (!relativeTarget || !entry.postImageBlob || !relativeCheck || relativeCheck === '..' || relativeCheck.startsWith(`..${path.sep}`) || path.isAbsolute(relativeCheck)) {
+			skipped.push(entry);
+			continue;
+		}
+
+		let matchedPath: string | undefined;
+		let matchedHash: string | undefined;
+		let ambiguous = false;
+		for (const candidate of candidates) {
+			const result = await git.run(['hash-object', `--path=${relativeTarget}`, '--', candidate]);
+			const hash = result.stdout.trim();
+			if (result.exitCode === 0 && hash.startsWith(entry.postImageBlob)) {
+				if (matchedHash && matchedHash !== hash) {
+					ambiguous = true;
+					break;
+				}
+				matchedPath ??= candidate;
+				matchedHash = hash;
+			}
+		}
+		if (!matchedPath || ambiguous) {
+			skipped.push(entry);
+			continue;
+		}
+		found.push({ entry, sourcePath: matchedPath, expectedBlob: entry.postImageBlob, targetPath: relativeTarget });
+	}
+	return { found, skipped };
+}
+
+async function installRecoveredBinaryFiles(git: Git, files: readonly RecoveredBinaryFile[]): Promise<void> {
+	const copies: Array<{ source: string; target: string }> = [];
+	for (const file of files) {
+		const target = path.resolve(git.cwd, file.targetPath);
+		const sourceHash = await git.run(['hash-object', `--path=${file.targetPath}`, '--', file.sourcePath]);
+		if (sourceHash.exitCode !== 0 || !sourceHash.stdout.trim().startsWith(file.expectedBlob)) {
+			throw new GecoError('unsupported', `The sidecar file for "${file.entry.path}" changed after it was verified.`, 'Re-run Apply Patch to verify it again.');
+		}
+		if (path.resolve(file.sourcePath) === target) {
+			continue;
+		}
+
+		// Validate every target before copying any of them, and never follow a
+		// repository symlink when installing an untrusted patch path.
+		let cursor = git.cwd;
+		for (const part of file.targetPath.split(/[\\/]/)) {
+			cursor = path.join(cursor, part);
+			try {
+				const stat = await fsp.lstat(cursor);
+				if (stat.isSymbolicLink()) {
+					throw new GecoError('unsupported', `Cannot install recovered binary "${file.entry.path}" through a symbolic link.`);
+				}
+			} catch (error) {
+				if (error instanceof GecoError) {
+					throw error;
+				}
+				if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+					throw error;
+				}
+				break;
+			}
+		}
+		copies.push({ source: file.sourcePath, target });
+	}
+	for (const copy of copies) {
+		await fsp.mkdir(path.dirname(copy.target), { recursive: true });
+		await fsp.copyFile(copy.source, copy.target);
+	}
 }
 
 /**
@@ -647,6 +812,8 @@ export async function patchAlreadyAppliedReason(
 
 export interface ApplyPatchOptions {
 	patch: string;
+	/** Directory containing the original patch file; used only to recover indexed binary blobs. */
+	binarySourceDirectory?: string;
 	/** Explicit base; when omitted the proper base is searched for. */
 	base?: string;
 	sourceCommit?: string;
@@ -724,6 +891,26 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 		stopAtFirstMatch: !options.dryRun,
 	});
 	const parsed = found.parsed;
+	const recovery = await recoverableBinaryFiles(git, parsed, options.binarySourceDirectory);
+	parsed.skippedBinaryPaths = recovery.skipped.map((entry) => entry.path || entry.oldPath);
+	for (const entry of recovery.skipped) {
+		const name = entry.path || entry.oldPath || '(unknown binary file)';
+		warnings.push(
+			`Skipped binary file "${name}": no unique file beside the patch matched the new blob hash${entry.postImageBlob ? ` ${entry.postImageBlob}` : ''}. To include it automatically, put the exact binary file beside the patch before applying.`,
+		);
+	}
+	const textFiles = parsePatch(parsed.raw).files;
+	const applyingParsed: ParsedPatch = {
+		...parsed,
+		files: [...textFiles, ...recovery.found.map((file) => file.entry)],
+	};
+	if (applyingParsed.files.length === 0) {
+		throw new GecoError(
+			'unsupported',
+			'No patch changes can be applied: its binary file data was not found.',
+			warnings.join('\n') || 'Place the binary files beside the patch file, then retry.',
+		);
+	}
 
 	let base = options.base ? found.evaluated[0] : found.best;
 	if (!base) {
@@ -801,7 +988,7 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 			destination,
 			method: 'none',
 			cwd: git.cwd,
-			appliedPaths: parsed.files.map((f) => f.path || f.oldPath),
+			appliedPaths: applyingParsed.files.map((f) => f.path || f.oldPath),
 			conflicts: [],
 			staged: false,
 			committed: false,
@@ -845,7 +1032,14 @@ export async function applyPatch(ctx: RepoContext, options: ApplyPatchOptions): 
 
 	const target = new Git(git.exec, workDir);
 	try {
-		const applied = await applyInWorktree(target, parsed, { threeWay, mailbox, commit: options.commit, commitMessage: options.commitMessage, warnings });
+		const applied = await applyInWorktree(target, applyingParsed, {
+			threeWay,
+			mailbox,
+			commit: options.commit,
+			commitMessage: options.commitMessage,
+			recoveredBinaries: recovery.found,
+			warnings,
+		});
 		const commitSha = applied.committed ? await target.revParse('HEAD') : undefined;
 
 		if (createdWorktree || createdBranch) {
@@ -945,6 +1139,7 @@ interface ApplyInWorktreeOptions {
 	/** See {@link ApplyPatchOptions.commit} - `false` means never commit, mailbox included. */
 	commit?: boolean;
 	commitMessage?: string;
+	recoveredBinaries: readonly RecoveredBinaryFile[];
 	warnings: string[];
 }
 
@@ -959,13 +1154,12 @@ interface ApplyInWorktreeResult {
 
 async function applyInWorktree(git: Git, parsed: ParsedPatch, options: ApplyInWorktreeOptions): Promise<ApplyInWorktreeResult> {
 	const paths = parsed.files.map((f) => f.path || f.oldPath).filter(Boolean);
+	const binaryPaths = options.recoveredBinaries.map((file) => file.targetPath);
+	const hasTextPatch = parsePatch(parsed.raw).files.length > 0;
 
-	// `git am` is the only way to replay a mailbox *as a commit* (author,
-	// date, message included). When committing is explicitly unwanted, its
-	// mail headers are dropped and the diff goes through `git apply` like a
-	// plain patch: the change lands in the worktree/index, uncommitted, and
-	// the user writes the commit under their own name.
-	if (options.mailbox && options.commit !== false) {
+	// `git am` replays mailbox metadata. A binary without a payload is added
+	// afterwards from its hash-verified sidecar and folded into the new commit.
+	if (options.mailbox && options.commit !== false && hasTextPatch) {
 		const result = await git.amPatch(parsed.raw, { threeWay: options.threeWay });
 		const output = `${result.stdout}\n${result.stderr}`;
 		const alreadyApplied = /No changes -- Patch already applied/i.test(output);
@@ -986,6 +1180,16 @@ async function applyInWorktree(git: Git, parsed: ParsedPatch, options: ApplyInWo
 		if (alreadyApplied) {
 			options.warnings.push('git am reported the patch was already applied.');
 		}
+		if (binaryPaths.length > 0) {
+			await installRecoveredBinaryFiles(git, options.recoveredBinaries);
+			await git.ok(['add', '--', ...binaryPaths]);
+			const amended = alreadyApplied
+				? await git.run(['commit', '-F', '-'], { input: `${parsed.subject ?? 'Recover binary files from patch'} (recovered binaries)\n` })
+				: await git.run(['commit', '--amend', '--no-edit'], { env: { GIT_EDITOR: 'true' } });
+			if (amended.exitCode !== 0) {
+				throw new GecoError('git-failed', 'The patch text was committed, but the recovered binary could not be added to that commit.', `${amended.stdout}\n${amended.stderr}`.trim());
+			}
+		}
 		return {
 			method: options.threeWay ? 'am-3' : 'am',
 			appliedPaths: paths,
@@ -996,25 +1200,36 @@ async function applyInWorktree(git: Git, parsed: ParsedPatch, options: ApplyInWo
 		};
 	}
 
-	const result = await git.applyPatch(parsed.raw, { threeWay: options.threeWay });
-	const output = `${result.stdout}\n${result.stderr}`;
-	if (result.exitCode !== 0) {
-		const conflicts = await git.conflictedPaths();
-		throw new GecoError(
-			'conflict',
-			`git apply could not apply the patch${conflicts.length > 0 ? ` (conflicts in ${conflicts.join(', ')})` : ''}.`,
-			output.trim(),
-		);
+	if (hasTextPatch) {
+		const result = await git.applyPatch(parsed.raw, { threeWay: options.threeWay });
+		const output = `${result.stdout}\n${result.stderr}`;
+		if (result.exitCode !== 0) {
+			const conflicts = await git.conflictedPaths();
+			throw new GecoError(
+				'conflict',
+				`git apply could not apply the patch${conflicts.length > 0 ? ` (conflicts in ${conflicts.join(', ')})` : ''}.`,
+				output.trim(),
+			);
+		}
+	}
+
+	if (binaryPaths.length > 0) {
+		await installRecoveredBinaryFiles(git, options.recoveredBinaries);
 	}
 	const staged = options.threeWay; // `--3way` implies `--index`
+	if (binaryPaths.length > 0 && staged && !options.commit) {
+		await git.ok(['add', '--', ...binaryPaths]);
+	}
 	const conflicts = staged ? await git.conflictedPaths() : [];
 
 	let committed = false;
 	if (options.commit) {
 		if (!staged) {
 			await git.ok(['add', '--', ...paths]);
+		} else if (binaryPaths.length > 0) {
+			await git.ok(['add', '--', ...binaryPaths]);
 		}
-		const message = options.commitMessage ?? `Apply patch (${parsed.files.length} file${parsed.files.length === 1 ? '' : 's'})`;
+		const message = options.commitMessage ?? (parsed.subject || `Apply patch (${parsed.files.length} file${parsed.files.length === 1 ? '' : 's'})`);
 		const commitResult = await git.run(['commit', '-F', '-'], { input: `${message}\n` });
 		if (commitResult.exitCode !== 0) {
 			throw new GecoError('git-failed', 'The patch was applied but the commit failed.', `${commitResult.stdout}\n${commitResult.stderr}`.trim());

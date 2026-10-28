@@ -1511,6 +1511,7 @@ export class Controller {
 				report(`applying at ${shorten(base.sha)}`);
 				return applyPatch(ctx, {
 					patch: materialized.patch,
+					binarySourceDirectory: materialized.sourceDirectory,
 					sourceCommit: materialized.sourceCommit,
 					base: base.sha,
 					destination,
@@ -1618,6 +1619,7 @@ export class Controller {
 			report(`applying "${materialized.label}" (${destination})`);
 			return applyPatch(ctx, {
 				patch: materialized.patch,
+				binarySourceDirectory: materialized.sourceDirectory,
 				sourceCommit: parsed.commitSha,
 				destination,
 				// No branch-name question: `applyPatch` derives one from the

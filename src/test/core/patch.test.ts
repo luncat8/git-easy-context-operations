@@ -324,6 +324,116 @@ describe('findProperBase', () => {
 		assert.equal(found.evaluated.length >= 2, true);
 	});
 
+	test('binary diff headers without payload are skipped while text changes apply', async () => {
+		const repo = await temp();
+		const base = await repo.commit('base', { 'f.txt': 'before\n', 'blob.bin': '\u0000old' });
+		await repo.checkout('feature', { create: true });
+		await repo.commit('text change', { 'f.txt': 'after\n' });
+		const textPatch = await repo.gitOk(['diff', `${base}..HEAD`]);
+		await repo.checkout('main');
+		const patch = `${textPatch}\n\n${[
+			'diff --git a/blob.bin b/blob.bin',
+			`index ${await repo.gitOk(['hash-object', 'blob.bin'])}..2222222 100644`,
+			'Binary files a/blob.bin and b/blob.bin differ',
+		].join('\n')}\n`;
+
+		const found = await findProperBase(repo.ctx, { patch, targetBranch: 'main' });
+		assert.deepEqual(found.parsed.skippedBinaryPaths, []);
+		assert.deepEqual(found.parsed.unavailableBinaryFiles.map((file) => file.path), ['blob.bin']);
+		assert.deepEqual(found.parsed.files.map((file) => file.path), ['f.txt', 'blob.bin']);
+
+		const result = await applyPatch(repo.ctx, { patch, targetBranch: 'main', destination: 'current', commit: false });
+		assert.deepEqual(result.appliedPaths, ['f.txt']);
+		assert.match(result.warnings.join('\n'), /Skipped binary file.*blob\.bin/);
+		assert.equal(fs.readFileSync(path.join(repo.dir, 'f.txt'), 'utf8'), 'after\n');
+		assert.equal(fs.readFileSync(path.join(repo.dir, 'blob.bin')).toString('hex'), '006f6c64');
+	});
+
+	test('a binary-only diff uses its old blob to find the base and explains a missing sidecar', async () => {
+		const repo = await temp();
+		await repo.commit('base', { 'blob.bin': '\u0000old' });
+		const oldBlob = await repo.gitOk(['hash-object', 'blob.bin']);
+		const patch = [
+			'diff --git a/blob.bin b/blob.bin',
+			`index ${oldBlob}..2222222 100644`,
+			'Binary files a/blob.bin and b/blob.bin differ',
+		].join('\n');
+		const found = await findProperBase(repo.ctx, { patch });
+		assert.equal(found.best?.sha, await repo.api.revParse('HEAD'));
+
+		const error = await expectCode(() => applyPatch(repo.ctx, { patch, destination: 'current' }), 'unsupported');
+		assert.match(error.userMessage, /No patch changes can be applied/);
+		assert.match(error.detail ?? '', /put the exact binary file beside the patch/);
+	});
+
+	test('recovers a missing binary payload from a matching file beside the patch', async () => {
+		const repo = await temp();
+		const base = await repo.commit('base', { 'f.txt': 'before\n', 'assets/blob.bin': '\u0000old' });
+		await repo.checkout('feature', { create: true });
+		await repo.commit('text change', { 'f.txt': 'after\n' });
+		await repo.checkout('main');
+
+		const sidecarDir = path.join(repo.dir, 'patch-assets');
+		fs.mkdirSync(sidecarDir);
+		const sidecar = path.join(sidecarDir, 'downloaded-file.bin');
+		fs.writeFileSync(sidecar, Buffer.from([0, 9, 8, 7, 6]));
+		const oldBlob = await repo.gitOk(['hash-object', 'assets/blob.bin']);
+		const newBlob = await repo.gitOk(['hash-object', sidecar]);
+		const textPatch = await repo.gitOk(['diff', `${base}..feature`]);
+		const patch = `${textPatch}\n${[
+			'diff --git a/assets/blob.bin b/assets/blob.bin',
+			`index ${oldBlob}..${newBlob} 100644`,
+			'Binary files a/assets/blob.bin and b/assets/blob.bin differ',
+		].join('\n')}\n`;
+		const patchPath = path.join(sidecarDir, 'change.patch');
+		fs.writeFileSync(patchPath, patch, 'utf8');
+
+		const materialized = await materializePatch(repo.ctx, { kind: 'file', path: patchPath });
+		const result = await applyPatch(repo.ctx, {
+			patch: materialized.patch,
+			binarySourceDirectory: materialized.sourceDirectory,
+			targetBranch: 'main',
+			destination: 'current',
+			commit: false,
+		});
+		assert.deepEqual(result.appliedPaths.sort(), ['assets/blob.bin', 'f.txt']);
+		assert.deepEqual(result.warnings.filter((warning) => /Skipped binary file/.test(warning)), []);
+		assert.equal(fs.readFileSync(path.join(repo.dir, 'f.txt'), 'utf8'), 'after\n');
+		assert.deepEqual(fs.readFileSync(path.join(repo.dir, 'assets/blob.bin')), Buffer.from([0, 9, 8, 7, 6]));
+	});
+
+	test('recovers a sidecar binary into a mailbox commit', async () => {
+		const repo = await temp();
+		await repo.commit('base', { 'f.txt': 'before\n', 'blob.bin': '\u0000old' });
+		await repo.checkout('feature', { create: true });
+		const featureCommit = await repo.commit('mailbox text change', { 'f.txt': 'after\n' });
+		await repo.checkout('main');
+
+		const sidecarDir = path.join(repo.dir, 'mailbox-assets');
+		fs.mkdirSync(sidecarDir);
+		const sidecar = path.join(sidecarDir, 'binary-copy');
+		fs.writeFileSync(sidecar, Buffer.from([0, 8, 6, 4]));
+		const oldBlob = await repo.gitOk(['hash-object', 'blob.bin']);
+		const newBlob = await repo.gitOk(['hash-object', sidecar]);
+		const mailbox = await repo.gitOk(['format-patch', '-1', '--stdout', '--no-signature', featureCommit]);
+		const patchPath = path.join(sidecarDir, 'change.patch');
+		fs.writeFileSync(patchPath, `${mailbox}\ndiff --git a/blob.bin b/blob.bin\nindex ${oldBlob}..${newBlob} 100644\nBinary files a/blob.bin and b/blob.bin differ\n`, 'utf8');
+		const materialized = await materializePatch(repo.ctx, { kind: 'file', path: patchPath });
+
+		const result = await applyPatch(repo.ctx, {
+			patch: materialized.patch,
+			binarySourceDirectory: materialized.sourceDirectory,
+			sourceCommit: featureCommit,
+			targetBranch: 'main',
+			destination: 'newBranch',
+			branchName: 'patched-mailbox',
+		});
+		assert.equal(result.committed, true);
+		assert.match(result.method, /^am(?:-3)?$/);
+		assert.deepEqual(fs.readFileSync(path.join(repo.dir, 'blob.bin')), Buffer.from([0, 8, 6, 4]));
+		assert.equal(await repo.api.commitInfo(result.commitSha!).then((info) => info.subject), 'mailbox text change');
+	});
+
 	test('a patch that fits nowhere reports every candidate it probed', async () => {
 		const { repo } = await scenario();
 		const patch = [

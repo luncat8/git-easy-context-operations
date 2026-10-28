@@ -4,6 +4,12 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.27
+
+### Added
+
+- **Binary patch handling.** Before applying, the extension now checks files directly beside the patch (not in subdirectories) against the binary diff’s new blob hash. A match is copied to the patch’s repository path, and the binary-only diff section is removed so the remaining patch can apply. Mailbox patches are handled too.
+
 ## 0.4.26
 
 ### Changed
