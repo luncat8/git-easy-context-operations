@@ -217,6 +217,13 @@ extension id. Both halves are needed:
    both files, writes the entry (with a backup) and reports what is still missing.
 3. restart VS Code or ctrl-shift-p Developer: Reload Window
 
+To edit a changed file from a commit, right-click the commit and choose
+**Open Changed Files for Edit...**. Select one or more current working-tree
+files in the picker; missing files are omitted. For a rename, the path at that
+commit is used; later renames are not followed. This is on the commit row
+because VS Code does not expose the graph's individual file-row menu to
+extensions, even through the current proposed menu API.
+
 In the graph, the items are **flattened into the groups the built-in entries
 already use** instead of hiding in a "Git Easy Ops" submenu:
 

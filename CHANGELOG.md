@@ -4,6 +4,15 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.29
+
+### Added
+
+- In the +graph build, right-click a commit and choose **Open Changed Files for
+  Edit...** to select its changed files and open their current working-tree
+  versions. Missing files are omitted. VS Code does not expose the individual
+  graph file-row menu to extensions, so the action is on the commit row.
+
 ## 0.4.28
 
 ### Added

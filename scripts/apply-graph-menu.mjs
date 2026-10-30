@@ -53,6 +53,9 @@ const GRAPH_MENUS = {
 		{ command: 'geco.createBackupBranch', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.createBackupBranch)', group: '7_move@3' },
 		{ command: 'geco.forcePush', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.forcePush)', group: '8_remote@1' },
 		{ command: 'geco.forcePushHard', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.forcePushHard)', group: '8_remote@2' },
+		// VS Code does not expose the graph's file-row menu to extensions.
+		// Use the commit menu and let the user pick the files instead.
+		{ command: 'geco.openCommitSourceForEdit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openCommitSourceForEdit)', group: '0_view@2' },
 		{ command: 'geco.copyCommitSha', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.copyCommitSha)', group: 'inline@1' },
 		{ command: 'geco.enableGraphMenu', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.enableGraphMenu)', group: '9_misc@1' },
 		{ command: 'geco.customizeMenus', when: 'scmProvider == git', group: '9_misc@2' },

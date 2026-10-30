@@ -253,6 +253,15 @@ describe('menu order - Remove Redundant Branches... follows Create Branch...', (
 	});
 });
 
+describe('graph changed-file edit action', () => {
+	it('appears on the proposed commit menu, with the visibility switch', () => {
+		const entries = graphEntries().filter((entry) => entry.command === 'geco.openCommitSourceForEdit');
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.key, 'scm/historyItem/context');
+		assert.equal(entries[0]?.when, 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openCommitSourceForEdit)');
+	});
+});
+
 describe('menu order - graph header actions', () => {
 	it('follows the shared header order without the row-targeted operations', () => {
 		// The shared order is: apply automatically, apply, (find base),

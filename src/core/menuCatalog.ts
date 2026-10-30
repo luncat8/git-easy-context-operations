@@ -186,7 +186,9 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// Source Control view), sits at the end of the built-in "open"
 	// actions (`navigation@4`, after the order-0 Open Changes / Open File /
 	// Open HEAD File entries), and is gated to the git provider.
+
 	{ id: 'geco.openSourceForEdit', label: 'Open Source for Edit', surfaces: ['scm.resource'] },
+	{ id: 'geco.openCommitSourceForEdit', label: 'Open Changed Files for Edit...', surfaces: ['graph.commit'] },
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',

@@ -1,0 +1,23 @@
+
+
+
+## to check in 2027 or later (currently impossible)
+
+check if proposed api became main
+
+check is this available:
+we implemented open file for edit context item but it works only in top panel.
+good but i also want this in the graph (next panel with commits list), but graph only has open file. it is ok to use proposed api if main api not allow
+
+## helper tp fix repo in case of worktree broken
+
+The problem is a Git worktree limitation, not a code bug in the repo:
+
+- All worktrees share one repository and one set of branch refs. A branch (e.g. `main`) can be checked out in **only one worktree at a time**.
+- Kilo's agent manager creates a separate pooled worktree per session, usually detached at the base commit. `main` stays checked out in whichever worktree first claimed it (often the primary one, or a leftover pooled one).
+- When you try to `git checkout main` in another worktree, Git refuses with `fatal: 'main' is already used by worktree at ...`.
+- If you just `rm -rf` a pooled worktree directory instead of `git worktree remove`, the `.git/worktrees/<name>` registration can remain, so Git still thinks `main` is held there and the checkout keeps failing. Accumulating many pooled worktrees makes this worse.
+
+What fixed it here: `git worktree remove <path>` (which clears the registration) followed by `git checkout main` once `main` was free. For cleanup of stale registrations you can also run `git worktree prune`.
+
+The "can't commit to main" symptom comes from the same cause: commits made in a detached worktree create dangling commits that never advance `main`. To land work on `main`, either work in the worktree that actually has `main` checked out, or create a branch in the detached worktree and merge/fast-forward `main` afterward.

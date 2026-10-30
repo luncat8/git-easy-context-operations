@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -254,6 +254,12 @@
         "title": "Open Source for Edit",
         "category": "Git Easy Ops",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "geco.openCommitSourceForEdit",
+        "title": "Open Changed Files for Edit...",
+        "category": "Git Easy Ops",
+        "icon": "$(go-to-file)"
       }
     ],
     "submenus": [
@@ -274,31 +280,35 @@
           "command": "geco.refresh",
           "when": "false"
         },
-      {
-        "command": "geco.menuCopyItemName",
-        "when": "false"
-      },
-      {
-        "command": "geco.openSourceForEdit",
-        "when": "false"
-      },
-      {
-        "command": "geco.dialogDecisionToggle",
-        "when": "false"
-      },
-      {
-        "command": "geco.dialogDecisionReset",
-        "when": "false"
-      }
-    ],
-    "scm/resourceState/context": [
-      {
-        "command": "geco.openSourceForEdit",
-        "when": "scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openSourceForEdit)",
-        "group": "navigation@4"
-      }
-    ],
-    "view/title": [
+        {
+          "command": "geco.menuCopyItemName",
+          "when": "false"
+        },
+        {
+          "command": "geco.openSourceForEdit",
+          "when": "false"
+        },
+        {
+          "command": "geco.openCommitSourceForEdit",
+          "when": "false"
+        },
+        {
+          "command": "geco.dialogDecisionToggle",
+          "when": "false"
+        },
+        {
+          "command": "geco.dialogDecisionReset",
+          "when": "false"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "geco.openSourceForEdit",
+          "when": "scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openSourceForEdit)",
+          "group": "navigation@4"
+        }
+      ],
+      "view/title": [
         {
           "command": "geco.refresh",
           "when": "view == geco.history && (!geco.menuFilter || geco.menuVisible.geco.refresh)",

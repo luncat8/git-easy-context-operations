@@ -21,7 +21,15 @@ import type { FileUriLike } from '../core/scmFileArgs';
 export async function openFilesForEdit(uris: readonly FileUriLike[], output: vscode.OutputChannel): Promise<void> {
 	for (const uri of uris) {
 		try {
-			const document = await vscode.workspace.openTextDocument(uri as unknown as vscode.Uri);
+			// Extractors can return a plain {scheme, fsPath} for a file: string;
+			// openTextDocument needs an actual Uri, not just its structural shape.
+			const target: vscode.Uri | undefined = uri.scheme === 'file'
+				? vscode.Uri.file(uri.fsPath)
+				: typeof (uri as { with?: unknown }).with === 'function' ? uri as vscode.Uri : undefined;
+			if (!target) {
+				throw new Error(`unsupported URI scheme: ${uri.scheme}`);
+			}
+			const document = await vscode.workspace.openTextDocument(target);
 			await vscode.window.showTextDocument(document, {
 				preview: false,
 				viewColumn: vscode.ViewColumn.Active,

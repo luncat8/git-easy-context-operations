@@ -26,6 +26,7 @@ import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from '.
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 import { scmResourceFileUris } from './core/scmFileArgs';
 import { openFilesForEdit } from './vscode/fileOpen';
+import { graphCommitTarget, openCommitFilesForEdit } from './vscode/graphFileOpen';
 
 const VIEW_ID = 'geco.history';
 const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
@@ -524,14 +525,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			void watchRepository(activeRepo);
 			scheduleRefresh('manual refresh', true);
 		}),
-		// "Open Source for Edit" - the changed-file rows of the built-in
-		// Source Control view open a (usually read-only) diff by default;
-		// this opens the file itself in an editable editor tab. It is
-		// contributed to `scm/resourceState/context` in the manifest and
-		// needs the row the menu handed us, so it stays out of the palette.
+		// The stable changed-file menu and the graph commit menu pass different
+		// arguments, so keep their commands separate and avoid guessing a target.
 		vscode.commands.registerCommand('geco.openSourceForEdit', async (...args: unknown[]) => {
 			const uris = scmResourceFileUris(args);
-			if (uris.length === 0) {
+			if (!uris.length) {
 				output.appendLine('no file to open for edit (the menu arguments carried no usable resource)');
 				reportWithoutWaiting(() => vscode.window.showWarningMessage(
 					'Git Easy Ops: there is no file to open for edit. Right-click a changed file in the Source Control view.',
@@ -539,6 +537,21 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			await openFilesForEdit(uris, output);
+		}),
+		vscode.commands.registerCommand('geco.openCommitSourceForEdit', async (...args: unknown[]) => {
+			const target = graphCommitTarget(args);
+			if (!target.sha || !target.repoPath) {
+				reportWithoutWaiting(() => vscode.window.showWarningMessage('Git Easy Ops: right-click a commit in the Source Control Graph to choose its files.'));
+				return;
+			}
+			try {
+				const git = runtime.controller.contextFor(target.repoPath).git;
+				await openCommitFilesForEdit(git, target.sha, output);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				output.appendLine(`Could not open commit files: ${message}`);
+				reportWithoutWaiting(() => vscode.window.showErrorMessage(`Git Easy Ops: could not list commit files: ${message}`));
+			}
 		}),
 		vscode.commands.registerCommand('geco.explainMenus', async () => {
 			await runtime.controller.explainMenus();
