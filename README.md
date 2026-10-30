@@ -83,6 +83,10 @@ Always available, in VS Code and VSCodium:
   Ctrl/Shift-click selects several commits for *Squash Selected Commits...*.
 - **Changed files of the built-in Source Control view** - right-click a changed
   file row for **Open Source for Edit**, next to the built-in open actions.
+- **Built-in Source Control Graph** (+graph build) - right-click a commit and
+  choose **Open Changed Files for Edit...**, then select current working-tree
+  files. Files no longer present are omitted; no historical version is edited.
+  VS Code does not expose the graph’s individual file-row menu to extensions.
 - **Timeline view**, the **Source Control title / repository menu** (`···`), and the
   **Command Palette** (`Git Easy Ops: ...`).
 

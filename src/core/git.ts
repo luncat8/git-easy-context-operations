@@ -13,6 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { GecoError } from './errors';
+import { parseCommitFileChanges, type CommitFileChange } from './commitFiles';
 import type { GitExec, GitExecResult } from './gitRunner';
 
 const US = '\x1f';
@@ -584,6 +585,19 @@ export class Git {
 
 	async treeOf(rev: string): Promise<string> {
 		return this.ok(['rev-parse', `${rev}^{tree}`]);
+	}
+
+	/** Changed paths against the first parent, or the empty tree for a root commit. */
+	async changedFiles(rev: string): Promise<CommitFileChange[]> {
+		const sha = await this.resolveCommit(rev);
+		const parents = (await this.ok(['rev-list', '--parents', '-n', '1', sha])).split(/\s+/).slice(1);
+		const args = ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '-M', '--root', '--no-ext-diff',
+			...(parents[0] ? [parents[0], sha] : [sha]), '--'];
+		const result = await this.run(args);
+		if (result.exitCode !== 0 || result.timedOut || result.truncated) {
+			throw new GecoError('git-failed', 'Could not list the commit’s changed files.', result.stderr.trim());
+		}
+		return parseCommitFileChanges(result.stdout);
 	}
 
 	/** Blob information for a set of paths inside a commit's tree. */
