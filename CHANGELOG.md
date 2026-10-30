@@ -4,6 +4,19 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.28
+
+### Added
+
+- **Open Source for Edit in the changed-file context menu.** The changed-file
+  rows of the built-in Source Control view open a (usually read-only) diff by
+  default; right-clicking one now also offers **Open Source for Edit**, which
+  opens the file itself in an editable editor tab. It sits at the end of the
+  built-in open actions (after Open Changes / Open File / Open HEAD File),
+  works for selected rows (all of them open), skips rows whose file is gone
+  from the working tree, and is switchable like every other menu item
+  (**Git Easy Ops: Customize Context Menus...**).
+
 ## 0.4.27
 
 ### Added

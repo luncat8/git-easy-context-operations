@@ -63,6 +63,7 @@ const SURFACE_ICONS: Partial<Record<MenuSurfaceId, string>> = {
 	'scm.title': 'source-control',
 	'scm.sourceControl': 'source-control',
 	'scm.repository': 'repo',
+	'scm.resource': 'go-to-file',
 	'timeline.commit': 'history',
 	'graph.commit': 'graph-line',
 	'graph.ref': 'git-branch',

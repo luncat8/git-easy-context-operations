@@ -14,6 +14,9 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
 - **Squash N commits** - combine any contiguous run into one.
 - **Change commit message** - rename, append, or search and replace in *any* commit's
   message, not just the last one.
+- **Open a changed file for edit** - the changed-file rows of the built-in Source
+  Control view open a diff (read-only by default); right-click one for
+  **Open Source for Edit** to open the file itself in an editable editor tab.
 
 - **Fast-forward `main`** - onto any commit, with the old tip parked on a backup
   branch first. The default cleanup flow checks out `main` when the worktree is
@@ -78,6 +81,8 @@ Always available, in VS Code and VSCodium:
 - **Source Control sidebar → "Git Easy Ops" → "Graph"** - the commit graph itself
   (lane art, ref badges, relative dates) with the full context menu on every row.
   Ctrl/Shift-click selects several commits for *Squash Selected Commits...*.
+- **Changed files of the built-in Source Control view** - right-click a changed
+  file row for **Open Source for Edit**, next to the built-in open actions.
 - **Timeline view**, the **Source Control title / repository menu** (`···`), and the
   **Command Palette** (`Git Easy Ops: ...`).
 

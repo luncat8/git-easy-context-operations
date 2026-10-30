@@ -35,6 +35,7 @@ export type MenuSurfaceId =
 	| 'scm.title'
 	| 'scm.sourceControl'
 	| 'scm.repository'
+	| 'scm.resource'
 	| 'timeline.commit'
 	| 'graph.commit'
 	| 'graph.ref'
@@ -75,6 +76,12 @@ export const MENU_SURFACES: readonly MenuSurface[] = [
 	{ id: 'scm.title', label: 'Source Control title (⋯)', menuKey: 'scm/title', expands: 'geco.commitSubmenu' },
 	{ id: 'scm.sourceControl', label: 'Source Control panel (⋯)', menuKey: 'scm/sourceControl', expands: 'geco.commitSubmenu' },
 	{ id: 'scm.repository', label: 'Source Control repository row', menuKey: 'scm/repository', expands: 'geco.commitSubmenu' },
+	// The context menu of a changed-file row in the built-in Source Control
+	// view (Changes / Staged Changes lists): `scm/resourceState/context` is
+	// the menu key VS Code registers for `MenuId.SCMResourceContext`, and
+	// the git extension's own "Open File" / "Open Change" entries live on
+	// the same surface.
+	{ id: 'scm.resource', label: 'Source Control → changed file row', menuKey: 'scm/resourceState/context' },
 	{ id: 'timeline.commit', label: 'Timeline → commit row', menuKey: 'timeline/item/context', expands: 'geco.commitSubmenu' },
 	{ id: 'graph.commit', label: 'Source Control Graph → commit row', menuKey: 'scm/historyItem/context', graphOnly: true },
 	{ id: 'graph.ref', label: 'Source Control Graph → branch row', menuKey: 'scm/historyItemRef/context', graphOnly: true },
@@ -172,6 +179,14 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	// A repository-wide link, so it sits on both headers (never on a commit
 	// row) - last of the operation buttons in the shared header order.
 	{ id: 'geco.copyRepositoryWebLink', label: 'Copy Repository Web Link', surfaces: ['view.title', 'graph.title'] },
+	// "Open Source for Edit" - the changed-file rows of the built-in Source
+	// Control view open a (usually read-only) diff by default; this menu
+	// entry opens the file itself in an editable editor tab. It is the
+	// only row on the `scm.resource` surface (a file row of the built-in
+	// Source Control view), sits at the end of the built-in "open"
+	// actions (`navigation@4`, after the order-0 Open Changes / Open File /
+	// Open HEAD File entries), and is gated to the git provider.
+	{ id: 'geco.openSourceForEdit', label: 'Open Source for Edit', surfaces: ['scm.resource'] },
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',

@@ -24,6 +24,8 @@ import { countDecisionRepositories, dialogDecisionById, type DialogDecisionId } 
 import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
+import { scmResourceFileUris } from './core/scmFileArgs';
+import { openFilesForEdit } from './vscode/fileOpen';
 
 const VIEW_ID = 'geco.history';
 const MENU_EDITOR_VIEW_ID = 'geco.menuEditor';
@@ -521,6 +523,22 @@ export function activate(context: vscode.ExtensionContext): void {
 			setRepoContext();
 			void watchRepository(activeRepo);
 			scheduleRefresh('manual refresh', true);
+		}),
+		// "Open Source for Edit" - the changed-file rows of the built-in
+		// Source Control view open a (usually read-only) diff by default;
+		// this opens the file itself in an editable editor tab. It is
+		// contributed to `scm/resourceState/context` in the manifest and
+		// needs the row the menu handed us, so it stays out of the palette.
+		vscode.commands.registerCommand('geco.openSourceForEdit', async (...args: unknown[]) => {
+			const uris = scmResourceFileUris(args);
+			if (uris.length === 0) {
+				output.appendLine('no file to open for edit (the menu arguments carried no usable resource)');
+				reportWithoutWaiting(() => vscode.window.showWarningMessage(
+					'Git Easy Ops: there is no file to open for edit. Right-click a changed file in the Source Control view.',
+				));
+				return;
+			}
+			await openFilesForEdit(uris, output);
 		}),
 		vscode.commands.registerCommand('geco.explainMenus', async () => {
 			await runtime.controller.explainMenus();

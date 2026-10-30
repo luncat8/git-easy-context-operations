@@ -365,6 +365,25 @@ describe('manifest - menus', () => {
 		assert.match(buildSource, /enabledProposals = manifest\.enabledApiProposals/, 'the session-enabled proposals are not read from the runtime manifest');
 	});
 
+	it('opens a changed file for edit right after the built-in open actions', () => {
+		// The built-in Source Control view's changed-file rows open a
+		// (usually read-only) diff by default; the menu entry opens the
+		// file itself in an editable editor tab. It sits at the end of the
+		// navigation group - the built-in Open Changes / Open File / Open
+		// HEAD File entries carry the unnumbered `navigation` group (order
+		// 0), so they sort before `navigation@4` - is offered for the git
+		// provider only, and carries the Customize Context Menus switch
+		// like every toggleable row.
+		const entries = manifest.contributes.menus['scm/resourceState/context'] ?? [];
+		const entry = entries.find((e) => e.command === 'geco.openSourceForEdit');
+		assert.ok(entry, 'the changed-file rows have no "Open Source for Edit" entry');
+		assert.equal(entry!.group, 'navigation@4', 'the entry does not sit at the end of the navigation group');
+		assert.equal(
+			entry!.when,
+			'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openSourceForEdit)',
+		);
+	});
+
 	it('puts our own view items straight into categories instead of a submenu', () => {
 		// A submenu one extension deep is a puzzle ("which extension owns this?")
 		// - in our own view every entry is a first-class citizen, grouped the way
