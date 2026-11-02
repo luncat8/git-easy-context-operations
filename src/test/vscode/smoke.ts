@@ -52,6 +52,9 @@ const EXPECTED_COMMANDS = [
 	'geco.dialogDecisionReset',
 	'geco.menuResetAll',
 	'geco.menuCopyItemName',
+	'geco.openSourceForEdit',
+	'geco.openCommitSourceForEdit',
+	'geco.openCurrentVersionForEdit',
 ];
 
 export async function run(): Promise<void> {
@@ -61,6 +64,7 @@ export async function run(): Promise<void> {
 		['every contributed command is registered', testCommands],
 		['refresh works without a repository', testRefresh],
 		['menu item names can be copied', testCopyMenuItemName],
+		['a read-only git editor can open its current file', testOpenCurrentVersionForEdit],
 		['a command reaches git and copies a sha', testCopySha],
 		['a command does not wait for its own notification', testCommandDoesNotWaitForItsNotification],
 	];
@@ -231,6 +235,37 @@ function gitEnv(dir: string): NodeJS.ProcessEnv {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The tab of a read-only `git:` revision carries the working-tree path in its
+ * query. The editor-caption command must open that plain file, not another
+ * read-only revision (and not create an empty document when it still exists).
+ */
+async function testOpenCurrentVersionForEdit(): Promise<void> {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'geco-editor-'));
+	const file = path.join(dir, 'app.ts');
+	fs.writeFileSync(file, 'export const answer = 42;\n', 'utf8');
+	const fileUri = vscode.Uri.file(file);
+	const revisionUri = fileUri.with({
+		scheme: 'git',
+		path: `${fileUri.path}.git`,
+		query: JSON.stringify({ path: file, ref: 'HEAD~1' }),
+	});
+	try {
+		await vscode.commands.executeCommand('geco.openCurrentVersionForEdit', revisionUri);
+		const expected = fileUri.toString();
+		const deadline = Date.now() + 5000;
+		let active = vscode.window.activeTextEditor?.document.uri.toString();
+		while (active !== expected && Date.now() < deadline) {
+			await sleep(50);
+			active = vscode.window.activeTextEditor?.document.uri.toString();
+		}
+		assert.equal(active, expected, 'the current working-tree file was not opened');
+	} finally {
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 }
 
 async function testCopyMenuItemName(): Promise<void> {

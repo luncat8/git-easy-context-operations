@@ -137,6 +137,8 @@ describe('menu catalogue', () => {
 			['view.graphGroup', 'view/item/context'],
 			['view.title', 'view/title'],
 			['scm.resource', 'scm/resourceState/context'],
+			['editor.titleContext', 'editor/title/context'],
+			['editor.context', 'editor/context'],
 			['submenu.commit', 'geco.commitSubmenu'],
 			['submenu.branch', 'geco.branchSubmenu'],
 		];

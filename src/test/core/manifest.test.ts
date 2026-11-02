@@ -47,6 +47,7 @@ const STABLE_MENU_KEYS = new Set([
 	'timeline/item/context',
 	'editor/context',
 	'editor/title',
+	'editor/title/context',
 	'explorer/context',
 ]);
 const PROPOSED_MENU_KEYS = ['scm/historyItem/context', 'scm/historyItemRef/context', 'scm/history/title'];
@@ -142,6 +143,28 @@ describe('manifest - menus', () => {
 				STABLE_MENU_KEYS.has(menu) || submenus.has(menu),
 				`menu "${menu}" needs a proposed API - keep it out of the default manifest (npm run graph-menu:on)`,
 			);
+		}
+	});
+
+	it('offers the editor-caption action only on Git revision and diff editors', () => {
+		for (const menu of ['editor/title/context', 'editor/context']) {
+			const entries = manifest.contributes.menus[menu] ?? [];
+			assert.equal(entries.length, 1, `${menu} has no single current-version action`);
+			const entry = entries[0]!;
+			assert.equal(entry.command, 'geco.openCurrentVersionForEdit');
+			assert.match(entry.when ?? '', /resourceScheme == git/, `${menu} must show on a git: revision`);
+			assert.match(entry.when ?? '', /isInDiffEditor/, `${menu} must show on the file side of a diff`);
+			assert.match(
+				entry.when ?? '',
+				/inDiffEditor \|\| inMultiDiffEditor/,
+				`${menu} must also cover the editor and multi-diff context keys`,
+			);
+			assert.match(
+				entry.when ?? '',
+				/\(!geco\.menuFilter \|\| geco\.menuVisible\.geco\.openCurrentVersionForEdit\)$/,
+				`${menu} lost its Customize Context Menus switch`,
+			);
+			assert.equal(entry.group, 'navigation@5');
 		}
 	});
 

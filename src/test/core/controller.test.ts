@@ -606,15 +606,18 @@ describe('controller - fast-forward flows', () => {
 			await repo.checkout('main');
 			const from = await repo.sha('main');
 
-			const ui = new FakeUI({ choices: ['move-remove'] });
-			await controllerFor(ui, repo).fastForward(repo.dir, [target], { askBranch: false });
-			assert.equal(await repo.hasBranch('old'), false);
+		// This test is about undoing one journal checkpoint on its own, so it
+		// opts out of the (now default) one-item-per-user-action aggregation.
+		const settings = { ...DEFAULT_SETTINGS, aggregateUndoLastOperation: false };
+		const ui = new FakeUI({ choices: ['move-remove'] });
+		await controllerFor(ui, repo, settings).fastForward(repo.dir, [target], { askBranch: false });
+		assert.equal(await repo.hasBranch('old'), false);
 
-			const undoUi = new FakeUI({ picks: [0] });
-			await controllerFor(undoUi, repo).undoLastOperation(repo.dir);
-			assert.equal(await repo.hasBranch('old'), true, 'the backup branch is back');
-			assert.equal(await repo.sha('old'), from);
-			assert.equal(await repo.sha('main'), target, 'the move itself is untouched');
+		const undoUi = new FakeUI({ picks: [0] });
+		await controllerFor(undoUi, repo, settings).undoLastOperation(repo.dir);
+		assert.equal(await repo.hasBranch('old'), true, 'the backup branch is back');
+		assert.equal(await repo.sha('old'), from);
+		assert.equal(await repo.sha('main'), target, 'the move itself is untouched');
 		} finally {
 			repo.cleanup();
 		}
@@ -1448,7 +1451,7 @@ describe('controller - backups, undo and information', () => {
 			assert.equal(ui.pickCalls[0]!.items.length, 2);
 			assert.equal(ui.pickCalls[0]!.items[0]!.label.startsWith('reword - Renamed the message of'), true);
 			assert.match(ui.pickCalls[0]!.items[1]!.description!, /also undoes 1 newer operation/);
-			assert.match(ui.confirmCalls[0]!.message, /^Undo 2 operations, back to "Renamed the message of /);
+			assert.match(ui.confirmCalls[0]!.message, /^Undo 2 operations \(2 checkpoints\), back to "Renamed the message of /);
 			assert.match(ui.allMessages(), /Undone: 2 operations/);
 			assert.equal(await repo.sha('main'), shas.v04, 'both rewrites are gone');
 			assert.equal((await repo.message('main')).trim(), 'v0.4');

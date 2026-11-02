@@ -10,6 +10,32 @@ import * as vscode from 'vscode';
 import type { FileUriLike } from '../core/scmFileArgs';
 
 /**
+ * Rebuild a real `vscode.Uri` from the structural values the pure argument
+ * resolvers return. A `file:` target is always local; a remote target keeps
+ * its authority and URI path, so a Remote-SSH path is never mistaken for a
+ * path on the machine running the extension host UI.
+ */
+export function toVscodeUri(uri: FileUriLike): vscode.Uri | undefined {
+	// Extractors can pass through an actual Uri (it has a `with` method).
+	if (typeof (uri as { with?: unknown }).with === 'function') {
+		return uri as vscode.Uri;
+	}
+	if (uri.scheme === 'file') {
+		return uri.fsPath ? vscode.Uri.file(uri.fsPath) : undefined;
+	}
+	if (!uri.path) {
+		return undefined;
+	}
+	return vscode.Uri.from({
+		scheme: uri.scheme,
+		authority: uri.authority,
+		path: uri.path,
+		query: uri.query,
+		fragment: uri.fragment,
+	});
+}
+
+/**
  * Open every uri in its own editable editor tab - never a preview tab, so
  * the file stays pinned like one the user opened by hand.
  *
@@ -21,11 +47,7 @@ import type { FileUriLike } from '../core/scmFileArgs';
 export async function openFilesForEdit(uris: readonly FileUriLike[], output: vscode.OutputChannel): Promise<void> {
 	for (const uri of uris) {
 		try {
-			// Extractors can return a plain {scheme, fsPath} for a file: string;
-			// openTextDocument needs an actual Uri, not just its structural shape.
-			const target: vscode.Uri | undefined = uri.scheme === 'file'
-				? vscode.Uri.file(uri.fsPath)
-				: typeof (uri as { with?: unknown }).with === 'function' ? uri as vscode.Uri : undefined;
+			const target = toVscodeUri(uri);
 			if (!target) {
 				throw new Error(`unsupported URI scheme: ${uri.scheme}`);
 			}

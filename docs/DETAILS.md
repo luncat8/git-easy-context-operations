@@ -5,14 +5,14 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.20.vsix
+code --install-extension dist/git-easy-context-operations-0.4.30.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.20+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.30+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) The `+graph` build also
-declares `0.4.20+graph` as its version - that is what the Extensions view
+declares `0.4.30+graph` as its version - that is what the Extensions view
 shows, and the different version string is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build. Accept that prompt: without it the previously loaded build
@@ -97,7 +97,8 @@ Repository: https://github.com/luncat8/git-easy-context-operations
 
 | 10 | **Diagnose Push / Sync Trouble...** | Answers "why can I not push or sync?" from the repository itself: an unfinished merge/rebase/cherry-pick (and its conflict markers), a stale `index.lock` left by a killed git process, a branch with no upstream or an upstream that is gone from the server, and - the reported accident - **the same work committed twice**, where a local commit and a commit on the remote carry byte-identical trees under different hashes and `git push` is rejected as non-fast-forward. It says what a push would do, explains why the **Sync** button makes the duplicate case *worse* (its `git pull` half merges the remote copy back in, or stops half-way with a conflict - the "unfinished repository" state), and offers the repairs, one at a time and re-checked after each: abort the unfinished operation, remove the stale lock, rebase onto the remote copy (git drops the already-applied commits itself), point the branch at the remote copy when nothing local is unique (old tip parked on a backup branch first), force push with lease, fetch (with a short timeout, so "the network is down" is an answer instead of a hang), publish. Every repair that touches a ref is journaled - one **Undo** puts it back. See `docs/STUCK-STATES.md` for the reproductions.
 
-| 9 | **Customize Context Menus...** / **Restore Menu Item Defaults** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. One row is hidden *by default* (**Search and Replace in Commit Message...**, shown as "hidden by default" in the editor); everything else is on until you switch it off. Saved in `geco.hiddenMenuItems` (an absent value means the built-in defaults, an explicit `[]` means "show everything"), fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
+| 11 | **Open Current Version for Edit** (editor context menus) | Right-click the tab/title of a read-only `git:` history or revision editor, or right-click inside a diff editor, to open the same file's current working-tree version in a pinned editable tab. It uses the revision URI's recorded path (or the modified side of the diff), preserves Remote-SSH authorities, and warns instead of creating an empty file if the path was deleted or renamed away. This is the stable-API alternative to the graph's inaccessible per-file menu and needs no `+graph` build. |
+| 9 | **Customize Context Menus...** / **Restore Menu Item Defaults** | The menu editor: a checkbox tree of every menu Git Easy Ops contributes, grouped by surface (sidebar commit/branch rows, view toolbar, the *Git Easy Ops* submenu, Source Control title/repository, editor tab/text menus, Timeline, the graph build). Unchecking a row hides that command from **every** menu that shows it - immediately, no reload; checking restores it. One row is hidden *by default* (**Search and Replace in Commit Message...**, shown as "hidden by default" in the editor); everything else is on until you switch it off. Saved in `geco.hiddenMenuItems` (an absent value means the built-in defaults, an explicit `[]` means "show everything"), fail-open by design (with the extension disabled nothing is ever hidden), and every context menu keeps a required *Customize Context Menus...* entry as the way back. |
 
 Plus: **Copy Commit SHA** - and the sidebar view now shows the commit **graph**
 (lanes, ref badges, relative dates) with the same context menus on commits and
@@ -179,6 +180,12 @@ without any proposed API.
   clicked commit was never its target - so they no longer appear on commit rows
   or in the commit submenu. The interactive two still ask where the patch comes
   from and where it should go; the automatic one asks nothing (see feature 4).
+- **Editor tab / title and editor text context menus** - right-click a read-only
+  `git:` history or revision tab (where *Reopen Editor With...* appears), or
+  right-click inside a diff editor, for **Open Current Version for Edit**. It
+  needs no proposed API, so it is available in both builds. The current
+  working-tree file opens as a separate pinned editable tab; deleted files are
+  reported instead of opened as empty documents.
 - **Timeline view** - right-click a commit row of the selected file
   (`timelineItem == git:file:commit`).
 - **Source Control title / repository menu** (`···`) → *Git Easy Ops*.
@@ -197,7 +204,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.20+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.30+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -222,7 +229,10 @@ To edit a changed file from a commit, right-click the commit and choose
 files in the picker; missing files are omitted. For a rename, the path at that
 commit is used; later renames are not followed. This is on the commit row
 because VS Code does not expose the graph's individual file-row menu to
-extensions, even through the current proposed menu API.
+extensions, even through the current proposed menu API. Once one of those
+read-only file versions is open, the editor tab / text **Open Current Version
+for Edit** action above reaches the same current file in one click, with no
+commit picker.
 
 In the graph, the items are **flattened into the groups the built-in entries
 already use** instead of hiding in a "Git Easy Ops" submenu:
@@ -342,12 +352,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.20.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.20.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.30.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.30.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.20+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.20+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.30+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.30+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -359,7 +369,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.20.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.30.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing (and

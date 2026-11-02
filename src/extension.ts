@@ -26,6 +26,7 @@ import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from '.
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 import { scmResourceFileUris } from './core/scmFileArgs';
 import { openFilesForEdit } from './vscode/fileOpen';
+import { openCurrentVersionForEdit } from './vscode/editorFileOpen';
 import { graphCommitTarget, openCommitFilesForEdit } from './vscode/graphFileOpen';
 
 const VIEW_ID = 'geco.history';
@@ -552,6 +553,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				output.appendLine(`Could not open commit files: ${message}`);
 				reportWithoutWaiting(() => vscode.window.showErrorMessage(`Git Easy Ops: could not list commit files: ${message}`));
 			}
+		}),
+		// The editor tab / text context menu has the URI of the read-only
+		// revision (or the modified side of a diff); open its current file.
+		vscode.commands.registerCommand('geco.openCurrentVersionForEdit', async (...args: unknown[]) => {
+			await openCurrentVersionForEdit(args, output);
 		}),
 		vscode.commands.registerCommand('geco.explainMenus', async () => {
 			await runtime.controller.explainMenus();

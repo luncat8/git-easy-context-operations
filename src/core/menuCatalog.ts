@@ -36,6 +36,8 @@ export type MenuSurfaceId =
 	| 'scm.sourceControl'
 	| 'scm.repository'
 	| 'scm.resource'
+	| 'editor.titleContext'
+	| 'editor.context'
 	| 'timeline.commit'
 	| 'graph.commit'
 	| 'graph.ref'
@@ -82,6 +84,12 @@ export const MENU_SURFACES: readonly MenuSurface[] = [
 	// the git extension's own "Open File" / "Open Change" entries live on
 	// the same surface.
 	{ id: 'scm.resource', label: 'Source Control → changed file row', menuKey: 'scm/resourceState/context' },
+	// Right-clicking an editor tab / title (where "Reopen Editor With..." lives)
+	// and right-clicking inside a read-only revision or diff document. Both
+	// are stable APIs - unlike the graph's per-file row menu, they need no
+	// proposed API and work in the publishable build too.
+	{ id: 'editor.titleContext', label: 'Editor → tab / title context menu', menuKey: 'editor/title/context' },
+	{ id: 'editor.context', label: 'Editor → text context menu', menuKey: 'editor/context' },
 	{ id: 'timeline.commit', label: 'Timeline → commit row', menuKey: 'timeline/item/context', expands: 'geco.commitSubmenu' },
 	{ id: 'graph.commit', label: 'Source Control Graph → commit row', menuKey: 'scm/historyItem/context', graphOnly: true },
 	{ id: 'graph.ref', label: 'Source Control Graph → branch row', menuKey: 'scm/historyItemRef/context', graphOnly: true },
@@ -189,6 +197,14 @@ export const MENU_ROWS: readonly MenuRow[] = [
 
 	{ id: 'geco.openSourceForEdit', label: 'Open Source for Edit', surfaces: ['scm.resource'] },
 	{ id: 'geco.openCommitSourceForEdit', label: 'Open Changed Files for Edit...', surfaces: ['graph.commit'] },
+	// The editor-caption alternative to the graph's inaccessible file-row menu:
+	// once a read-only historical version is already open, its tab identifies
+	// the very file, so one click opens that file's current editable version.
+	{
+		id: 'geco.openCurrentVersionForEdit',
+		label: 'Open Current Version for Edit',
+		surfaces: ['editor.titleContext', 'editor.context'],
+	},
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',

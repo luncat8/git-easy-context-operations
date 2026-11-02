@@ -9,6 +9,11 @@ check is this available:
 we implemented open file for edit context item but it works only in top panel.
 good but i also want this in the graph (next panel with commits list), but graph only has open file. it is ok to use proposed api if main api not allow
 
+2026-11-02: the graph's per-file row menu is still not exposed. As the stable
+workaround, the editor tab/title and editor text context menus now offer
+"Open Current Version for Edit" whenever a read-only Git revision or diff is
+open. Keep this note only for a future true per-file graph row menu.
+
 ## helper tp fix repo in case of worktree broken
 
 The problem is a Git worktree limitation, not a code bug in the repo:

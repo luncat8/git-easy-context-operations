@@ -17,6 +17,10 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
 - **Open a changed file for edit** - the changed-file rows of the built-in Source
   Control view open a diff (read-only by default); right-click one for
   **Open Source for Edit** to open the file itself in an editable editor tab.
+- **Open the current version of a historical file** - right-click the tab/title
+  of a read-only Git history or revision editor (or inside a diff) for
+  **Open Current Version for Edit**. It opens the file's current working-tree
+  version in an editable tab; no graph proposed API is needed.
 
 - **Fast-forward `main`** - onto any commit, with the old tip parked on a backup
   branch first. The default cleanup flow checks out `main` when the worktree is
@@ -83,6 +87,10 @@ Always available, in VS Code and VSCodium:
   Ctrl/Shift-click selects several commits for *Squash Selected Commits...*.
 - **Changed files of the built-in Source Control view** - right-click a changed
   file row for **Open Source for Edit**, next to the built-in open actions.
+- **Editor tabs / read-only Git revisions and diffs** - right-click the tab or
+  title (where *Reopen Editor With...* lives), or inside the editor, for
+  **Open Current Version for Edit**. The current editable file opens as a new
+  pinned tab; the historical revision itself is never edited.
 - **Built-in Source Control Graph** (+graph build) - right-click a commit and
   choose **Open Changed Files for Edit...**, then select current working-tree
   files. Files no longer present are omitted; no historical version is edited.
@@ -94,7 +102,7 @@ The built-in **Source Control Graph** needs a proposed VS Code API
 (`contribSourceControlHistoryItemMenu`), which a published extension cannot
 declare - so the repository ships a second build for it. *Install* from -graph.vsix to enable it.
 That build reports itself as `<version>+graph` in the Extensions view (e.g.
-`0.4.23+graph`); the distinct version is what makes VS Code offer the
+`0.4.30+graph`); the distinct version is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build - accept it, otherwise the previous build keeps running.
 

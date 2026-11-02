@@ -20,8 +20,9 @@
  *     BOTH_DELETED = 17). `INDEX_DELETED` is deliberately *not* skipped -
  *     the file is still on disk there, so there is a source to edit.
  *
- * The returned values carry `fsPath` and `scheme`, which is all the VS Code
- * side needs to open them - and a `vscode.Uri` already is one.
+ * The returned values carry `fsPath` and `scheme` (plus optional remote URI
+ * parts), which is what the VS Code side needs to open them - and a
+ * `vscode.Uri` already is one.
  */
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +32,11 @@ export interface FileUriLike {
 	readonly fsPath: string;
 	/** Uri scheme; `'file'` for workspace files. */
 	readonly scheme: string;
+	/** Optional URI parts needed to preserve remote resources. */
+	readonly authority?: string;
+	readonly path?: string;
+	readonly query?: string;
+	readonly fragment?: string;
 }
 
 /** The properties of a Source Control resource row we read. */

@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.29",
+  "version": "0.4.30",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -260,6 +260,12 @@
         "title": "Open Changed Files for Edit...",
         "category": "Git Easy Ops",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "geco.openCurrentVersionForEdit",
+        "title": "Open Current Version for Edit",
+        "category": "Git Easy Ops",
+        "icon": "$(go-to-file)"
       }
     ],
     "submenus": [
@@ -293,6 +299,10 @@
           "when": "false"
         },
         {
+          "command": "geco.openCurrentVersionForEdit",
+          "when": "false"
+        },
+        {
           "command": "geco.dialogDecisionToggle",
           "when": "false"
         },
@@ -306,6 +316,20 @@
           "command": "geco.openSourceForEdit",
           "when": "scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.openSourceForEdit)",
           "group": "navigation@4"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "geco.openCurrentVersionForEdit",
+          "when": "(resourceScheme == git || ((isInDiffEditor || inDiffEditor || inMultiDiffEditor) && resourceScheme =~ /^git$|^file$|^vscode-remote$/)) && (!geco.menuFilter || geco.menuVisible.geco.openCurrentVersionForEdit)",
+          "group": "navigation@5"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "geco.openCurrentVersionForEdit",
+          "when": "(resourceScheme == git || ((isInDiffEditor || inDiffEditor || inMultiDiffEditor) && resourceScheme =~ /^git$|^file$|^vscode-remote$/)) && (!geco.menuFilter || geco.menuVisible.geco.openCurrentVersionForEdit)",
+          "group": "navigation@5"
         }
       ],
       "view/title": [

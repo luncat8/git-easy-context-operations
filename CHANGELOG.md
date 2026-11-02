@@ -4,6 +4,21 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.30
+
+### Added
+
+- **Open Current Version for Edit in the editor caption.** Right-click the tab /
+  title of a read-only Git history or revision document, or right-click inside
+  a diff editor, and choose **Open Current Version for Edit**. It opens that
+  file's current working-tree version (including any uncommitted changes) in a
+  pinned, editable text editor tab instead of asking which editor to reopen.
+  The action resolves `git:` URIs, remote Git URIs and the modified side of a
+  diff, reports files that no longer exist, and works in the ordinary
+  publishable build - VS Code still does not expose the graph's per-file row
+  menu to extensions. Like every contributed menu item it can be hidden with
+  **Git Easy Ops: Customize Context Menus...**.
+
 ## 0.4.29
 
 ### Added
