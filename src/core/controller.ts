@@ -1516,7 +1516,7 @@ export class Controller {
 					base: base.sha,
 					destination,
 					branchName,
-					commit: destination === 'current' ? false : undefined,
+					commit: this.settings.patchApplyMode === 'am',
 				});
 			});
 
@@ -1626,7 +1626,7 @@ export class Controller {
 				// patch subject / base. `commit: false` also keeps a mailbox
 				// patch out of `git am`: the change stays staged and
 				// uncommitted so the user picks the commit name themselves.
-				commit: false,
+				commit: this.settings.patchApplyMode === 'am',
 				// When the patch fits the latest HEAD, no branch is needed
 				// to hold it: apply it on the current branch, uncommitted.
 				applyAtHeadWithoutBranch: true,

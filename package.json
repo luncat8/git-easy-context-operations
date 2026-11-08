@@ -856,6 +856,19 @@
           "default": "newBranch",
           "markdownDescription": "Where **Apply Patch at Proper Base** puts the result."
         },
+        "geco.patchApplyMode": {
+          "type": "string",
+          "enum": [
+            "am",
+            "apply"
+          ],
+          "enumDescriptions": [
+            "Use git am for mailbox patches, preserving author/message metadata and creating a commit automatically.",
+            "Use git apply; changes remain uncommitted for you to commit manually."
+          ],
+          "default": "am",
+          "markdownDescription": "How patch commands apply mailbox patches. **git am** is the default and preserves commit metadata; choose **git apply** to apply changes without committing."
+        },
         "geco.worktreeFolder": {
           "type": "string",
           "default": ".geco-worktrees",
@@ -891,7 +904,7 @@
         "geco.showGraphLanes": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Draw the `●│╮…` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits."
+          "markdownDescription": "Draw the `\u25cf\u2502\u256e\u2026` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits."
         },
         "geco.hiddenMenuItems": {
           "type": "array",

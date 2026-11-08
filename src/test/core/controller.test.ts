@@ -12,7 +12,7 @@ import { ACTIONS, decodeMultilineInput, encodeMultilineInput, type AskOptions } 
 import { createLinearRepo, TempRepo } from '../helpers/tempRepo';
 import { FakeUI } from '../helpers/fakeUi';
 
-function controllerFor(ui: FakeUI, repo: TempRepo, settings: Settings = DEFAULT_SETTINGS): Controller {
+function controllerFor(ui: FakeUI, repo: TempRepo, settings: Settings = { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }): Controller {
 	return new Controller({ ui, settings, exec: repo.exec });
 }
 

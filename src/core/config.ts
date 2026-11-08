@@ -10,6 +10,7 @@ export const CONFIG_SECTION = 'geco';
 
 export type ForcePushMode = 'lease' | 'force';
 export type PatchDestination = 'current' | 'newBranch' | 'worktree';
+export type PatchApplyMode = 'am' | 'apply';
 
 export interface Settings {
 	gitPath: string;
@@ -21,6 +22,7 @@ export interface Settings {
 	commitPickerLimit: number;
 	patchBaseCandidateLimit: number;
 	applyPatchDestination: PatchDestination;
+	patchApplyMode: PatchApplyMode;
 	worktreeFolder: string;
 	threeWayApply: boolean;
 	journalMaxEntries: number;
@@ -54,6 +56,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	commitPickerLimit: 'geco.commitPickerLimit',
 	patchBaseCandidateLimit: 'geco.patchBaseCandidateLimit',
 	applyPatchDestination: 'geco.applyPatchDestination',
+	patchApplyMode: 'geco.patchApplyMode',
 	worktreeFolder: 'geco.worktreeFolder',
 	threeWayApply: 'geco.threeWayApply',
 	journalMaxEntries: 'geco.journalMaxEntries',
@@ -75,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	commitPickerLimit: 50,
 	patchBaseCandidateLimit: 40,
 	applyPatchDestination: 'newBranch',
+	patchApplyMode: 'am',
 	worktreeFolder: '.geco-worktrees',
 	threeWayApply: true,
 	journalMaxEntries: 100,
@@ -138,6 +142,7 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		commitPickerLimit: asInt(source.commitPickerLimit, DEFAULT_SETTINGS.commitPickerLimit, 5, 1000),
 		patchBaseCandidateLimit: asInt(source.patchBaseCandidateLimit, DEFAULT_SETTINGS.patchBaseCandidateLimit, 1, 500),
 		applyPatchDestination: asEnum(source.applyPatchDestination, PATCH_DESTINATIONS, DEFAULT_SETTINGS.applyPatchDestination),
+		patchApplyMode: asEnum(source.patchApplyMode, ['am', 'apply'], DEFAULT_SETTINGS.patchApplyMode),
 		worktreeFolder: asString(source.worktreeFolder, DEFAULT_SETTINGS.worktreeFolder).trim().replace(/^[/\\]+|[/\\]+$/g, '').trim() || '.geco-worktrees',
 		threeWayApply: asBoolean(source.threeWayApply, DEFAULT_SETTINGS.threeWayApply),
 		journalMaxEntries: asInt(source.journalMaxEntries, DEFAULT_SETTINGS.journalMaxEntries, 1, 1000),

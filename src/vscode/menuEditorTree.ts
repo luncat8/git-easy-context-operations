@@ -52,6 +52,16 @@ interface MenuNoteNode extends vscode.TreeItem {
 	nodeKind: 'note';
 }
 
+// Keep the title-surface checkboxes in the same sequence as the toolbar buttons
+// in package.json (`contributes.menus["view/title"]`).
+const HEADER_BUTTON_ORDER = [
+	'geco.refresh', 'geco.applyPatchAutomatically', 'geco.applyPatchAtProperBase',
+	'geco.findProperBase', 'geco.fastForwardDefaultBranch', 'geco.squashWithPreviousCommits',
+	'geco.rewordCommit', 'geco.renameBranch', 'geco.removeRedundantBranches',
+	'geco.cleanHistory', 'geco.undoLastOperation', 'geco.diagnosePushSync',
+	'geco.copyRepositoryWebLink', 'geco.showBackups', 'geco.explainMenus', 'geco.enableGraphMenu',
+];
+
 const SURFACE_ICONS: Partial<Record<MenuSurfaceId, string>> = {
 	'view.commit': 'git-commit',
 	'view.branch': 'git-branch',
@@ -147,7 +157,11 @@ export class MenuEditorProvider implements vscode.TreeDataProvider<MenuEditorNod
 			return [note];
 		}
 		const hidden = this.deps.hidden();
-		return MENU_ROWS.filter((row) => row.surfaces.includes(surface.id)).map((row) => {
+		const rows = MENU_ROWS.filter((row) => row.surfaces.includes(surface.id));
+		if (surface.id === 'view.title') {
+			rows.sort((a, b) => HEADER_BUTTON_ORDER.indexOf(a.id) - HEADER_BUTTON_ORDER.indexOf(b.id));
+		}
+		return rows.map((row) => {
 			const label = this.deps.titles.get(row.id) ?? row.label;
 			const hiddenHere = isHidden(hidden, row);
 			const node = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None) as MenuRowNode;
