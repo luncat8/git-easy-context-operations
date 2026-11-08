@@ -1229,8 +1229,9 @@ async function applyInWorktree(git: Git, parsed: ParsedPatch, options: ApplyInWo
 		} else if (binaryPaths.length > 0) {
 			await git.ok(['add', '--', ...binaryPaths]);
 		}
-		const message = options.commitMessage ?? (parsed.subject || `Apply patch (${parsed.files.length} file${parsed.files.length === 1 ? '' : 's'})`);
-		const commitResult = await git.run(['commit', '-F', '-'], { input: `${message}\n` });
+		const message = options.commitMessage ?? (parsed.subject || '');
+		const commitArgs = message.trim() ? ['commit', '-F', '-'] : ['commit', '--allow-empty-message', '-F', '-'];
+		const commitResult = await git.run(commitArgs, { input: `${message}\n` });
 		if (commitResult.exitCode !== 0) {
 			throw new GecoError('git-failed', 'The patch was applied but the commit failed.', `${commitResult.stdout}\n${commitResult.stderr}`.trim());
 		}

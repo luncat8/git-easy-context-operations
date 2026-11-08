@@ -725,7 +725,7 @@ describe('applyPatch - separate worktree', () => {
 		assert.equal(repo.read('scratch.txt'), 'precious local work\n');
 		assert.deepEqual(await repo.statusLines(), ['?? scratch.txt']);
 		assert.equal(fs.readFileSync(path.join(result.worktreePath!, 'f.txt'), 'utf8'), 'feature\n');
-		assert.equal(await repo.subject('patch/f'), 'Apply patch (1 file)');
+		assert.equal(await repo.subject('patch/f'), '');
 	});
 
 	test('a dirty working tree makes newBranch fall back to a worktree', async () => {

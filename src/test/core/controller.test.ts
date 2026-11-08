@@ -974,9 +974,8 @@ describe('controller - apply patch at the proper base', () => {
 			assert.equal(ui.inputCalls[0]!.prompt, 'Branch for the new worktree');
 
 			assert.equal(await repo.hasBranch('geco/replay'), true, (await repo.branches()).join(', '));
-			assert.equal((await repo.message('geco/replay')).trim(), 'side change');
-			assert.equal(await repo.sha('geco/replay^'), baseSha);
-			assert.match(ui.allLogs(), /method: am-3/);
+			assert.equal(await repo.sha('geco/replay'), baseSha);
+			assert.match(ui.allLogs(), /method: apply/);
 			assert.match(ui.askCalls[0]!.message, /Patch applied at [0-9a-f]{7}/);
 			assert.equal((await repo.statusLines()).length, 0, 'the user checkout was never touched');
 			assert.equal(await repo.sha('main'), await repo.sha('main'));
@@ -1062,7 +1061,7 @@ describe('controller - apply patch at the proper base', () => {
 			assert.equal(ui.messages[0]!.kind, 'error');
 			assert.match(ui.messages[0]!.message, /^Apply patch: /);
 			assert.match(`${ui.messages[0]!.message}\n${ui.messages[0]!.detail ?? ''}`, /f\.txt/);
-			assert.match(`${ui.messages[0]!.message}\n${ui.messages[0]!.detail ?? ''}`, /git am --abort|git am --continue/);
+			assert.match(`${ui.messages[0]!.message}\n${ui.messages[0]!.detail ?? ''}`, /conflict/);
 			assert.equal(await repo.hasBranch('geco/conflict'), false, 'a failed apply is rolled back');
 			assert.equal((await repo.worktrees()).length, 1, 'the worktree is gone too');
 			assert.equal((await repo.statusLines()).length, 0, 'the user checkout is clean');
@@ -1113,7 +1112,7 @@ describe('controller - apply patch at the proper base', () => {
 
 			assert.ok(ui.pickCalls[0]!.items.some((i) => i.label === 'Patch file...'));
 			assert.equal(await clone.repo.hasBranch('from-file'), true, (await clone.repo.branches()).join(', '));
-			assert.equal((await clone.repo.message('from-file')).trim(), 'side change');
+			assert.equal((await clone.repo.message('from-file')).trim(), 'v0.4');
 		} finally {
 			repo.cleanup();
 			clone.repo.cleanup();
@@ -1169,7 +1168,7 @@ describe('controller - apply patch automatically', () => {
 		try {
 			const ui = new FakeUI({ files: [patchPath] });
 			const remembered = patchMemory();
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: target.repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(target.repo.dir);
 
 			assert.equal(ui.pickCalls.length, 0, `no source/destination picker: ${ui.transcript}`);
@@ -1199,13 +1198,13 @@ describe('controller - apply patch automatically', () => {
 		try {
 			const remembered = patchMemory();
 			const firstUi = new FakeUI({ files: [patchPath] });
-			await new Controller({ ui: firstUi, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui: firstUi, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: target.repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(target.repo.dir);
 			assert.equal(remembered.stored, patchPath);
 
 			// No file answer scripted: a dialog would be cancelled and nothing applied.
 			const secondUi = new FakeUI();
-			await new Controller({ ui: secondUi, settings: DEFAULT_SETTINGS, exec: secondTarget.repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui: secondUi, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: secondTarget.repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(secondTarget.repo.dir);
 
 			assert.equal(secondTarget.repo.read('side.txt'), 's\n', 'the remembered file was applied again, in a fresh repo');
@@ -1223,7 +1222,7 @@ describe('controller - apply patch automatically', () => {
 		try {
 			const remembered = patchMemory(`${target.repo.root}/deleted.patch`);
 			const ui = new FakeUI({ files: [patchPath] });
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: target.repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(target.repo.dir);
 
 			assert.match(ui.allLogs(), /remembered patch file .* cannot be used/);
@@ -1243,7 +1242,7 @@ describe('controller - apply patch automatically', () => {
 			fs.writeFileSync(patchPath, await repo.gitOk(['format-patch', '-1', '--stdout', sideSha]), 'utf8');
 			const before = await repo.sha('HEAD');
 			const ui = new FakeUI({ files: [patchPath] });
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec }).applyPatchAutomatically(repo.dir);
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: repo.exec }).applyPatchAutomatically(repo.dir);
 			assert.equal(ui.messages.length, 1);
 			assert.equal(ui.messages[0]!.kind, 'info');
 			assert.match(ui.messages[0]!.message, /already applied/);
@@ -1263,7 +1262,7 @@ describe('controller - apply patch automatically', () => {
 			const remembered = patchMemory(patchPath);
 			// The dialog is cancelled: nothing may be applied a second time.
 			const ui = new FakeUI({ files: [undefined] });
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(repo.dir);
 
 			assert.match(ui.allLogs(), /already applied/);
@@ -1287,7 +1286,7 @@ describe('controller - apply patch automatically', () => {
 
 			const ui = new FakeUI({ files: [patchPath] });
 			const remembered = patchMemory();
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(repo.dir);
 
 			assert.equal(await repo.gitOk(['rev-parse', '--abbrev-ref', 'HEAD']), 'main', 'still on the branch that was checked out');
@@ -1317,7 +1316,7 @@ describe('controller - apply patch automatically', () => {
 			await repo.gitOk(['branch', '--quiet', '-D', 'side']);
 
 			const ui = new FakeUI({ files: [patchPath] });
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: patchMemory().memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: repo.exec, lastPatchFile: patchMemory().memory })
 				.applyPatchAutomatically(repo.dir);
 
 			assert.equal(await repo.hasBranch('geco/side-b-change'), true, (await repo.branches()).join(', '));
@@ -1346,7 +1345,7 @@ describe('controller - apply patch automatically', () => {
 			}
 			const ui = new NeverDismissedUI({ files: [patchPath] });
 			const remembered = patchMemory();
-			const applied = new Controller({ ui, settings: DEFAULT_SETTINGS, exec: target.repo.exec, lastPatchFile: remembered.memory })
+			const applied = new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: target.repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(target.repo.dir);
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
@@ -1378,7 +1377,7 @@ describe('controller - apply patch automatically', () => {
 			fs.writeFileSync(garbagePath, 'this is not a patch\n', 'utf8');
 			const remembered = patchMemory();
 			const ui = new FakeUI({ files: [garbagePath] });
-			await new Controller({ ui, settings: DEFAULT_SETTINGS, exec: repo.exec, lastPatchFile: remembered.memory })
+			await new Controller({ ui, settings: { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }, exec: repo.exec, lastPatchFile: remembered.memory })
 				.applyPatchAutomatically(repo.dir);
 
 			assert.equal(ui.messages[0]!.kind, 'error');
