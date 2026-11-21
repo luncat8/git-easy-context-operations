@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.31",
+  "version": "0.4.32",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -918,6 +918,32 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Allow a dialog answer to be saved per repository and reused for that exact question (\"Force Push (always)\"), managed in [Git Easy Ops: Manage Dialog Decisions...](command:geco.manageDialogDecisions). Off by default: while off, nothing is saved or skipped. Saved answers live in workspace state (never synced), Undo and other non-repeatable questions can never be saved, and force push with lease / `--force` are separate decisions."
+        },
+        "geco.dialogDecisionScope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "perRepository"
+          ],
+          "enumDescriptions": [
+            "One shared set of saved answers for every repository. Saving \"Rename (always)\" then answers that question in all of them, and the Manage view edits the single shared bucket.",
+            "Keep a separate set of saved answers per repository, as in earlier versions."
+          ],
+          "default": "global",
+          "markdownDescription": "Scope of saved dialog answers (the \"<action> (always)\" answers). **global** shares one bucket across every repository; **perRepository** keeps them separate per repo. The master setting `geco.rememberDialogDecisions` still gates saving entirely — this only decides how broadly a saved answer is reused."
+        },
+        "geco.lastPatchFileScope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "perRepository"
+          ],
+          "enumDescriptions": [
+            "Remember the last applied patch file in one shared place, so **Apply Patch Automatically** reuses it across repositories.",
+            "Remember the last applied patch file separately for each repository, as in earlier versions."
+          ],
+          "default": "global",
+          "markdownDescription": "Scope of the patch file **Apply Patch Automatically** remembers. **global** shares it across repositories; **perRepository** keeps it per repo."
         }
       }
     }

@@ -11,6 +11,11 @@ export const CONFIG_SECTION = 'geco';
 export type ForcePushMode = 'lease' | 'force';
 export type PatchDestination = 'current' | 'newBranch' | 'worktree';
 export type PatchApplyMode = 'am' | 'apply';
+/**
+ * Where an opt-in memory lives: one shared bucket for every repository
+ * (`global`), or a separate bucket per repository (`perRepository`).
+ */
+export type StorageScope = 'global' | 'perRepository';
 
 export interface Settings {
 	gitPath: string;
@@ -38,6 +43,21 @@ export interface Settings {
 	 * live in workspace state, managed by "Manage Dialog Decisions…".
 	 */
 	rememberDialogDecisions: boolean;
+	/**
+	 * Scope of saved dialog answers ("<action> (always)"): `global` keeps one
+	 * shared bucket for every repository (saving "Rename (always)" answers it
+	 * everywhere), `perRepository` keeps a separate bucket per repo. Default
+	 * `global` — the same few answers are wanted in every repo, and a single
+	 * scope is far faster to manage. The `rememberDialogDecisions` master
+	 * switch still gates saving entirely.
+	 */
+	dialogDecisionScope: StorageScope;
+	/**
+	 * Scope of the patch file "Apply Patch Automatically" remembers: `global`
+	 * shares the last applied patch file across repositories, `perRepository`
+	 * keeps it per repo. Default `global`.
+	 */
+	lastPatchFileScope: StorageScope;
 	/** Row ids hidden from the context menus by "Customize Context Menus...". */
 	hiddenMenuItems: string[];
 }
@@ -65,6 +85,8 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	graphCommitLimit: 'geco.graphCommitLimit',
 	showGraphLanes: 'geco.showGraphLanes',
 	rememberDialogDecisions: 'geco.rememberDialogDecisions',
+	dialogDecisionScope: 'geco.dialogDecisionScope',
+	lastPatchFileScope: 'geco.lastPatchFileScope',
 	hiddenMenuItems: 'geco.hiddenMenuItems',
 };
 
@@ -86,12 +108,15 @@ export const DEFAULT_SETTINGS: Settings = {
 	showGraphMenuHint: true,
 	graphCommitLimit: 200,
 	showGraphLanes: true,
-	rememberDialogDecisions: false,
+	rememberDialogDecisions: true,
+	dialogDecisionScope: 'global',
+	lastPatchFileScope: 'global',
 	hiddenMenuItems: [],
 };
 
 const FORCE_PUSH_MODES: readonly ForcePushMode[] = ['lease', 'force'];
 const PATCH_DESTINATIONS: readonly PatchDestination[] = ['current', 'newBranch', 'worktree'];
+const STORAGE_SCOPES: readonly StorageScope[] = ['global', 'perRepository'];
 
 function asString(value: unknown, fallback: string): string {
 	return typeof value === 'string' && value.length > 0 ? value : fallback;
@@ -150,8 +175,10 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
 		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
 		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),
-		rememberDialogDecisions: asBoolean(source.rememberDialogDecisions, DEFAULT_SETTINGS.rememberDialogDecisions),
-		hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
+			rememberDialogDecisions: asBoolean(source.rememberDialogDecisions, DEFAULT_SETTINGS.rememberDialogDecisions),
+			dialogDecisionScope: asEnum(source.dialogDecisionScope, STORAGE_SCOPES, DEFAULT_SETTINGS.dialogDecisionScope),
+			lastPatchFileScope: asEnum(source.lastPatchFileScope, STORAGE_SCOPES, DEFAULT_SETTINGS.lastPatchFileScope),
+			hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
 	};
 }
 

@@ -20,6 +20,7 @@ import * as path from 'node:path';
 import type * as vscode from 'vscode';
 import {
 	DIALOG_DECISIONS_STATE_KEY,
+	decisionRepoKey,
 	normalizeRepoKey,
 	savedDecision,
 	serializeDialogDecisions,
@@ -28,6 +29,7 @@ import {
 	type DialogDecisionId,
 	type DialogDecisionMemory,
 	type SavedAnswer,
+	type StorageScope,
 } from '../core/dialogDecisions';
 
 /** The canonical key a repository path maps to in the decision store. */
@@ -44,6 +46,7 @@ export function canonicalRepoKey(repoPath: string): string {
 export class WorkspaceDialogDecisionStore implements DialogDecisionMemory {
 	constructor(
 		private readonly state: vscode.Memento,
+		private readonly getScope: () => StorageScope,
 		private readonly onChanged?: () => void,
 	) {}
 
@@ -52,18 +55,23 @@ export class WorkspaceDialogDecisionStore implements DialogDecisionMemory {
 		return this.state.get(DIALOG_DECISIONS_STATE_KEY);
 	}
 
+	/** Map a repository path onto its storage key for the active scope. */
+	private resolveKey(repoPath: string): string {
+		return decisionRepoKey(repoPath, this.getScope());
+	}
+
 	get(repoPath: string, id: DialogDecisionId): SavedAnswer | undefined {
 		if (!repoPath.trim()) {
 			return undefined;
 		}
-		return savedDecision(this.raw(), canonicalRepoKey(repoPath), id);
+		return savedDecision(this.raw(), this.resolveKey(repoPath), id);
 	}
 
 	async save(repoPath: string, id: DialogDecisionId): Promise<void> {
 		if (!repoPath.trim()) {
 			throw new Error('no repository identity to save a decision for');
 		}
-		await this.state.update(DIALOG_DECISIONS_STATE_KEY, withSavedDecision(this.raw(), canonicalRepoKey(repoPath), id));
+		await this.state.update(DIALOG_DECISIONS_STATE_KEY, withSavedDecision(this.raw(), this.resolveKey(repoPath), id));
 		this.onChanged?.();
 	}
 
@@ -71,7 +79,7 @@ export class WorkspaceDialogDecisionStore implements DialogDecisionMemory {
 		if (!repoPath.trim()) {
 			return;
 		}
-		await this.state.update(DIALOG_DECISIONS_STATE_KEY, withoutSavedDecision(this.raw(), canonicalRepoKey(repoPath), id));
+		await this.state.update(DIALOG_DECISIONS_STATE_KEY, withoutSavedDecision(this.raw(), this.resolveKey(repoPath), id));
 		this.onChanged?.();
 	}
 

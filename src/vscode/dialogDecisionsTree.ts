@@ -14,15 +14,19 @@
  */
 import * as vscode from 'vscode';
 import {
+	GLOBAL_DECISION_KEY,
 	dialogDecisionRows,
 	type DialogDecisionDef,
 	type DialogDecisionId,
+	type StorageScope,
 } from '../core/dialogDecisions';
 
 export interface DialogDecisionsDeps {
 	/** The `geco.rememberDialogDecisions` master setting. */
 	masterEnabled(): boolean;
-	/** The repository whose decisions are being edited, if any. */
+	/** The active storage scope for saved decisions (`global` | `perRepository`). */
+	scope(): StorageScope;
+	/** The repository whose decisions are being edited, if any (canonical key). */
 	repoPath(): string | undefined;
 	/** The raw stored decisions (validated by the core helpers). */
 	raw(): unknown;
@@ -69,35 +73,46 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 		if (element) {
 			return [];
 		}
+		const scopeValue = this.deps.scope();
+		const isGlobal = scopeValue === 'global';
 		const repo = this.deps.repoPath();
+		// With a global scope the one shared bucket is edited here regardless of
+		// which (or whether any) repository is open; per-repository scope still
+		// needs an open repository to know which bucket to show.
+		const effectiveKey = isGlobal ? GLOBAL_DECISION_KEY : repo;
 		const master = this.deps.masterEnabled();
 		const nodes: DialogDecisionNode[] = [];
 
+		const scopeLabel = isGlobal
+			? 'Scope: Global — one shared set of answers for every repository'
+			: (repo ? `Repository: ${repo}` : 'No Git repository is open');
 		const scope = new vscode.TreeItem(
-			repo ? `Repository: ${repo}` : 'No Git repository is open',
+			scopeLabel,
 			vscode.TreeItemCollapsibleState.None,
 		) as DecisionInfoNode;
 		scope.nodeKind = 'info';
 		scope.id = 'scope';
-		scope.iconPath = new vscode.ThemeIcon(repo ? 'repo' : 'warning');
+		scope.iconPath = new vscode.ThemeIcon(isGlobal ? 'globe' : (repo ? 'repo' : 'warning'));
 		scope.description = master ? 'saved decisions are ON' : 'saved decisions are OFF (geco.rememberDialogDecisions)';
 		scope.tooltip = new vscode.MarkdownString(
-			repo
-				? `Decisions are saved per repository — this list edits **${repo}** only. `
+			isGlobal
+				? `Decisions are shared across **every repository** (scope \`global\`): saving "Rename (always)" here answers that question in all of them. `
+				: (repo
+					? `Decisions are saved per repository (scope \`perRepository\`) — this list edits **${repo}** only. `
 					+ 'They are stored in this workspace’s extension state and are never synced to other machines or repositories.'
 					+ (master
 						? '\n\nThe master setting is on: an “Enabled” answer below skips only its own question. Repository checks, recovery points and journaling still run.'
 						: '\n\nThe master setting is off: saved answers below are kept but inactive — no dialog offers “(always)” and no saved answer is used until the mode is turned on.')
-				: 'Open a folder that contains a Git repository to see and edit its saved decisions.',
+				: 'Open a folder that contains a Git repository to see and edit its saved decisions.'),
 		);
 		scope.accessibilityInformation = { label: scope.tooltip.value };
 		nodes.push(scope);
 
-		if (!repo) {
+		if (!effectiveKey) {
 			return nodes;
 		}
 
-		for (const row of dialogDecisionRows(this.deps.raw(), repo, master)) {
+		for (const row of dialogDecisionRows(this.deps.raw(), effectiveKey, master)) {
 			const { def } = row;
 			const node = new vscode.TreeItem(def.action, vscode.TreeItemCollapsibleState.None) as DecisionRowNode;
 			node.nodeKind = 'decision';

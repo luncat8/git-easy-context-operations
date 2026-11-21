@@ -1,3 +1,6 @@
+import type { StorageScope } from './config';
+export type { StorageScope } from './config';
+
 /**
  * Saved dialog decisions — the typed registry, the stored shape and the
  * state machine behind "Git Easy Ops: Manage Dialog Decisions…".
@@ -165,6 +168,20 @@ export function isEligibleDecision(id: string): boolean {
 export const DIALOG_DECISIONS_STATE_KEY = 'geco.dialogDecisions.v1';
 /** Shape version of the stored object; anything else parses as empty. */
 export const DIALOG_DECISIONS_FORMAT_VERSION = 1;
+
+/**
+ * The repository identity used when decisions are saved with a `global`
+ * scope: a single bucket every repository reads and writes. It is a value
+ * {@link normalizeRepoKey} would never produce for a real path, so per-repo
+ * and global decisions can never collide — switching scopes cleanly
+ * separates the two buckets.
+ */
+export const GLOBAL_DECISION_KEY = '__geco_global__';
+
+/** Resolve the storage key a decision maps to under the active scope. */
+export function decisionRepoKey(repoPath: string, scope: StorageScope): string {
+	return scope === 'global' ? GLOBAL_DECISION_KEY : normalizeRepoKey(repoPath);
+}
 
 export interface StoredDialogDecision {
 	answer: SavedAnswer;

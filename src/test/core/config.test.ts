@@ -31,6 +31,8 @@ describe('config - defaults', () => {
 		assert.equal(DEFAULT_SETTINGS.forcePushMode, 'lease');
 		assert.equal(DEFAULT_SETTINGS.confirmDestructiveOperations, true);
 		assert.equal(DEFAULT_SETTINGS.rememberDialogDecisions, false, 'saved dialog decisions are opt-in');
+		assert.equal(DEFAULT_SETTINGS.dialogDecisionScope, 'global', 'saved dialog answers are shared across repositories by default');
+		assert.equal(DEFAULT_SETTINGS.lastPatchFileScope, 'global', 'the remembered patch file is shared across repositories by default');
 		assert.equal(DEFAULT_SETTINGS.aggregateUndoLastOperation, true, 'aggregated undo is the default');
 		assert.equal(DEFAULT_SETTINGS.preserveCommitterDateOnReword, true);
 		assert.equal(DEFAULT_SETTINGS.applyPatchDestination, 'newBranch');
@@ -84,6 +86,8 @@ describe('config - normalisation', () => {
 			journalMaxEntries: Infinity,
 			aggregateUndoLastOperation: 'yes',
 			showGraphMenuHint: {},
+			dialogDecisionScope: 'everywhere',
+			lastPatchFileScope: 7,
 		});
 		assert.deepEqual(settings, { ...DEFAULT_SETTINGS, gitPath: DEFAULT_SETTINGS.gitPath });
 	});

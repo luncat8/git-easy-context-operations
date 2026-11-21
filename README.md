@@ -74,9 +74,13 @@ and VSCodium, no proposed API needed for the default install,  but to make conte
   checkbox tree (`Git Easy Ops: Customize Context Menus...`).
 - **Remember dialog answers (opt-in)** - with `geco.rememberDialogDecisions` on,
   eligible confirmations offer an "(always)" button and skip that one question
-  for that repository next time; **Git Easy Ops: Manage Dialog Decisions...**
+  next time; **Git Easy Ops: Manage Dialog Decisions...**
   shows every question's state, with per-row reset and clear-all. Undo and
-  other non-repeatable questions can never be saved.
+  other non-repeatable questions can never be saved. By default the saved
+  answers are shared across **every repository** (`geco.dialogDecisionScope`),
+  so "Rename (always)" answers the question everywhere; set it to
+  `perRepository` to keep the old per-repo buckets. The patch file **Apply
+  Patch Automatically** remembers follows the same rule via `geco.lastPatchFileScope`.
 
 ## Where the menus are
 
@@ -102,7 +106,7 @@ The built-in **Source Control Graph** needs a proposed VS Code API
 (`contribSourceControlHistoryItemMenu`), which a published extension cannot
 declare - so the repository ships a second build for it. *Install* from -graph.vsix to enable it.
 That build reports itself as `<version>+graph` in the Extensions view (e.g.
-`0.4.31+graph`); the distinct version is what makes VS Code offer the
+`0.4.32+graph`); the distinct version is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build - accept it, otherwise the previous build keeps running.
 

@@ -20,7 +20,7 @@ import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
 import { MenuEditorProvider, commandTitlesFromManifest, type MenuEditorNode } from './vscode/menuEditorTree';
 import { DialogDecisionsProvider, type DecisionRowNode } from './vscode/dialogDecisionsTree';
 import { WorkspaceDialogDecisionStore, canonicalRepoKey } from './vscode/dialogDecisionStore';
-import { countDecisionRepositories, dialogDecisionById, type DialogDecisionId } from './core/dialogDecisions';
+import { countDecisionRepositories, dialogDecisionById, GLOBAL_DECISION_KEY, type DialogDecisionId } from './core/dialogDecisions';
 import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
@@ -182,24 +182,35 @@ export function activate(context: vscode.ExtensionContext): void {
 	// operation (and every undo) schedules a burst, so the graph a squash
 	// just rewrote is current before the result notification is even
 	// dismissed, and so is the branch list after a cleanup.
-	// "Apply Patch Automatically" remembers, per repository, the patch file
-	// it last applied successfully - in workspace state, so the memory is
-	// this workspace's, survives reloads, and never leaks into settings
-	// (a patch path is machine-local and often outside the repository).
+	// "Apply Patch Automatically" remembers the patch file it last applied
+	// successfully - in workspace state, so the memory is this workspace's,
+	// survives reloads, and never leaks into settings (a patch path is
+	// machine-local and often outside the repository). The `geco.lastPatchFileScope`
+	// setting decides whether that memory is shared across every repository
+	// (`global`) or kept per repository (`perRepository`, the old behaviour).
+	const LAST_PATCH_FILE_GLOBAL_KEY = '__geco_global__';
+	const lastPatchFileKey = (repoPath: string): string =>
+		readSettings().lastPatchFileScope === 'global' ? LAST_PATCH_FILE_GLOBAL_KEY : repoPath;
 	const lastPatchFile = {
-		get: (repoPath: string) => context.workspaceState.get<Record<string, string>>(LAST_PATCH_FILES_KEY, {})[repoPath],
+		get: (repoPath: string) => context.workspaceState.get<Record<string, string>>(LAST_PATCH_FILES_KEY, {})[lastPatchFileKey(repoPath)],
 		set: async (repoPath: string, patchFile: string) => {
 			const remembered = { ...context.workspaceState.get<Record<string, string>>(LAST_PATCH_FILES_KEY, {}) };
-			remembered[repoPath] = patchFile;
+			remembered[lastPatchFileKey(repoPath)] = patchFile;
 			await context.workspaceState.update(LAST_PATCH_FILES_KEY, remembered);
 		},
 	};
 
-	// Saved dialog decisions: workspace state, scoped per repository, never
-	// synced. The store is shared by every rebuilt runtime; its change hook
-	// repaints the management view (declared further down).
+	// Saved dialog decisions: workspace state, never synced, scoped by the
+	// `geco.dialogDecisionScope` setting (per repository, or one global bucket
+	// shared by every repository). The store is shared by every rebuilt
+	// runtime; its change hook repaints the management view (declared further
+	// down).
 	let dialogDecisionsView: DialogDecisionsProvider | undefined;
-	const dialogDecisionStore = new WorkspaceDialogDecisionStore(context.workspaceState, () => dialogDecisionsView?.refresh());
+	const dialogDecisionStore = new WorkspaceDialogDecisionStore(
+		context.workspaceState,
+		() => readSettings().dialogDecisionScope,
+		() => dialogDecisionsView?.refresh(),
+	);
 
 	let runtime = buildRuntime(readSettings(), ui, () => scheduleRefresh('an operation changed the repository', true), lastPatchFile, dialogDecisionStore);
 
@@ -316,8 +327,24 @@ export function activate(context: vscode.ExtensionContext): void {
 	// modal confirmation here — that confirmation is deliberately not one
 	// of the rememberable dialogs, and unchecking/resetting (the safe
 	// direction) never asks.
+	//
+	// The active storage scope decides the repository identity a decision is
+	// saved under. With `global` scope the one shared bucket is used and an
+	// answer applies to every repository (and can be managed with no
+	// repository open); with `perRepository` scope a saved answer is kept
+	// per repository, so managing it still needs an open repository.
+	const decisionRepoKeyFor = (): string | undefined => {
+		const scope = readSettings().dialogDecisionScope;
+		if (scope === 'global') {
+			return GLOBAL_DECISION_KEY;
+		}
+		return activeRepo ? canonicalRepoKey(activeRepo) : undefined;
+	};
+	const decisionScopeLabel = (): string =>
+		readSettings().dialogDecisionScope === 'global' ? 'every repository' : `this repository (${canonicalRepoKey(activeRepo ?? '')})`;
 	const enableDialogDecision = async (id: DialogDecisionId): Promise<boolean> => {
-		if (!activeRepo) {
+		const key = decisionRepoKeyFor();
+		if (!key) {
 			return false;
 		}
 		const def = dialogDecisionById(id);
@@ -328,10 +355,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			const accept: vscode.MessageItem = { title: def.confirmLabel ?? 'Enable' };
 			const cancel: vscode.MessageItem = { title: 'Cancel', isCloseAffordance: true };
 			const chosen = await vscode.window.showWarningMessage(
-				`Always answer "${def.action}" with "${def.confirmLabel}" for this repository?`,
+				`Always answer "${def.action}" with "${def.confirmLabel}" for ${decisionScopeLabel()}?`,
 				{
 					modal: true,
-					detail: `Future runs skip the question ${def.question} for ${activeRepo} while "Remember dialog decisions" (geco.rememberDialogDecisions) is on. `
+					detail: `Future runs skip the question ${def.question} for ${decisionScopeLabel()} while "Remember dialog decisions" (geco.rememberDialogDecisions) is on. `
 						+ 'Only that question is skipped: repository checks, recovery points and journaling still run, and the target of each run is still picked by that run. '
 						+ 'Reset it any time in this view (uncheck the row, or "Reset Saved Decision to Default").',
 				},
@@ -343,20 +370,22 @@ export function activate(context: vscode.ExtensionContext): void {
 				return false;
 			}
 		}
-		await dialogDecisionStore.save(activeRepo, id);
-		output.appendLine(`Saved decision enabled: "${def.action}" -> always "${def.confirmLabel}" for ${activeRepo}.`);
+		await dialogDecisionStore.save(key, id);
+		output.appendLine(`Saved decision enabled: "${def.action}" -> always "${def.confirmLabel}" for ${decisionScopeLabel()}.`);
 		return true;
 	};
 	const dialogDecisionsProvider = new DialogDecisionsProvider({
 		masterEnabled: () => readSettings().rememberDialogDecisions,
+		scope: () => readSettings().dialogDecisionScope,
 		repoPath: () => (activeRepo ? canonicalRepoKey(activeRepo) : undefined),
 		raw: () => dialogDecisionStore.raw(),
 		setEnabled: async (id, enabled) => {
-			if (!activeRepo) {
+			const key = decisionRepoKeyFor();
+			if (!key) {
 				return false;
 			}
 			if (!enabled) {
-				await dialogDecisionStore.reset(activeRepo, id);
+				await dialogDecisionStore.reset(key, id);
 				return true;
 			}
 			return enableDialogDecision(id);
@@ -581,11 +610,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			await focusTreeView(DIALOG_DECISIONS_VIEW_ID, 'Git Easy Ops Dialog Decisions');
 		}),
 		vscode.commands.registerCommand('geco.dialogDecisionToggle', async (node?: DecisionRowNode) => {
-			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !activeRepo) {
+			const key = decisionRepoKeyFor();
+			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !key) {
 				return;
 			}
 			if (node.saved) {
-				await dialogDecisionStore.reset(activeRepo, node.def.id);
+				await dialogDecisionStore.reset(key, node.def.id);
 				output.appendLine(`Saved decision reset: "${node.def.action}" asks every time again.`);
 			} else {
 				await enableDialogDecision(node.def.id);
@@ -593,10 +623,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			dialogDecisionsProvider.refresh();
 		}),
 		vscode.commands.registerCommand('geco.dialogDecisionReset', async (node?: DecisionRowNode) => {
-			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !activeRepo) {
+			const key = decisionRepoKeyFor();
+			if (!node || node.nodeKind !== 'decision' || node.def.kind !== 'eligible' || !key) {
 				return;
 			}
-			await dialogDecisionStore.reset(activeRepo, node.def.id);
+			await dialogDecisionStore.reset(key, node.def.id);
 			output.appendLine(`Saved decision reset: "${node.def.action}" asks every time again.`);
 			dialogDecisionsProvider.refresh();
 		}),

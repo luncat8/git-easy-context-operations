@@ -11,7 +11,15 @@ exact ids, files and tests.
 
 ## Agreed direction
 
-- Saving decisions is disabled by default (`geco.rememberDialogDecisions`, `false`).
+- Saving decisions is enabled by default (`geco.rememberDialogDecisions`, `true`).
+- Saved answers are **shared across every repository by default**
+  (`geco.dialogDecisionScope`, `global`): saving "Rename (always)" answers that
+  question in all repositories, which is what a typical user wants and far faster
+  to manage than a bucket per repo. `perRepository` keeps the old per-repo
+  buckets. Switching scope separates the buckets cleanly — a global answer is not
+  silently reused under a per-repository key, and vice versa.
+- The patch file **Apply Patch Automatically** remembers follows the same rule
+  through `geco.lastPatchFileScope` (also `global` by default).
 - Repeatable choices may be saved even for dangerous actions, including force
   push. Danger alone does not make a decision ineligible.
 - Settings show the complete action list and current state, not remembered
@@ -39,6 +47,15 @@ exact ids, files and tests.
    (`canonicalRepoKey`). Linked worktrees opened through that root share its
    scope; different repositories never do. An empty/unresolvable identity
    fails closed: ask, never approve, never save.
+3b. **Scope is selectable.** `geco.dialogDecisionScope` (`global` default, or
+   `perRepository`) decides the storage key a decision maps to:
+   `decisionRepoKey(repoPath, scope)` returns a single shared
+   `GLOBAL_DECISION_KEY` for `global`, or the canonical repository key for
+   `perRepository`. A `global` answer is therefore reused across every
+   repository and edited in one bucket in the management view; `perRepository`
+   restores the original per-repo behaviour. The same `global`/`perRepository`
+   choice (`geco.lastPatchFileScope`) governs the patch file
+   **Apply Patch Automatically** remembers. The two settings are independent.
 4. **The management view is an explicit settings surface.** Editing it is
    allowed while the master switch is off — rows show *inactive: mode
    disabled*, enabling there only *stores* an answer, and dialogs neither
@@ -150,8 +167,9 @@ only ever meet these rows.
   allowed answer (`yes` only), per-question `policyVersion`. Unknown ids,
   unknown answers and stale policy versions parse as unset.
 - Storage is extension **workspace state** under `geco.dialogDecisions.v1`,
-  keyed by canonical repository identity; never synced, never in settings.
-  No credentials, dialog text, SHAs or file contents are stored.
+  keyed either by the shared `GLOBAL_DECISION_KEY` (scope `global`) or by the
+  canonical repository identity (scope `perRepository`); never synced, never in
+  settings. No credentials, dialog text, SHAs or file contents are stored.
 - Read failure → ask normally (plain confirm, no "(always)" offer). Write
   failure → the explicitly chosen one-time action proceeds; the failure is
   logged and reported, nothing is pretended saved. Missing repository
@@ -164,7 +182,8 @@ only ever meet these rows.
 | Registry, parser, in-memory store, row-state machine | `src/core/dialogDecisions.ts` |
 | Asking path (skip / offer "(always)" / save) | `Controller.confirmDecision` in `src/core/controller.ts` |
 | Master setting | `rememberDialogDecisions` in `src/core/config.ts` + `package.json` |
-| Workspace-state store, canonical repo key | `src/vscode/dialogDecisionStore.ts` |
+| Scope settings | `dialogDecisionScope`, `lastPatchFileScope` in `src/core/config.ts` + `package.json` (both default `global`) |
+| Workspace-state store, canonical repo key (scope-aware) | `src/vscode/dialogDecisionStore.ts` (`decisionRepoKey` in `src/core/dialogDecisions.ts`) |
 | Management view | `src/vscode/dialogDecisionsTree.ts`, wired in `src/extension.ts` |
 | Tests | `src/test/core/dialogDecisions.test.ts` (+ manifest/config suites) |
 

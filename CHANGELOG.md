@@ -4,6 +4,20 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+## 0.4.32
+
+### Added
+
+- **Global scope for saved dialog answers and the remembered patch file.** New
+  settings `geco.dialogDecisionScope` and `geco.lastPatchFileScope` (both default
+  `global`) decide whether these memories are shared across every repository or
+  kept per repository. With `global` (the default), saving "Rename (always)"
+  answers that question everywhere and **Apply Patch Automatically** reuses the
+  last patch file across repositories; `perRepository` restores the original
+  per-repo behaviour. The two scopes are independent.
+
 ## 0.4.31
 
 ### Added
