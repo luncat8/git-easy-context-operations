@@ -27,6 +27,10 @@ export interface ForcePushOptions {
 	tags?: boolean;
 	/** Set the upstream configuration (`-u`). */
 	setUpstream?: boolean;
+	/** For automatic pushes: pin both the local source and remote lease to the
+	 * state captured by the originating operation. Never silently create a ref. */
+	expectedLocalSha?: string;
+	expectedRemoteSha?: string;
 }
 
 export interface ForcePushResult {
@@ -114,14 +118,21 @@ export async function planForcePush(ctx: RepoContext, options: ForcePushOptions 
 export async function forcePush(ctx: RepoContext, options: ForcePushOptions = {}): Promise<ForcePushResult> {
 	const { git, safety, settings } = ctx;
 	const plan = await planForcePush(ctx, options);
-	const { branch, remote, remoteBranch, refspec, localSha, ahead, behind, createdRemoteBranch } = plan;
-	const remoteShaBefore = plan.remoteShaBefore;
+	const { branch, remote, remoteBranch, refspec, localSha, ahead, behind } = plan;
+	if (options.expectedLocalSha && plan.localSha !== options.expectedLocalSha) {
+		throw new GecoError('rejected', `Branch "${branch}" changed after the operation; automatic force push was stopped.`);
+	}
+	if (options.expectedRemoteSha && (options.mode ?? settings.forcePushMode) !== 'lease') {
+		throw new GecoError('rejected', 'A pinned remote expectation requires force-with-lease.');
+	}
+	const remoteShaBefore = options.expectedRemoteSha ?? plan.remoteShaBefore;
+	const createdRemoteBranch = !remoteShaBefore;
 	const remoteRef = `refs/remotes/${remote}/${remoteBranch}`;
 	const mode: ForcePushMode = options.mode ?? settings.forcePushMode;
 	const dryRun = options.dryRun === true;
 
 	const args: string[] = [];
-	if (!createdRemoteBranch) {
+	if (remoteShaBefore) {
 		if (mode === 'force') {
 			args.push('--force');
 		} else {
@@ -137,7 +148,9 @@ export async function forcePush(ctx: RepoContext, options: ForcePushOptions = {}
 	if (options.setUpstream) {
 		args.push('-u');
 	}
-	args.push(remote, refspec);
+	// A raw SHA refspec prevents a concurrent branch move from changing what
+	// this automatic push sends after the preflight check.
+	args.push(remote, options.expectedLocalSha ? `${options.expectedLocalSha}:refs/heads/${remoteBranch}` : refspec);
 
 	const result = await git.push(args);
 	const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');

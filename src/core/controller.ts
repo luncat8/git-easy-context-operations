@@ -10,7 +10,7 @@ import { createRepoContext, type RepoContext } from './context';
 import type { GitExec } from './gitRunner';
 import type { Settings } from './config';
 import { ACTIONS, SYNC_BUTTON_WARNING, followUpWithoutWaiting, type ActionLabel, type AskOptions, type ConfirmOptions, type QuickPickChoice, type UI } from './ui';
-import { dialogDecisionById, type DialogDecisionId, type DialogDecisionMemory } from './dialogDecisions';
+import { dialogDecisionById, isForceDecision, type DialogDecisionId, type DialogDecisionMemory } from './dialogDecisions';
 import { resolveMenuArgs } from './args';
 import {
 	applyMessageEdit,
@@ -284,7 +284,7 @@ export class Controller {
 	): Promise<{ confirmed: boolean; saved: boolean }> {
 		const def = dialogDecisionById(id);
 		const store = this.options.dialogDecisions;
-		if (!def || def.kind !== 'eligible' || !this.settings.rememberDialogDecisions || !store || !repoPath) {
+		if (!def || def.kind !== 'eligible' || !this.settings.rememberDialogDecisions || (isForceDecision(id) && !this.settings.rememberForceDialogDecisions) || !store || !repoPath) {
 			return { confirmed: await this.ui.confirm(message, options), saved: false };
 		}
 		let saved: string | undefined;
@@ -295,7 +295,7 @@ export class Controller {
 			return { confirmed: await this.ui.confirm(message, options), saved: false };
 		}
 		if (saved === 'yes') {
-			this.ui.log(`Saved decision: "${def.action}" was answered "always ${def.confirmLabel}" for this repository — skipping its confirmation (Manage Dialog Decisions… can reset it).`);
+			this.ui.log(`Saved decision: "${def.action}" was answered "always ${def.confirmLabel}" for ${this.settings.dialogDecisionScope === 'global' ? 'all repositories in this workspace' : 'this repository'} — skipping its confirmation (Manage Dialog Decisions… can reset it).`);
 			return { confirmed: true, saved: true };
 		}
 		if (!this.ui.choose) {
@@ -305,7 +305,7 @@ export class Controller {
 		const chosen = await this.ui.choose(message, {
 			detail: [
 				options?.detail ?? '',
-				`"${confirmLabel} (always)" saves this answer for this repository while "Remember dialog decisions" is on. It skips only this question — repository checks, recovery points and journaling still run. Reset it any time with "Git Easy Ops: Manage Dialog Decisions…".`,
+				`"${confirmLabel} (always)" saves this answer for ${this.settings.dialogDecisionScope === 'global' ? 'all repositories in this workspace' : 'this repository'} while "Remember dialog decisions" is on. It skips only this question — repository checks, recovery points and journaling still run. Reset it any time with "Git Easy Ops: Manage Dialog Decisions…".`,
 			].filter(Boolean).join('\n\n'),
 			choices: [
 				{ label: confirmLabel, value: 'once', primary: true },
@@ -316,7 +316,7 @@ export class Controller {
 		if (chosen === 'always') {
 			try {
 				await store.save(repoPath, id);
-				this.ui.log(`Saved decision: "${def.action}" is now "always ${def.confirmLabel}" for this repository.`);
+				this.ui.log(`Saved decision: "${def.action}" is now "always ${def.confirmLabel}" for ${this.settings.dialogDecisionScope === 'global' ? 'all repositories in this workspace' : 'this repository'}.`);
 			} catch (error) {
 				this.ui.log(`Saved decisions: saving "${id}" failed (${toErrorMessage(error)}); continuing with the one-time answer only.`);
 				await this.ui.message('warn', `The "${def.action}" answer could not be saved, so it applies this once only.`, 'See the Git Easy Ops output log for the reason.');
@@ -473,6 +473,39 @@ export class Controller {
 		);
 	}
 
+	/** Push only the exact rewritten branch to its previously observed upstream.
+	 * A stale lease, changed target, or remote work not contained in the old
+	 * local tip leaves the result notification's manual Force Push available. */
+	private async autoPushAfterRewrite(ctx: RepoContext, branch: string | undefined, oldTip: string | undefined, newTip: string | undefined, upstream: import('./git').UpstreamInfo | undefined, needed: boolean): Promise<boolean> {
+		if (!this.settings.autoForcePushWithLease || !needed) {
+			return false;
+		}
+		try {
+			if (!branch || !oldTip || !newTip || !upstream?.sha) {
+				throw new GecoError('rejected', 'The original branch or upstream is unknown.');
+			}
+			const currentUpstream = await ctx.git.upstream(branch);
+			if (!currentUpstream || currentUpstream.remote !== upstream.remote || currentUpstream.branch !== upstream.branch) {
+				throw new GecoError('rejected', 'The branch upstream changed after the operation.');
+			}
+			if (!(await ctx.git.isAncestor(upstream.sha, oldTip))) {
+				throw new GecoError('rejected', 'The remote contains history not present in the original local branch.');
+			}
+			await assertStartable(ctx);
+			const result = await this.ui.withProgress(`Automatically pushing ${branch}`, () => forcePush(ctx, {
+				branch, remote: upstream.remote, remoteBranch: upstream.branch, mode: 'lease',
+				expectedLocalSha: newTip, expectedRemoteSha: upstream.sha,
+			}));
+			this.ui.log(`Automatic force push with lease: ${result.branch} -> ${result.remote}/${result.remoteBranch} (${shorten(result.localSha)}).`);
+			return true;
+		} catch (error) {
+			const message = toErrorMessage(error);
+			this.ui.log(`Automatic force push with lease stopped: ${message}`);
+			await this.ui.message('error', 'Automatic force push with lease failed. The local operation succeeded; check the remote before retrying.', `${message}\n\nReview the branch and remote before pushing manually.`);
+			return false;
+		}
+	}
+
 	private async reportReword(ctx: RepoContext, result: RewordResult, cwd: string): Promise<void> {
 		const where = result.branch ?? 'detached HEAD';
 		this.ui.log(
@@ -493,8 +526,9 @@ export class Controller {
 			return;
 		}
 
+		const autoPushed = await this.autoPushAfterRewrite(ctx, result.branch, result.oldTip, result.newTip, result.upstreamBefore, result.needsForcePush);
 		const actions: string[] = [];
-		if (result.needsForcePush) {
+		if (result.needsForcePush && !autoPushed) {
 			actions.push(ACTIONS.forcePush);
 			if (this.settings.forcePushMode !== 'force') {
 				actions.push(ACTIONS.forcePushHard);
@@ -504,17 +538,17 @@ export class Controller {
 
 		const message = `Renamed the message of ${shorten(result.newTargetSha)} on ${where}: "${previewSubject(result.newMessage)}"`
 			+ (result.rewritten.length > 1 ? ` (${result.rewritten.length} commits rewritten)` : '')
-			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
+			+ (autoPushed ? ` - automatically force-pushed to ${result.upstreamRef} with lease.` : result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
 		// A report, not a question: the rewrite is done and journaled, so the
 		// command ends here (an awaited notification is the "endless progress
 		// bar" - see reportResult). Picking Force Push *is* the confirmation of
 		// the push: the modal asks the same question a second time otherwise.
-		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
+		this.reportResult(message, { actions, detail: result.needsForcePush && !autoPushed ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
 			if (chosen === ACTIONS.forcePush) {
-				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true, context: ctx });
+				await this.forcePush(cwd, [], 'lease', result.branch, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.forcePushHard) {
-				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true, context: ctx });
+				await this.forcePush(cwd, [], 'force', result.branch, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.undo) {
 				await this.undoLast(ctx, true);
 			}
@@ -690,8 +724,9 @@ export class Controller {
 			].filter(Boolean).join('\n'),
 		);
 
+		const autoPushed = await this.autoPushAfterRewrite(ctx, result.branch, result.oldTip, result.newTip, result.upstreamBefore, result.needsForcePush);
 		const actions: string[] = [];
-		if (result.needsForcePush) {
+		if (result.needsForcePush && !autoPushed) {
 			actions.push(ACTIONS.forcePush);
 			if (this.settings.forcePushMode !== 'force') {
 				actions.push(ACTIONS.forcePushHard);
@@ -700,16 +735,16 @@ export class Controller {
 		actions.push(ACTIONS.undo);
 
 		const message = `Squashed ${result.squashed.length} commits into ${shorten(result.newSha)} on ${result.branch}: "${previewSubject(result.message)}"`
-			+ (result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
+			+ (autoPushed ? ` - automatically force-pushed to ${result.upstreamRef} with lease.` : result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
 
 		// Report, not question - and the Force Push button the user just
 		// pressed is the answer to "push anyway?", so the flow does not ask it
 		// again in a modal dialog.
-		this.reportResult(message, { actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
+		this.reportResult(message, { actions, detail: result.needsForcePush && !autoPushed ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
 			if (chosen === ACTIONS.forcePush) {
-				await this.forcePush(cwd, [], 'lease', undefined, { confirmed: true, context: ctx });
+				await this.forcePush(cwd, [], 'lease', result.branch, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.forcePushHard) {
-				await this.forcePush(cwd, [], 'force', undefined, { confirmed: true, context: ctx });
+				await this.forcePush(cwd, [], 'force', result.branch, { confirmed: true, context: ctx });
 			} else if (chosen === ACTIONS.undo) {
 				await this.undoLast(ctx, true);
 			}
@@ -786,14 +821,9 @@ export class Controller {
 
 			let removeBackup = false;
 			let cleanRedundantAfterMove = false;
-			// True when the confirmation the user just answered already made
-			// clear this is not a fast-forward (it said "NOT a fast-forward..."
-			// and its button was "Move anyway"): that live answer is the
-			// approval of the forced move, and the force question must not be
-			// asked a second time for the same decision. A saved answer is not
-			// fresh eyes on the divergence, and neither is a confirmation that
-			// was never shown, so both keep the force question as its own gate
-			// (as does a branch that diverges only after the user answered).
+			// A divergent move uses its own decision, separate from a plain move.
+			// If divergence appears only after the preview, the retry below asks
+			// for that separate approval before forcing the move.
 			let forceApproved = false;
 			const checkedOutBefore = (await ctx.git.headBranch()) === branch;
 			if (this.settings.confirmDestructiveOperations) {
@@ -827,7 +857,7 @@ export class Controller {
 					removeBackup = choice === 'move-remove' || choice === 'move-clean';
 					cleanRedundantAfterMove = choice === 'move-clean';
 				} else {
-					const outcome = await this.confirmDecisionInfo(ctx.git.cwd, 'fastForward.move', `Move ${branch} to ${targetInfo.shortSha}?`, {
+					const outcome = await this.confirmDecisionInfo(ctx.git.cwd, isFastForward ? 'fastForward.move' : 'fastForward.moveAnyway', `Move ${branch} to ${targetInfo.shortSha}?`, {
 						confirmLabel: isFastForward ? 'Move' : 'Move anyway',
 						destructive: !isFastForward,
 						detail: [
@@ -845,7 +875,7 @@ export class Controller {
 						this.ui.log(`Fast-forward of ${branch} cancelled by the user.`);
 						return;
 					}
-					forceApproved = !isFastForward && !outcome.saved;
+					forceApproved = !isFastForward;
 				}
 			}
 
@@ -1014,8 +1044,9 @@ export class Controller {
 			return;
 		}
 
+		const autoPushed = await this.autoPushAfterRewrite(ctx, result.branch, result.from, result.to, result.upstreamBefore, result.needsForcePush);
 		const actions: string[] = [];
-		if (result.needsForcePush) {
+		if (result.needsForcePush && !autoPushed) {
 			actions.push(ACTIONS.forcePush);
 		}
 		actions.push(ACTIONS.undo);
@@ -1027,7 +1058,7 @@ export class Controller {
 			removedBackup
 				? `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}"); the redundant backup "${removedBackup}" was removed - nothing was lost.`
 				: `${result.branch} now points at ${shorten(result.to)} ("${result.toSubject}")${result.backup ? `, old tip kept on ${result.backup.name}` : ''}.`,
-			{ actions, detail: result.needsForcePush ? SYNC_BUTTON_WARNING : undefined },
+			{ actions, detail: autoPushed ? `Automatically force-pushed ${result.branch} to ${result.upstreamRef} with lease.` : result.needsForcePush ? SYNC_BUTTON_WARNING : undefined },
 			async (chosen) => {
 				if (chosen === ACTIONS.forcePush) {
 					// The button was already answered: no second modal.

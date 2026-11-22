@@ -5,14 +5,14 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.31.vsix
+code --install-extension dist/git-easy-context-operations-0.4.35.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.31+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.35+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) The `+graph` build also
-declares `0.4.31+graph` as its version - that is what the Extensions view
+declares `0.4.35+graph` as its version - that is what the Extensions view
 shows, and the different version string is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build. Accept that prompt: without it the previously loaded build
@@ -84,7 +84,7 @@ Repository: https://github.com/luncat8/git-easy-context-operations
 | 1 | **Rename Commit Message...** / **Append to Commit Message...** / **Search and Replace in Commit Message...** | Rewrites the message of *any* commit, not just the last one: `v0.2` → `v0.2 add new button`. Descendant commits are replayed with identical trees, parents and author dates. *Search and Replace in Commit Message...* is hidden by default - tick it back on in **Customize Context Menus...**. |
 | 2 | **Fast-Forward Default Branch to Commit...** / **Fast-Forward Branch to Commit...** | Moves `main` (or a branch you pick) onto the selected commit. The old tip is parked on a backup branch named `old` (or whatever you type) *before* anything moves. (keeping the old tip as a backup branch - or removing that backup right away when it is redundant)|
 | 3 | **Force Push (with lease)...** / **Force Push (--force)...** | Pushes the rewritten history. `--force-with-lease` refuses to overwrite work a colleague pushed since your last fetch. |
-| 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** / **Apply Patch Automatically** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. All three are header buttons (view toolbar, and the built-in graph's toolbar in the `+graph` build): a patch comes from a file and lands at the base the search finds, so it belongs to the whole repository, never to the commit that was clicked - they no longer sit on commit rows. **Apply Patch Automatically** asks nothing: it re-applies the patch file last used successfully in this repository (remembered per repository in the editor's workspace state), with the default destination and a branch name derived from the patch - unless the patch applies cleanly on the latest HEAD itself, in which case it is applied directly on the current branch and no branch or worktree is created at all - and **never commits**: the change (a mailbox patch included - it is applied with `git apply`, not `git am`) lands staged in the working tree, on the new branch / in the worktree or on the current branch, and you commit it yourself with your own message and authorship. Once that commit exists, the next click recognises the patch as already in the graph by its patch-id; clicking again *before* committing applies the file once more (on the dirty tree the new-branch destination falls back to a separate worktree, which the report says). The file dialog only opens when there is no remembered file, or the remembered one is missing/unreadable, is not a patch, is already in the graph (its commit is reachable, or every commit of it has a patch-id twin among the newest 200 commits of `--all`), or does not apply for any other reason; a file picked in that dialog that also fails is reported as an error instead of reopening the dialog. Only a successfully applied file becomes the remembered one. |
+| 4 | **Apply Patch at Proper Base...** / **Find Proper Base for Patch...** / **Apply Patch Automatically** | Finds the commit a patch was made against (exact blob match, clean apply, then 3-way) and applies it there - on a new branch or in a separate worktree, so your checkout is never disturbed. All three are header buttons (view toolbar, and the built-in graph's toolbar in the `+graph` build): a patch comes from a file and lands at the base the search finds, so it belongs to the whole repository, never to the commit that was clicked - they no longer sit on commit rows. **Apply Patch Automatically** asks nothing: it re-applies the patch file last used successfully (remembered across repositories in the editor's workspace state by default, or per repository via `geco.lastPatchFileScope`), with the default destination and a branch name derived from the patch - unless the patch applies cleanly on the latest HEAD itself, in which case it is applied directly on the current branch and no branch or worktree is created at all - and **never commits**: the change (a mailbox patch included - it is applied with `git apply`, not `git am`) lands staged in the working tree, on the new branch / in the worktree or on the current branch, and you commit it yourself with your own message and authorship. Once that commit exists, the next click recognises the patch as already in the graph by its patch-id; clicking again *before* committing applies the file once more (on the dirty tree the new-branch destination falls back to a separate worktree, which the report says). The file dialog only opens when there is no remembered file, or the remembered one is missing/unreadable, is not a patch, is already in the graph (its commit is reachable, or every commit of it has a patch-id twin among the newest 200 commits of `--all`), or does not apply for any other reason; a file picked in that dialog that also fails is reported as an error instead of reopening the dialog. Only a successfully applied file becomes the remembered one. |
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. **Undo Last Operation** is also a header button, opens the same newest-first list as the Command Palette, and can roll back an older entry together with every newer operation. |
 
 | 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph's commit context menu, our view's header or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
@@ -204,7 +204,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.31+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.35+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -306,8 +306,10 @@ until you open it.
 Saved dialog decisions are **off by default** (`geco.rememberDialogDecisions`).
 Turned on, an eligible confirmation gains a second button -
 **Force Push | Force Push (always) | Cancel** - and picking "(always)" saves
-that one affirmative answer **for that repository**, so the same question is
-skipped next time. The ordinary button stays first (Enter never enrols), and
+that one affirmative answer for the configured scope, so the same question is
+skipped next time. By default the scope is all repositories in this workspace;
+`geco.dialogDecisionScope` can instead select one repository. `geco.rememberForceDialogDecisions`
+controls the force-related questions and requires the master switch. The ordinary button stays first (Enter never enrols), and
 a one-time answer, Cancel or dismissal never saves anything.
 
 `Git Easy Ops: Manage Dialog Decisions...` reveals the hidden **"Git Easy Ops
@@ -352,12 +354,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.31.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.31.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.35.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.35.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.31+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.31+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.35+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.35+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -369,7 +371,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.31.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.35.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing (and
@@ -439,8 +441,12 @@ do that before publishing).
 | `geco.defaultBackupBranchName` | `old` | Where the old branch tip is parked (`old-2`, `old-3`, ... if taken). |
 | `geco.backupRefPrefix` | `refs/geco/` | Prefix for hidden recovery refs. |
 | `geco.forcePushMode` | `lease` | Default for **Force Push**: `lease` or `force`. |
+| `geco.autoForcePushWithLease` | `false` | After rename, squash or branch move, automatically push the rewritten branch to its upstream when needed, using a pinned lease. Never falls back to hard force; failures are reported and the manual action remains. Clean History, other branches and tags are not pushed automatically. |
 | `geco.confirmDestructiveOperations` | `true` | Ask before rewriting/moving/pushing. Saved decisions (below) are only consulted where this switch would otherwise show its question. |
-| `geco.rememberDialogDecisions` | `false` | Allow "(always)" answers to eligible confirmations, saved per repository and managed by **Manage Dialog Decisions...**. Off: nothing is saved or skipped. |
+| `geco.rememberDialogDecisions` | `false` | Allow "(always)" answers to eligible confirmations, managed by **Manage Dialog Decisions...**. Off: nothing is saved or skipped. |
+| `geco.rememberForceDialogDecisions` | `true` | Also allow saved force push, diverged-move and unmerged-delete answers while the master is on. Off keeps saved answers inactive. |
+| `geco.dialogDecisionScope` | `global` | Share saved answers across repositories in this workspace, or use `perRepository`. |
+| `geco.lastPatchFileScope` | `global` | Share the remembered patch file across repositories in this workspace, or use `perRepository`. |
 | `geco.preserveCommitterDateOnReword` | `true` | Keep committer dates when rewording. |
 | `geco.commitPickerLimit` | `50` | Commits listed in the picker. |
 | `geco.patchBaseCandidateLimit` | `40` | Candidate bases probed for a patch. |

@@ -22,6 +22,8 @@ export interface Settings {
 	defaultBackupBranchName: string;
 	backupRefPrefix: string;
 	forcePushMode: ForcePushMode;
+	/** Automatically push rewritten tracked branches with an explicit lease. */
+	autoForcePushWithLease: boolean;
 	confirmDestructiveOperations: boolean;
 	preserveCommitterDateOnReword: boolean;
 	commitPickerLimit: number;
@@ -43,6 +45,8 @@ export interface Settings {
 	 * live in workspace state, managed by "Manage Dialog Decisions…".
 	 */
 	rememberDialogDecisions: boolean;
+	/** Also allow saved answers for force push, diverged moves and unmerged deletion. */
+	rememberForceDialogDecisions: boolean;
 	/**
 	 * Scope of saved dialog answers ("<action> (always)"): `global` keeps one
 	 * shared bucket for every repository (saving "Rename (always)" answers it
@@ -71,6 +75,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	defaultBackupBranchName: 'geco.defaultBackupBranchName',
 	backupRefPrefix: 'geco.backupRefPrefix',
 	forcePushMode: 'geco.forcePushMode',
+	autoForcePushWithLease: 'geco.autoForcePushWithLease',
 	confirmDestructiveOperations: 'geco.confirmDestructiveOperations',
 	preserveCommitterDateOnReword: 'geco.preserveCommitterDateOnReword',
 	commitPickerLimit: 'geco.commitPickerLimit',
@@ -85,6 +90,7 @@ export const CONFIG_KEYS: Readonly<Record<keyof Settings, string>> = {
 	graphCommitLimit: 'geco.graphCommitLimit',
 	showGraphLanes: 'geco.showGraphLanes',
 	rememberDialogDecisions: 'geco.rememberDialogDecisions',
+	rememberForceDialogDecisions: 'geco.rememberForceDialogDecisions',
 	dialogDecisionScope: 'geco.dialogDecisionScope',
 	lastPatchFileScope: 'geco.lastPatchFileScope',
 	hiddenMenuItems: 'geco.hiddenMenuItems',
@@ -95,6 +101,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	defaultBackupBranchName: 'old',
 	backupRefPrefix: 'refs/geco/',
 	forcePushMode: 'lease',
+	autoForcePushWithLease: false,
 	confirmDestructiveOperations: true,
 	preserveCommitterDateOnReword: true,
 	commitPickerLimit: 50,
@@ -108,7 +115,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	showGraphMenuHint: true,
 	graphCommitLimit: 200,
 	showGraphLanes: true,
-	rememberDialogDecisions: true,
+	rememberDialogDecisions: false,
+	rememberForceDialogDecisions: true,
 	dialogDecisionScope: 'global',
 	lastPatchFileScope: 'global',
 	hiddenMenuItems: [],
@@ -162,6 +170,7 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		defaultBackupBranchName: asString(source.defaultBackupBranchName, DEFAULT_SETTINGS.defaultBackupBranchName).trim() || 'old',
 		backupRefPrefix: normalizeRefPrefix(asString(source.backupRefPrefix, DEFAULT_SETTINGS.backupRefPrefix)),
 		forcePushMode: asEnum(source.forcePushMode, FORCE_PUSH_MODES, DEFAULT_SETTINGS.forcePushMode),
+		autoForcePushWithLease: asBoolean(source.autoForcePushWithLease, DEFAULT_SETTINGS.autoForcePushWithLease),
 		confirmDestructiveOperations: asBoolean(source.confirmDestructiveOperations, DEFAULT_SETTINGS.confirmDestructiveOperations),
 		preserveCommitterDateOnReword: asBoolean(source.preserveCommitterDateOnReword, DEFAULT_SETTINGS.preserveCommitterDateOnReword),
 		commitPickerLimit: asInt(source.commitPickerLimit, DEFAULT_SETTINGS.commitPickerLimit, 5, 1000),
@@ -175,10 +184,11 @@ export function normalizeSettings(raw: Record<string, unknown> | undefined | nul
 		showGraphMenuHint: asBoolean(source.showGraphMenuHint, DEFAULT_SETTINGS.showGraphMenuHint),
 		graphCommitLimit: asInt(source.graphCommitLimit, DEFAULT_SETTINGS.graphCommitLimit, 10, 5000),
 		showGraphLanes: asBoolean(source.showGraphLanes, DEFAULT_SETTINGS.showGraphLanes),
-			rememberDialogDecisions: asBoolean(source.rememberDialogDecisions, DEFAULT_SETTINGS.rememberDialogDecisions),
-			dialogDecisionScope: asEnum(source.dialogDecisionScope, STORAGE_SCOPES, DEFAULT_SETTINGS.dialogDecisionScope),
-			lastPatchFileScope: asEnum(source.lastPatchFileScope, STORAGE_SCOPES, DEFAULT_SETTINGS.lastPatchFileScope),
-			hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
+		rememberDialogDecisions: asBoolean(source.rememberDialogDecisions, DEFAULT_SETTINGS.rememberDialogDecisions),
+		rememberForceDialogDecisions: asBoolean(source.rememberForceDialogDecisions, DEFAULT_SETTINGS.rememberForceDialogDecisions),
+		dialogDecisionScope: asEnum(source.dialogDecisionScope, STORAGE_SCOPES, DEFAULT_SETTINGS.dialogDecisionScope),
+		lastPatchFileScope: asEnum(source.lastPatchFileScope, STORAGE_SCOPES, DEFAULT_SETTINGS.lastPatchFileScope),
+		hiddenMenuItems: normalizeHiddenItems(source.hiddenMenuItems),
 	};
 }
 

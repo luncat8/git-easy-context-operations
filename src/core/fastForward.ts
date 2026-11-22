@@ -22,6 +22,7 @@
  * restores the old tip AND leaves the branch again.
  */
 import type { RepoContext } from './context';
+import type { UpstreamInfo } from './git';
 import { GecoError, toErrorMessage } from './errors';
 import { previewSubject } from './reword';
 import { shorten, type BackupBranchResult } from './safety';
@@ -80,6 +81,8 @@ export interface FastForwardResult {
 	worktreeUpdated: boolean;
 	needsForcePush: boolean;
 	upstreamRef?: string;
+	/** Upstream observed before changing the branch, used for automatic lease pushes. */
+	upstreamBefore?: UpstreamInfo;
 	notes: string[];
 }
 
@@ -183,6 +186,8 @@ export async function fastForwardBranch(ctx: RepoContext, options: FastForwardOp
 		notes.push(`HEAD is detached at ${shorten(from)}; the worktree stays where it is.`);
 	}
 
+	const upstreamBefore = await git.upstream(branch);
+
 	// Park the old tip before anything is moved.
 	const backup = options.createBackup === false
 		? undefined
@@ -268,6 +273,7 @@ export async function fastForwardBranch(ctx: RepoContext, options: FastForwardOp
 		worktreeUpdated: checkedOut || checkedOutAfter,
 		needsForcePush,
 		upstreamRef: upstream ? `${upstream.remote}/${upstream.branch}` : undefined,
+		upstreamBefore,
 	};
 }
 

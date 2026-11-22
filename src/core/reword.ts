@@ -20,6 +20,7 @@
  * changes, and it also works for root commits and merge commits.
  */
 import type { RepoContext } from './context';
+import type { UpstreamInfo } from './git';
 import { GecoError } from './errors';
 import { discardRecoveryRef, isSignedCommit, rewriteCommit } from './rewrite';
 import { shorten } from './safety';
@@ -76,6 +77,8 @@ export interface RewordResult {
 	/** True when the rewritten commits are already on the remote. */
 	needsForcePush: boolean;
 	upstreamRef?: string;
+	/** Upstream observed before changing the branch, used for automatic lease pushes. */
+	upstreamBefore?: UpstreamInfo;
 	/** Local branches / tags that still contain the old (unrewritten) commit. */
 	otherRefsOnOldHistory: string[];
 	signatureDropped: boolean;
@@ -319,6 +322,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 		);
 	}
 
+	const upstreamBefore = await git.upstream(branchName);
 	const backupRef = createBackup ? await safety.hiddenBackupRef(`reword/${branchName}`, branchSha) : undefined;
 	try {
 		const map = new Map<string, string>();
@@ -371,6 +375,7 @@ export async function rewordCommitMessage(ctx: RepoContext, options: RewordOptio
 			backupRef,
 			needsForcePush,
 			upstreamRef: upstream ? `${upstream.remote}/${upstream.branch}` : undefined,
+			upstreamBefore,
 			otherRefsOnOldHistory: [...containingBranches, ...containingTags.map((t) => `tag:${t}`)],
 		};
 	} catch (error) {

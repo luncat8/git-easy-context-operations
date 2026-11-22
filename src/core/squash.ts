@@ -19,6 +19,7 @@
  * "Git Easy Ops: Undo Last Operation".
  */
 import type { RepoContext } from './context';
+import type { UpstreamInfo } from './git';
 import { GecoError } from './errors';
 import type { CommitInfo, Git } from './git';
 import { messageSubject, normalizeMessage, previewSubject } from './reword';
@@ -67,6 +68,8 @@ export interface SquashResult {
 	/** True when the rewritten commits are already on the remote. */
 	needsForcePush: boolean;
 	upstreamRef?: string;
+	/** Upstream observed before changing the branch, used for automatic lease pushes. */
+	upstreamBefore?: UpstreamInfo;
 	/** Local branches / tags that still point at the old (squashed) commits. */
 	otherRefsOnOldHistory: string[];
 	signatureDropped: boolean;
@@ -273,6 +276,7 @@ export async function squashCommits(ctx: RepoContext, options: SquashOptions): P
 		);
 	}
 
+	const upstreamBefore = await git.upstream(branchName);
 	const backupRef = createBackup ? await safety.hiddenBackupRef(`squash/${branchName}`, branchSha) : undefined;
 	try {
 		const map = new Map<string, string>();
@@ -347,6 +351,7 @@ export async function squashCommits(ctx: RepoContext, options: SquashOptions): P
 			backupRef,
 			needsForcePush,
 			upstreamRef: upstream ? `${upstream.remote}/${upstream.branch}` : undefined,
+			upstreamBefore,
 			otherRefsOnOldHistory: [...elsewhere],
 			signatureDropped: signed.some(Boolean),
 			mergeParentsDropped: oldestInfo.parents.length > 1,

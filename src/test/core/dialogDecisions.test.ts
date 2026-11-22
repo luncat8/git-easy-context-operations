@@ -283,22 +283,79 @@ describe('dialog decisions - controller flows', () => {
 			const store = new InMemoryDialogDecisionStore();
 			store.save(repo.dir, 'fastForward.move');
 
-			// The saved "Move" skips its own dialog - but the branch is
-			// diverged, so the force question keeps its own gate instead of
-			// riding on the saved plain-move approval.
+			// A diverged branch uses the separate force decision even when
+			// the plain move was previously approved.
 			const ui = new FakeUI();
 			await new Controller({ ui, settings: ON, exec: repo.exec, dialogDecisions: store })
 				.fastForward(repo.dir, [featureSha], { askBranch: false });
 
 			assert.equal(ui.confirmCalls.length, 0, 'no two-button dialog at all');
 			assert.equal(ui.chooseCalls.length, 1, `exactly one question left: ${ui.transcript}`);
-			assert.match(ui.chooseCalls[0]!.message, /has commits that .* does not\. Move it anyway\?/);
-			assert.match(ui.allLogs(), /Saved decision.*skipping its confirmation/);
+			assert.match(ui.chooseCalls[0]!.options.detail ?? '', /NOT a fast-forward/);
+			assert.equal(ui.chooseCalls[0]!.options.choices[1]?.label, 'Move anyway (always)');
 			assert.equal(await repo.sha('main'), featureSha, 'the confirmed forced move ran');
 			assert.equal(store.get(repo.dir, 'fastForward.moveAnyway'), undefined, 'the one-time answer saved nothing');
 		} finally {
 			repo.cleanup();
 		}
+	});
+
+	it('saves a diverged move under its own decision and reuses it only for forced moves', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.gitOk(['checkout', '--quiet', '-b', 'feature', await repo.sha('main')]);
+			const target = await repo.commit('feature work', { 'feature.txt': 'f\n' });
+			await repo.checkout('main');
+			await repo.commit('main work', { 'main.txt': 'm\n' });
+			const store = new InMemoryDialogDecisionStore();
+			const ui = new FakeUI({ choices: ['always'] });
+			await new Controller({ ui, settings: ON, exec: repo.exec, dialogDecisions: store })
+				.fastForward(repo.dir, [target], { askBranch: false });
+			assert.equal(store.get(repo.dir, 'fastForward.moveAnyway'), 'yes');
+			assert.equal(store.get(repo.dir, 'fastForward.move'), undefined);
+			assert.equal(await repo.sha('main'), target);
+
+			await repo.commit('new divergence', { 'another.txt': 'a\n' });
+			const again = new FakeUI();
+			await new Controller({ ui: again, settings: ON, exec: repo.exec, dialogDecisions: store })
+				.fastForward(repo.dir, [target], { askBranch: false });
+			assert.equal(again.chooseCalls.length + again.confirmCalls.length, 0);
+			assert.equal(await repo.sha('main'), target);
+		} finally { repo.cleanup(); }
+	});
+
+	it('force setting controls offers and saved answers independently of other decisions', async () => {
+		const { repo } = await createLinearRepo();
+		try {
+			await repo.addBareRemote('origin', ['main']);
+			const store = new InMemoryDialogDecisionStore();
+			const ui = new FakeUI({ choices: ['always'] });
+			await new Controller({ ui, settings: ON, exec: repo.exec, dialogDecisions: store }).forcePush(repo.dir, [], 'force');
+			assert.equal(ui.chooseCalls[0]?.options.choices[1]?.label, 'Force Push (always)');
+			assert.equal(store.get(repo.dir, 'forcePush.force'), 'yes');
+			assert.equal(store.get(repo.dir, 'forcePush.lease'), undefined);
+
+			const disabled = new FakeUI({ confirms: [false] });
+			await new Controller({ ui: disabled, settings: { ...ON, rememberForceDialogDecisions: false }, exec: repo.exec, dialogDecisions: store }).forcePush(repo.dir, [], 'force');
+			assert.equal(disabled.confirmCalls.length, 1);
+			assert.equal(disabled.chooseCalls.length, 0);
+			assert.equal(store.get(repo.dir, 'forcePush.force'), 'yes');
+			const enabled = new FakeUI();
+			await new Controller({ ui: enabled, settings: ON, exec: repo.exec, dialogDecisions: store }).forcePush(repo.dir, [], 'force');
+			assert.equal(enabled.confirmCalls.length + enabled.chooseCalls.length, 0);
+		} finally { repo.cleanup(); }
+	});
+
+	it('marks a saved force answer inactive when its setting is off', () => {
+		const raw = withSavedDecision(withSavedDecision(serializeDialogDecisions({}), repoA, 'forcePush.force'), repoA, 'squash.confirm');
+		const rows = dialogDecisionRows(raw, repoA, true, false);
+		assert.equal(rows.find(row => row.def.id === 'forcePush.force')?.state, 'inactive');
+		assert.equal(rows.find(row => row.def.id === 'squash.confirm')?.state, 'enabled');
+	});
+
+	it('invalidates old plain-move consent that could have been saved during divergence', () => {
+		const raw = { version: 1, byRepo: { [repoA]: { 'fastForward.move': { answer: 'yes', policyVersion: 1 } } } };
+		assert.equal(savedDecision(raw, repoA, 'fastForward.move'), undefined);
 	});
 
 	it('Undo still asks even with the mode on and other decisions saved', async () => {

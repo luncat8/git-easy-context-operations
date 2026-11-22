@@ -6,6 +6,9 @@
  */
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type * as vscode from 'vscode';
 import {
 	DIALOG_DECISIONS_STATE_KEY,
@@ -61,6 +64,21 @@ describe('dialog decision store - scope', () => {
 		await store.save(repoA, decision);
 		assert.equal(await store.get(repoA, decision), 'yes');
 		assert.equal(await store.get(repoB, decision), undefined);
+	});
+
+	it('resolves path aliases consistently in per-repository scope', async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'geco-decision-'));
+		try {
+			const real = path.join(root, 'real');
+			const alias = path.join(root, 'alias');
+			fs.mkdirSync(real);
+			fs.symlinkSync(real, alias, 'junction');
+			const store = make('perRepository');
+			await store.save(alias, decision);
+			assert.equal(store.get(real, decision), 'yes');
+			await store.reset(real, decision);
+			assert.equal(store.get(alias, decision), undefined);
+		} finally { fs.rmSync(root, { recursive: true, force: true }); }
 	});
 
 	it('reset and clearAll honour the active scope', async () => {

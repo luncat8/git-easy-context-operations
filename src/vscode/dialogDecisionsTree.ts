@@ -24,6 +24,7 @@ import {
 export interface DialogDecisionsDeps {
 	/** The `geco.rememberDialogDecisions` master setting. */
 	masterEnabled(): boolean;
+	forceEnabled(): boolean;
 	/** The active storage scope for saved decisions (`global` | `perRepository`). */
 	scope(): StorageScope;
 	/** The repository whose decisions are being edited, if any (canonical key). */
@@ -81,10 +82,11 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 		// needs an open repository to know which bucket to show.
 		const effectiveKey = isGlobal ? GLOBAL_DECISION_KEY : repo;
 		const master = this.deps.masterEnabled();
+		const forceEnabled = this.deps.forceEnabled();
 		const nodes: DialogDecisionNode[] = [];
 
 		const scopeLabel = isGlobal
-			? 'Scope: Global — one shared set of answers for every repository'
+			? 'Scope: Global — shared across repositories in this workspace'
 			: (repo ? `Repository: ${repo}` : 'No Git repository is open');
 		const scope = new vscode.TreeItem(
 			scopeLabel,
@@ -95,15 +97,14 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 		scope.iconPath = new vscode.ThemeIcon(isGlobal ? 'globe' : (repo ? 'repo' : 'warning'));
 		scope.description = master ? 'saved decisions are ON' : 'saved decisions are OFF (geco.rememberDialogDecisions)';
 		scope.tooltip = new vscode.MarkdownString(
-			isGlobal
-				? `Decisions are shared across **every repository** (scope \`global\`): saving "Rename (always)" here answers that question in all of them. `
-				: (repo
-					? `Decisions are saved per repository (scope \`perRepository\`) — this list edits **${repo}** only. `
-					+ 'They are stored in this workspace’s extension state and are never synced to other machines or repositories.'
-					+ (master
-						? '\n\nThe master setting is on: an “Enabled” answer below skips only its own question. Repository checks, recovery points and journaling still run.'
-						: '\n\nThe master setting is off: saved answers below are kept but inactive — no dialog offers “(always)” and no saved answer is used until the mode is turned on.')
-				: 'Open a folder that contains a Git repository to see and edit its saved decisions.'),
+			(isGlobal
+				? 'Decisions are shared across repositories **in this workspace** (scope `global`). '
+				: repo ? `Decisions are saved for **${repo}** only (scope \`perRepository\`). `
+					: 'Open a Git repository to edit per-repository decisions. ')
+			+ 'Saved answers are stored in workspace state and are not synced. '
+			+ (master ? 'The master setting is on.' : 'The master setting is off; saved answers are inactive.')
+			+ (forceEnabled ? '' : ' Force-related saved answers are inactive while `geco.rememberForceDialogDecisions` is off.')
+			+ ' Only the named question is skipped; repository checks, recovery points and journaling still run.',
 		);
 		scope.accessibilityInformation = { label: scope.tooltip.value };
 		nodes.push(scope);
@@ -112,7 +113,7 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 			return nodes;
 		}
 
-		for (const row of dialogDecisionRows(this.deps.raw(), effectiveKey, master)) {
+		for (const row of dialogDecisionRows(this.deps.raw(), effectiveKey, master, forceEnabled)) {
 			const { def } = row;
 			const node = new vscode.TreeItem(def.action, vscode.TreeItemCollapsibleState.None) as DecisionRowNode;
 			node.nodeKind = 'decision';
@@ -129,7 +130,7 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 				node.tooltip = new vscode.MarkdownString(
 					`**${def.action}**\n\nControls the question ${def.question}.\n\n`
 					+ (row.saved
-						? `Saved answer: always “${def.confirmLabel}”${master ? '.' : ' — inactive while the master setting is off.'} `
+						? `Saved answer: always “${def.confirmLabel}”${row.state === 'enabled' ? '.' : ' — inactive while its setting is off.'} `
 							+ 'Only this question is skipped; the operation’s repository checks, recovery points and journal entries still happen. '
 							+ 'The branch, commit and remote of a future run still come from that run.\n\nUntick the box (or “Reset to Default”) to ask again every time.'
 						: 'No saved answer: this question is asked every time. '
@@ -170,7 +171,7 @@ export class DialogDecisionsProvider implements vscode.TreeDataProvider<DialogDe
 			if (applied) {
 				changed = true;
 				this.deps.onLog(enabled
-					? `Saved decision enabled: "${node.def.action}" now always answers "${node.def.confirmLabel}" for this repository.`
+					? `Saved decision enabled: "${node.def.action}" now always answers "${node.def.confirmLabel}" for ${this.deps.scope() === 'global' ? 'all repositories in this workspace' : 'this repository'}.`
 					: `Saved decision reset: "${node.def.action}" asks every time again.`);
 			}
 		}

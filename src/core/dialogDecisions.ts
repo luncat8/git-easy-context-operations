@@ -66,6 +66,12 @@ export type DialogDecisionId =
 	| 'input.textEntry'
 	| 'selection.pickers';
 
+/** Force-related questions are separately gated by rememberForceDialogDecisions. */
+export function isForceDecision(id: DialogDecisionId): boolean {
+	return id === 'forcePush.lease' || id === 'forcePush.force'
+		|| id === 'fastForward.moveAnyway' || id === 'branch.deleteUnmergedAnyway';
+}
+
 export type DialogDecisionKind = 'eligible' | 'ineligible' | 'notApplicable';
 
 export interface DialogDecisionDef {
@@ -122,8 +128,8 @@ const notApplicable = (
 export const DIALOG_DECISIONS: readonly DialogDecisionDef[] = [
 	eligible('reword.rename', 'Rename Commit Message', '“Rename the message of <commit> on <branch>?”', 'Rename'),
 	eligible('squash.confirm', 'Squash Commits', '“Squash <N> commits into one on <branch>?”', 'Squash'),
-	eligible('fastForward.move', 'Fast-Forward / Move Branch', '“Move <branch> to <commit>?” (the plain two-button form)', 'Move'),
-	eligible('fastForward.moveAnyway', 'Move Branch Anyway (diverged)', '“<branch> has commits that <target> does not. Move it anyway?”', 'Move anyway'),
+	{ ...eligible('fastForward.move', 'Fast-Forward / Move Branch', '“Move <branch> to <commit>?” (the plain two-button form)', 'Move'), policyVersion: 2 },
+	eligible('fastForward.moveAnyway', 'Move Branch Anyway (diverged)', '“Move <branch> to <target> anyway?” when the branch has diverged', 'Move anyway'),
 	eligible('forcePush.lease', 'Force Push (with lease)', '“Force push <branch> to <remote>/<branch>?” with --force-with-lease', 'Force Push (with lease)'),
 	eligible('forcePush.force', 'Force Push (--force)', '“Force push <branch> to <remote>/<branch>?” with hard --force', 'Force Push'),
 	eligible('patch.applyToCurrent', 'Apply Patch to Current Branch', '“Apply this patch to the current branch?”', 'Apply', false),
@@ -362,7 +368,7 @@ export interface DialogDecisionRow {
  * `geco.rememberDialogDecisions` setting; a saved row with the mode off is
  * `inactive` (kept, but never used and never offered in a dialog).
  */
-export function dialogDecisionRows(raw: unknown, repoPath: string, masterEnabled: boolean): DialogDecisionRow[] {
+export function dialogDecisionRows(raw: unknown, repoPath: string, masterEnabled: boolean, forceEnabled = true): DialogDecisionRow[] {
 	const saved = new Set(savedDecisionIds(raw, repoPath));
 	return DIALOG_DECISIONS.map((def) => {
 		const isSaved = saved.has(def.id);
@@ -375,8 +381,8 @@ export function dialogDecisionRows(raw: unknown, repoPath: string, masterEnabled
 		if (!isSaved) {
 			return { def, saved: false, state: 'default' as const, stateLabel: 'Default (not enabled)' };
 		}
-		return masterEnabled
+		return masterEnabled && (forceEnabled || !isForceDecision(def.id))
 			? { def, saved: true, state: 'enabled' as const, stateLabel: `Enabled — always “${def.confirmLabel}”` }
-			: { def, saved: true, state: 'inactive' as const, stateLabel: `Saved — inactive: mode disabled (always “${def.confirmLabel}” when on)` };
+			: { def, saved: true, state: 'inactive' as const, stateLabel: `Saved — inactive: ${masterEnabled ? "force decisions disabled" : "mode disabled"} (always “${def.confirmLabel}” when on)` };
 	});
 }

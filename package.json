@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.32",
+  "version": "0.4.35",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -792,17 +792,40 @@
         "geco.gitPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `git` executable. Empty = use the `git.path` setting, then `git` from `PATH`."
+          "markdownDescription": "Path to the `git` executable. Empty = use the `git.path` setting, then `git` from `PATH`.",
+          "order": 1
         },
-        "geco.defaultBackupBranchName": {
-          "type": "string",
-          "default": "old",
-          "markdownDescription": "Branch name used to park the old tip before a fast-forward. A numeric suffix is added when the name is taken (`old-2`, `old-3`, ...)."
+        "geco.confirmDestructiveOperations": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask for confirmation before rewriting history, moving a branch or force-pushing.",
+          "order": 2
         },
-        "geco.backupRefPrefix": {
+        "geco.rememberDialogDecisions": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow eligible dialog answers to be saved and reused for the same question, managed in [Git Easy Ops: Manage Dialog Decisions...](command:geco.manageDialogDecisions). Off by default: dialogs neither save nor skip answers while off; the management view can still prepare inactive answers. Saved answers live in workspace state (never synced); Undo and other non-repeatable questions cannot be saved. Force-related questions are also controlled by `geco.rememberForceDialogDecisions`.",
+          "order": 3
+        },
+        "geco.rememberForceDialogDecisions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Allow “(always)” on force-related confirmations: force push (lease and hard force remain separate), moving a diverged branch, and deleting an unmerged branch. Requires `geco.rememberDialogDecisions`. Turn off to ask each time; existing saved answers remain inactive until turned on again. This does not automate result-report buttons or VS Code’s own Git dialogs.",
+          "order": 4
+        },
+        "geco.dialogDecisionScope": {
           "type": "string",
-          "default": "refs/geco/",
-          "markdownDescription": "Ref prefix for hidden recovery points created before history rewrites."
+          "enum": [
+            "global",
+            "perRepository"
+          ],
+          "enumDescriptions": [
+            "One shared set of saved answers for repositories in this workspace. Saving \"Rename (always)\" answers that question across these repositories.",
+            "Keep a separate set of saved answers per repository, as in earlier versions."
+          ],
+          "default": "global",
+          "markdownDescription": "Scope of saved dialog answers. **global** shares one bucket across repositories in this workspace; **perRepository** keeps them separate per repo. Saved answers do not carry across workspaces or sync to other machines. The master setting `geco.rememberDialogDecisions` still gates saving.",
+          "order": 5
         },
         "geco.forcePushMode": {
           "type": "string",
@@ -815,31 +838,62 @@
             "`git push --force` - always overwrites the remote branch."
           ],
           "default": "lease",
-          "markdownDescription": "Default mode for **Git Easy Ops: Force Push**."
+          "markdownDescription": "Default mode for **Git Easy Ops: Force Push**.",
+          "order": 6
         },
-        "geco.confirmDestructiveOperations": {
+        "geco.autoForcePushWithLease": {
+          "type": "boolean",
+          "default": false,
+          "order": 7,
+          "markdownDescription": "After a commit rename, squash or branch move, automatically force-push the rewritten branch to its existing upstream when needed. Uses **--force-with-lease** regardless of `geco.forcePushMode`, never falls back to hard force, and stops if the branch or upstream changed or the original branch did not contain the known remote history. Failures remain visible and can be reviewed before a manual push. Does not automatically push Clean History results, other branches or tags. Off by default."
+        },
+        "geco.defaultBackupBranchName": {
+          "type": "string",
+          "default": "old",
+          "markdownDescription": "Branch name used to park the old tip before a fast-forward. A numeric suffix is added when the name is taken (`old-2`, `old-3`, ...).",
+          "order": 8
+        },
+        "geco.backupRefPrefix": {
+          "type": "string",
+          "default": "refs/geco/",
+          "markdownDescription": "Ref prefix for hidden recovery points created before history rewrites.",
+          "order": 9
+        },
+        "geco.journalMaxEntries": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000,
+          "markdownDescription": "How many operations to remember for **Undo Last Operation** (stored in `.git/geco/journal.json`).",
+          "order": 10
+        },
+        "geco.aggregateUndoLastOperation": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ask for confirmation before rewriting history, moving a branch or force-pushing."
+          "markdownDescription": "Show one undo item per user action and restore all of its journal checkpoints together, back to the state before that action. Follow-up steps such as Force Push after a rewrite belong to the originating action. The detailed journal is still kept. Turn off to show and undo each checkpoint separately. Legacy entries written before action ids were introduced remain separate.",
+          "order": 11
         },
         "geco.preserveCommitterDateOnReword": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Keep the original committer date when rewording a commit. Turn off to behave like `git commit --amend` (committer date = now)."
+          "markdownDescription": "Keep the original committer date when rewording a commit. Turn off to behave like `git commit --amend` (committer date = now).",
+          "order": 12
         },
         "geco.commitPickerLimit": {
           "type": "number",
           "default": 50,
           "minimum": 5,
           "maximum": 1000,
-          "markdownDescription": "How many commits to list in the commit picker."
+          "markdownDescription": "How many commits to list in the commit picker.",
+          "order": 13
         },
         "geco.patchBaseCandidateLimit": {
           "type": "number",
           "default": 40,
           "minimum": 1,
           "maximum": 500,
-          "markdownDescription": "How many candidate commits to probe when searching for the proper base of a patch."
+          "markdownDescription": "How many candidate commits to probe when searching for the proper base of a patch.",
+          "order": 14
         },
         "geco.applyPatchDestination": {
           "type": "string",
@@ -854,7 +908,8 @@
             "Create a separate worktree at the proper base - your current checkout is never touched."
           ],
           "default": "newBranch",
-          "markdownDescription": "Where **Apply Patch at Proper Base** puts the result."
+          "markdownDescription": "Where **Apply Patch at Proper Base** puts the result.",
+          "order": 15
         },
         "geco.patchApplyMode": {
           "type": "string",
@@ -867,70 +922,20 @@
             "Use git apply; changes remain uncommitted for you to commit manually."
           ],
           "default": "am",
-          "markdownDescription": "How patch commands apply mailbox patches. **git am** is the default and preserves commit metadata; choose **git apply** to apply changes without committing."
-        },
-        "geco.worktreeFolder": {
-          "type": "string",
-          "default": ".geco-worktrees",
-          "markdownDescription": "Folder (relative to the repository's parent directory) that holds worktrees created by patch operations."
+          "markdownDescription": "How patch commands apply mailbox patches. **git am** is the default and preserves commit metadata; choose **git apply** to apply changes without committing.",
+          "order": 16
         },
         "geco.threeWayApply": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Fall back to a 3-way merge (`git apply --3way` / `git am -3`) when a patch does not apply cleanly."
+          "markdownDescription": "Fall back to a 3-way merge (`git apply --3way` / `git am -3`) when a patch does not apply cleanly.",
+          "order": 17
         },
-        "geco.journalMaxEntries": {
-          "type": "number",
-          "default": 100,
-          "minimum": 1,
-          "maximum": 1000,
-          "markdownDescription": "How many operations to remember for **Undo Last Operation** (stored in `.git/geco/journal.json`)."
-        },
-        "geco.aggregateUndoLastOperation": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show one undo item per user action and restore all of its journal checkpoints together, back to the state before that action. Follow-up steps such as Force Push after a rewrite belong to the originating action. The detailed journal is still kept. Turn off to show and undo each checkpoint separately. Legacy entries written before action ids were introduced remain separate."
-        },
-        "geco.showGraphMenuHint": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show a one-time hint explaining how to enable the Source Control Graph context menu (it needs a proposed VS Code API)."
-        },
-        "geco.graphCommitLimit": {
-          "type": "number",
-          "default": 200,
-          "markdownDescription": "How many commits the **Graph** group of the \"Git Easy Ops\" view lists (ordered topologically, across all refs)."
-        },
-        "geco.showGraphLanes": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Draw the `●│╮…` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits."
-        },
-        "geco.hiddenMenuItems": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "scope": "window",
-          "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them. When the setting is absent, the built-in defaults apply: **Search and Replace in Commit Message...** is hidden out of the box; an empty list `[]` means \"show everything\"."
-        },
-        "geco.rememberDialogDecisions": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Allow a dialog answer to be saved per repository and reused for that exact question (\"Force Push (always)\"), managed in [Git Easy Ops: Manage Dialog Decisions...](command:geco.manageDialogDecisions). Off by default: while off, nothing is saved or skipped. Saved answers live in workspace state (never synced), Undo and other non-repeatable questions can never be saved, and force push with lease / `--force` are separate decisions."
-        },
-        "geco.dialogDecisionScope": {
+        "geco.worktreeFolder": {
           "type": "string",
-          "enum": [
-            "global",
-            "perRepository"
-          ],
-          "enumDescriptions": [
-            "One shared set of saved answers for every repository. Saving \"Rename (always)\" then answers that question in all of them, and the Manage view edits the single shared bucket.",
-            "Keep a separate set of saved answers per repository, as in earlier versions."
-          ],
-          "default": "global",
-          "markdownDescription": "Scope of saved dialog answers (the \"<action> (always)\" answers). **global** shares one bucket across every repository; **perRepository** keeps them separate per repo. The master setting `geco.rememberDialogDecisions` still gates saving entirely — this only decides how broadly a saved answer is reused."
+          "default": ".geco-worktrees",
+          "markdownDescription": "Folder (relative to the repository's parent directory) that holds worktrees created by patch operations.",
+          "order": 18
         },
         "geco.lastPatchFileScope": {
           "type": "string",
@@ -939,11 +944,39 @@
             "perRepository"
           ],
           "enumDescriptions": [
-            "Remember the last applied patch file in one shared place, so **Apply Patch Automatically** reuses it across repositories.",
+            "Remember the last applied patch file across repositories in this workspace.",
             "Remember the last applied patch file separately for each repository, as in earlier versions."
           ],
           "default": "global",
-          "markdownDescription": "Scope of the patch file **Apply Patch Automatically** remembers. **global** shares it across repositories; **perRepository** keeps it per repo."
+          "markdownDescription": "Scope of the patch file **Apply Patch Automatically** remembers. **global** shares it across repositories in this workspace; **perRepository** keeps it per repo. It does not carry across workspaces.",
+          "order": 19
+        },
+        "geco.showGraphMenuHint": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a one-time hint explaining how to enable the Source Control Graph context menu (it needs a proposed VS Code API).",
+          "order": 20
+        },
+        "geco.graphCommitLimit": {
+          "type": "number",
+          "default": 200,
+          "markdownDescription": "How many commits the **Graph** group of the \"Git Easy Ops\" view lists (ordered topologically, across all refs).",
+          "order": 21
+        },
+        "geco.showGraphLanes": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Draw the `●│╮…` lane art in front of every commit in the **Graph** group. Turn it off for a plain, right-aligned list of commits.",
+          "order": 22
+        },
+        "geco.hiddenMenuItems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "scope": "window",
+          "markdownDescription": "Menu items of Git Easy Ops hidden from the context menus (row ids such as `geco.forcePushHard`). Maintained by **Git Easy Ops: Customize Context Menus...** - edit by hand at your own risk. Unknown ids are kept, so downgrading does not lose them. When the setting is absent, the built-in defaults apply: **Search and Replace in Commit Message...** is hidden out of the box; an empty list `[]` means \"show everything\".",
+          "order": 23
         }
       }
     }

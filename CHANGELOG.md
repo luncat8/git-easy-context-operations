@@ -4,7 +4,24 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
-## Unreleased
+## 0.4.35
+
+- Added opt-in `geco.autoForcePushWithLease` for commit renames, squashes and
+  branch moves. When needed, the rewritten branch is pushed automatically
+  with a lease pinned to its pre-operation upstream; a changed branch, changed
+  upstream, stale lease or remote history absent from the old branch stops it
+  and leaves the manual button available. It never escalates to hard force and
+  retains grouped Undo. Clean History and other branches or tags remain manual.
+
+- Added `geco.rememberForceDialogDecisions`, next to the saved-dialog settings,
+  to control “(always)” on force push, diverged moves and unmerged deletion.
+  The master switch remains opt-in; disabling the force switch retains but
+  ignores those saved answers. Related settings are grouped in Settings.
+- Fixed diverged moves saving approval as a plain move. Old plain-move answers
+  are invalidated for safety and may be re-enabled. Per-repository decision
+  storage now resolves path aliases consistently with the management view.
+- Clarified that global saved decisions and patch paths are shared only within
+  a VS Code workspace, not across workspaces.
 
 ## 0.4.32
 

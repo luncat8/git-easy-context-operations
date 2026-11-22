@@ -20,7 +20,7 @@ import { GecoHistoryProvider, GecoTreeItem } from './vscode/treeView';
 import { MenuEditorProvider, commandTitlesFromManifest, type MenuEditorNode } from './vscode/menuEditorTree';
 import { DialogDecisionsProvider, type DecisionRowNode } from './vscode/dialogDecisionsTree';
 import { WorkspaceDialogDecisionStore, canonicalRepoKey } from './vscode/dialogDecisionStore';
-import { countDecisionRepositories, dialogDecisionById, GLOBAL_DECISION_KEY, type DialogDecisionId } from './core/dialogDecisions';
+import { countDecisionRepositories, dialogDecisionById, isForceDecision, GLOBAL_DECISION_KEY, type DialogDecisionId } from './core/dialogDecisions';
 import { applyMenuContext } from './vscode/menuContext';
 import { loadGitApi, repositoryPaths, resolveRepoPath, type GitApiLike } from './vscode/repository';
 import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
@@ -341,7 +341,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		return activeRepo ? canonicalRepoKey(activeRepo) : undefined;
 	};
 	const decisionScopeLabel = (): string =>
-		readSettings().dialogDecisionScope === 'global' ? 'every repository' : `this repository (${canonicalRepoKey(activeRepo ?? '')})`;
+		readSettings().dialogDecisionScope === 'global' ? 'every repository in this workspace' : `this repository (${canonicalRepoKey(activeRepo ?? '')})`;
 	const enableDialogDecision = async (id: DialogDecisionId): Promise<boolean> => {
 		const key = decisionRepoKeyFor();
 		if (!key) {
@@ -359,6 +359,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				{
 					modal: true,
 					detail: `Future runs skip the question ${def.question} for ${decisionScopeLabel()} while "Remember dialog decisions" (geco.rememberDialogDecisions) is on. `
+						+ (isForceDecision(id) ? 'Force-related saved answers also require geco.rememberForceDialogDecisions to be on. ' : '')
 						+ 'Only that question is skipped: repository checks, recovery points and journaling still run, and the target of each run is still picked by that run. '
 						+ 'Reset it any time in this view (uncheck the row, or "Reset Saved Decision to Default").',
 				},
@@ -376,6 +377,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 	const dialogDecisionsProvider = new DialogDecisionsProvider({
 		masterEnabled: () => readSettings().rememberDialogDecisions,
+		forceEnabled: () => readSettings().rememberForceDialogDecisions,
 		scope: () => readSettings().dialogDecisionScope,
 		repoPath: () => (activeRepo ? canonicalRepoKey(activeRepo) : undefined),
 		raw: () => dialogDecisionStore.raw(),

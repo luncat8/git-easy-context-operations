@@ -8,9 +8,8 @@
  * obsolete answers and stale policy versions read as unset.
  *
  * Repository identity: keys are the real path of the repository root the
- * caller passed, so two folders reaching the same repository (or a linked
- * worktree of it, whose root resolves inside the same checkout family the
- * user opened) share one scope and different repositories never do. When
+ * caller passed, so path aliases of the same checkout share one scope. Linked
+ * worktrees have distinct roots and therefore separate per-repository scopes. When
  * the real path cannot be taken the resolved absolute path is used — still
  * scoped, still fail-closed, because an empty identity never reads a
  * decision at all (the core enforces that).
@@ -57,7 +56,8 @@ export class WorkspaceDialogDecisionStore implements DialogDecisionMemory {
 
 	/** Map a repository path onto its storage key for the active scope. */
 	private resolveKey(repoPath: string): string {
-		return decisionRepoKey(repoPath, this.getScope());
+		const scope = this.getScope();
+		return decisionRepoKey(scope === 'perRepository' ? canonicalRepoKey(repoPath) : repoPath, scope);
 	}
 
 	get(repoPath: string, id: DialogDecisionId): SavedAnswer | undefined {

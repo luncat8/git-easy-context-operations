@@ -11,17 +11,19 @@ exact ids, files and tests.
 
 ## Agreed direction
 
-- Saving decisions is enabled by default (`geco.rememberDialogDecisions`, `true`).
-- Saved answers are **shared across every repository by default**
+- Saving decisions is opt-in (`geco.rememberDialogDecisions`, default `false`).
+- Saved answers are **shared across repositories in the current workspace by default**
   (`geco.dialogDecisionScope`, `global`): saving "Rename (always)" answers that
-  question in all repositories, which is what a typical user wants and far faster
+  question across that workspace, which is far faster
   to manage than a bucket per repo. `perRepository` keeps the old per-repo
   buckets. Switching scope separates the buckets cleanly — a global answer is not
   silently reused under a per-repository key, and vice versa.
 - The patch file **Apply Patch Automatically** remembers follows the same rule
   through `geco.lastPatchFileScope` (also `global` by default).
 - Repeatable choices may be saved even for dangerous actions, including force
-  push. Danger alone does not make a decision ineligible.
+  push. `geco.rememberForceDialogDecisions` (default `true`) gates the force
+  push, diverged-move and unmerged-delete decisions in addition to the master.
+  Off retains but does not use or offer those answers.
 - Settings show the complete action list and current state, not remembered
   answers hidden in opaque storage.
 - Undo cannot have a reusable default decision and must not save one.
@@ -44,15 +46,15 @@ exact ids, files and tests.
    work, not a silent generalisation.
 3. **Repository identity is concrete.** The scope key is the canonical
    (real-path, normalised) repository root supplied by the VS Code layer
-   (`canonicalRepoKey`). Linked worktrees opened through that root share its
-   scope; different repositories never do. An empty/unresolvable identity
+   (`canonicalRepoKey`). Path aliases of the same checkout share its scope; linked worktrees have
+   distinct roots and separate scopes. An empty/unresolvable identity
    fails closed: ask, never approve, never save.
 3b. **Scope is selectable.** `geco.dialogDecisionScope` (`global` default, or
    `perRepository`) decides the storage key a decision maps to:
    `decisionRepoKey(repoPath, scope)` returns a single shared
    `GLOBAL_DECISION_KEY` for `global`, or the canonical repository key for
    `perRepository`. A `global` answer is therefore reused across every
-   repository and edited in one bucket in the management view; `perRepository`
+   repository in the workspace and edited in one bucket in the management view; `perRepository`
    restores the original per-repo behaviour. The same `global`/`perRepository`
    choice (`geco.lastPatchFileScope`) governs the patch file
    **Apply Patch Automatically** remembers. The two settings are independent.
@@ -79,7 +81,9 @@ exact ids, files and tests.
 Master setting: `geco.rememberDialogDecisions`, default `false`, linked from
 its description to **Git Easy Ops: Manage Dialog Decisions…**, which reveals
 the hidden **Git Easy Ops Dialog Decisions** view (native tree, keyboard
-navigable; no raw JSON UI).
+navigable; no raw JSON UI). The force-specific switch is
+`geco.rememberForceDialogDecisions`; when off, saved force decisions are inactive.
+Both scopes are workspace-local, not shared with other VS Code workspaces.
 
 Each row shows a human-readable action name, exactly which question it
 controls, and one of:
@@ -111,7 +115,7 @@ Eligible (saved answer = the affirmative button):
 | `reword.rename` | Rename the message of \<commit\> on \<branch\>? |
 | `squash.confirm` | Squash \<N\> commits into one on \<branch\>? |
 | `fastForward.move` | Move \<branch\> to \<commit\>? (plain two-button form) |
-| `fastForward.moveAnyway` | \<branch\> has commits that \<target\> does not. Move it anyway? |
+| `fastForward.moveAnyway` | Move a diverged branch anyway (including the retry if it diverges after preview). |
 | `forcePush.lease` | Force push … with `--force-with-lease` |
 | `forcePush.force` | Force push … with hard `--force` (never approved by the lease row) |
 | `patch.applyToCurrent` | Apply this patch to the current branch? |
@@ -150,6 +154,9 @@ only ever meet these rows.
 
 - Force push with lease and hard `--force` are separate ids/rows; lease
   approval never authorises hard force or escalation after a rejected lease.
+- The former plain-move policy version is invalidated because older builds
+  could save a diverged move under that key; re-enable the plain-move answer
+  if desired.
 - A decision is about the question, not arguments: future targets come from
   the current run's selections.
 - Skipping a confirmation skips nothing else: repository-state checks,
