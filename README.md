@@ -23,6 +23,13 @@ and VSCodium, no proposed API needed for the default install.
   of a read-only Git history or revision editor (or inside a diff) for
   **Open Current Version for Edit**. It opens the file's current working-tree
   version in an editable tab; no graph proposed API is needed.
+- **Serve the current version with Live Server** - from the same caption,
+  **Open Current Version with Live Server** hands that working-tree `.html` /
+  `.htm` file to the separately installed
+  [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer)
+  extension so it serves with live reload - no need to hunt the file down in the
+  Explorer. If Live Server is missing, the command offers to open its marketplace
+  page; the HTML gate is enforced by the command itself.
 
 - **Fast-forward `main`** - onto any commit, with the old tip parked on a backup
   branch first. The default cleanup flow checks out `main` when the worktree is
@@ -119,7 +126,7 @@ The built-in **Source Control Graph** needs a proposed VS Code API
 (`contribSourceControlHistoryItemMenu`), which a published extension cannot
 declare - so the repository ships a second build for it. *Install* from -graph.vsix to enable it.
 That build reports itself as `<version>+graph` in the Extensions view (e.g.
-`0.4.35+graph`); the distinct version is what makes VS Code offer the
+`0.4.37+graph`); the distinct version is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build - accept it, otherwise the previous build keeps running.
 
