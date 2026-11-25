@@ -146,25 +146,30 @@ describe('manifest - menus', () => {
 		}
 	});
 
-	it('offers the editor-caption action only on Git revision and diff editors', () => {
+	it('offers the editor-caption actions only on Git revision and diff editors', () => {
 		for (const menu of ['editor/title/context', 'editor/context']) {
 			const entries = manifest.contributes.menus[menu] ?? [];
-			assert.equal(entries.length, 1, `${menu} has no single current-version action`);
-			const entry = entries[0]!;
-			assert.equal(entry.command, 'geco.openCurrentVersionForEdit');
-			assert.match(entry.when ?? '', /resourceScheme == git/, `${menu} must show on a git: revision`);
-			assert.match(entry.when ?? '', /isInDiffEditor/, `${menu} must show on the file side of a diff`);
-			assert.match(
-				entry.when ?? '',
-				/inDiffEditor \|\| inMultiDiffEditor/,
-				`${menu} must also cover the editor and multi-diff context keys`,
-			);
-			assert.match(
-				entry.when ?? '',
-				/\(!geco\.menuFilter \|\| geco\.menuVisible\.geco\.openCurrentVersionForEdit\)$/,
-				`${menu} lost its Customize Context Menus switch`,
-			);
-			assert.equal(entry.group, 'navigation@5');
+			assert.equal(entries.length, 2, `${menu} should carry the edit and live-server current-version actions`);
+			const ids = entries.map((e) => e.command);
+			assert.ok(ids.includes('geco.openCurrentVersionForEdit'), `${menu} lost the edit action`);
+			assert.ok(ids.includes('geco.openCurrentVersionWithLiveServer'), `${menu} lost the live-server action`);
+			for (const entry of entries) {
+				assert.match(entry.when ?? '', /resourceScheme == git/, `${menu} ${entry.command} must show on a git: revision`);
+				assert.match(entry.when ?? '', /isInDiffEditor/, `${menu} ${entry.command} must show on the file side of a diff`);
+				assert.match(
+					entry.when ?? '',
+					/inDiffEditor \|\| inMultiDiffEditor/,
+					`${menu} ${entry.command} must also cover the editor and multi-diff context keys`,
+				);
+				assert.ok(
+					(entry.when ?? '').endsWith(`(!geco.menuFilter || geco.menuVisible.${entry.command})`),
+					`${menu} ${entry.command} lost its Customize Context Menus switch`,
+				);
+			}
+			const edit = entries.find((e) => e.command === 'geco.openCurrentVersionForEdit')!;
+			assert.equal(edit.group, 'navigation@5');
+			const live = entries.find((e) => e.command === 'geco.openCurrentVersionWithLiveServer')!;
+			assert.equal(live.group, 'navigation@6');
 		}
 	});
 

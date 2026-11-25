@@ -4,6 +4,33 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.37
+
+### Fixed
+
+- **Open Current Version with Live Server now serves `index.html` (and the
+  extension-less `index` entry).** The `.html` / `.htm` check was moved into a
+  `vscode`-free core helper that strips any lingering `.git` / `.diff` revision
+  suffix before matching and also accepts the bare `index` web-server default
+  document, so the most common HTML entry points are no longer rejected with
+  "serves .html/.htm files only".
+
+## 0.4.36
+
+### Added
+
+- **Open Current Version with Live Server in the editor caption.** A companion
+  to **Open Current Version for Edit**: right-click the tab / title of a read-only
+  Git history or revision editor (or inside a diff) and choose **Open Current
+  Version with Live Server**. It resolves the same working-tree HTML file and
+  hands it to the separately installed Live Server extension
+  (`ritwickdey.LiveServer`), which serves it with live reload in the browser -
+  no need to search the file out in the Explorer. If Live Server is not
+  installed the command offers to open its marketplace page; the `.html` / `.htm`
+  gate is enforced by the command, and missing files are reported like the edit
+  action. Like every contributed item it can be hidden with **Git Easy Ops:
+  Customize Context Menus...**.
+
 ## 0.4.35
 
 - Added opt-in `geco.autoForcePushWithLease` for commit renames, squashes and

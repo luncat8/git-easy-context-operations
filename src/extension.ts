@@ -27,6 +27,7 @@ import { describeInstalledBuild, FsFileStore } from './vscode/graphMenu';
 import { scmResourceFileUris } from './core/scmFileArgs';
 import { openFilesForEdit } from './vscode/fileOpen';
 import { openCurrentVersionForEdit } from './vscode/editorFileOpen';
+import { openCurrentVersionWithLiveServer } from './vscode/liveServerOpen';
 import { graphCommitTarget, openCommitFilesForEdit } from './vscode/graphFileOpen';
 
 const VIEW_ID = 'geco.history';
@@ -589,6 +590,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		// revision (or the modified side of a diff); open its current file.
 		vscode.commands.registerCommand('geco.openCurrentVersionForEdit', async (...args: unknown[]) => {
 			await openCurrentVersionForEdit(args, output);
+		}),
+		// The same caption, but serves the working-tree HTML file with the
+		// (separately installed) Live Server extension instead of editing it.
+		vscode.commands.registerCommand('geco.openCurrentVersionWithLiveServer', async (...args: unknown[]) => {
+			await openCurrentVersionWithLiveServer(args, output);
 		}),
 		vscode.commands.registerCommand('geco.explainMenus', async () => {
 			await runtime.controller.explainMenus();

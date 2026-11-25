@@ -55,6 +55,7 @@ const EXPECTED_COMMANDS = [
 	'geco.openSourceForEdit',
 	'geco.openCommitSourceForEdit',
 	'geco.openCurrentVersionForEdit',
+	'geco.openCurrentVersionWithLiveServer',
 ];
 
 export async function run(): Promise<void> {

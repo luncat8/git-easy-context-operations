@@ -205,6 +205,21 @@ export const MENU_ROWS: readonly MenuRow[] = [
 		label: 'Open Current Version for Edit',
 		surfaces: ['editor.titleContext', 'editor.context'],
 	},
+	// The Live Server companion of "Open Current Version for Edit": it resolves
+	// the same working-tree HTML file behind a read-only revision, but instead
+	// of opening it editable it hands the file to the (separately installed)
+	// Live Server extension, which serves it with live reload in the browser.
+	// It shares the editor-caption `when` clause of the edit action (Git
+	// revisions and the file side of a diff) and, like it, can be hidden with
+	// **Customize Context Menus...**. The .html/.htm gate lives in the handler,
+	// not in the `when` clause: a `git:` revision URI ends in `.html.git`, so a
+	// `resourceExtname == .html` guard would never match - the handler opens
+	// only the first existing .html/.htm target and explains otherwise.
+	{
+		id: 'geco.openCurrentVersionWithLiveServer',
+		label: 'Open Current Version with Live Server',
+		surfaces: ['editor.titleContext', 'editor.context'],
+	},
 	{
 		id: 'geco.customizeMenus',
 		label: 'Customize Context Menus...',
