@@ -3,13 +3,21 @@
 **To make context menu work in build-in graph - use -graph.vsix from github**.
 
 Right-click a commit or a branch and do the git surgery that is awkward on the
-command line - **rename** an old commit's message, **squash** a run of commits,
+command line - **rename** an old commit's message, **squash** commits,
 **fast-forward `main`** onto it, **create / rename / delete** a branch, **force-push**
 safely, automatically **remove** the branch names a fast-forward left behind, **remove** files that
 exist only in old commits, or **apply a patch** at the base it actually belongs to (TODO investigate work across branches).
 
 Every operation writes a recovery point first and can be undone. Works in VS Code
 and VSCodium, no proposed API needed for the default install.
+
+## Installation
+
+![Install step 1](archive/1.webp)
+![Install step 2](archive/2.webp)
+![Install step 3](archive/3.webp)
+
+![Screenshot](archive/screenshot.webp)
 
 ## What it does
 
@@ -28,8 +36,7 @@ and VSCodium, no proposed API needed for the default install.
   `.htm` file to the separately installed
   [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer)
   extension so it serves with live reload - no need to hunt the file down in the
-  Explorer. If Live Server is missing, the command offers to open its marketplace
-  page; the HTML gate is enforced by the command itself.
+  Explorer. If Live Server is missing, the command offers to open its page;
 
 - **Fast-forward `main`** - onto any commit, with the old tip parked on a backup
   branch first. The default cleanup flow checks out `main` when the worktree is
