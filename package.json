@@ -2,7 +2,7 @@
   "name": "git-easy-context-operations",
   "displayName": "Git Easy Context Operations",
   "description": "Right-click a commit in the Source Control sidebar graph to reword it, fast-forward main (keeping the old tip as a backup branch), force-push safely, create/rename/delete branches, and apply a patch at its proper base.",
-  "version": "0.4.37",
+  "version": "0.4.38",
   "icon": "resources/icon.png",
   "publisher": "luncat8",
   "license": "MIT",
@@ -72,6 +72,13 @@
         "shortTitle": "Squash with Previous...",
         "category": "Git Easy Ops",
         "icon": "$(git-merge)"
+      },
+      {
+        "command": "geco.reorderCommit",
+        "title": "Reorder Commit in List...",
+        "shortTitle": "Reorder Commit...",
+        "category": "Git Easy Ops",
+        "icon": "$(arrow-both)"
       },
       {
         "command": "geco.fastForwardDefaultBranch",
@@ -476,6 +483,11 @@
           "group": "2_commit@2"
         },
         {
+          "command": "geco.reorderCommit",
+          "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.reorderCommit)",
+          "group": "2_commit@3"
+        },
+        {
           "command": "geco.createBranch",
           "when": "view == geco.history && viewItem =~ /^geco\\.commit/ && (!geco.menuFilter || geco.menuVisible.geco.createBranch)",
           "group": "3_branch@1"
@@ -641,6 +653,11 @@
           "command": "geco.squashWithPreviousCommits",
           "group": "2_commit@1",
           "when": " && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)"
+        },
+        {
+          "command": "geco.reorderCommit",
+          "group": "2_commit@2",
+          "when": " && (!geco.menuFilter || geco.menuVisible.geco.reorderCommit)"
         },
         {
           "command": "geco.fastForwardDefaultBranch",

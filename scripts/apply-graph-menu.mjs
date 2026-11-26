@@ -41,9 +41,10 @@ const GRAPH_MENUS = {
 	// what it does not have.
 	'scm/historyItem/context': [
 		{ command: 'geco.squashWithPreviousCommits', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.squashWithPreviousCommits)', group: '4_modify@2' },
-		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: '4_modify@3' },
-		{ command: 'geco.rewordCommitAppend', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)', group: '4_modify@4' },
-		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)', group: '4_modify@5' },
+		{ command: 'geco.reorderCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.reorderCommit)', group: '4_modify@3' },
+		{ command: 'geco.rewordCommit', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommit)', group: '4_modify@4' },
+		{ command: 'geco.rewordCommitAppend', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitAppend)', group: '4_modify@5' },
+		{ command: 'geco.rewordCommitRename', when: 'scmProvider == git && (!geco.menuFilter || geco.menuVisible.geco.rewordCommitRename)', group: '4_modify@6' },
 		// The branch group of the built-in graph: "Create Branch..." is git.branch
 		// at 2_branch@2, so the branch cleanup lands directly behind it - last in
 		// that group, exactly like on the extension's own commit rows.

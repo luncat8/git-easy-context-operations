@@ -439,6 +439,37 @@ describe('manifest - menus', () => {
 		assert.equal(submenu.includes('geco.squashSelectedCommits'), false, 'multi-select squash does not belong in a single-commit menu');
 	});
 
+	it('puts the reorder item right after Squash with Previous Commits...', () => {
+		// The one order this feature has: on every list that shows the squash,
+		// the reorder sits directly behind it - same group, next slot.
+		const GROUP = /^(\w+)@(\d+)$/;
+		const groupName = (group: string | undefined) => GROUP.exec(group ?? '')?.[1];
+		const orderOf = (group: string | undefined) => Number.parseInt(GROUP.exec(group ?? '')?.[2] ?? '-1', 10);
+
+		const itemContext = manifest.contributes.menus['view/item/context'] ?? [];
+		const rowSquash = itemContext.find((entry) => entry.command === 'geco.squashWithPreviousCommits');
+		const rowReorder = itemContext.find((entry) => entry.command === 'geco.reorderCommit');
+		assert.ok(rowSquash && rowReorder, 'the commit row needs both the squash and the reorder');
+		assert.equal(groupName(rowReorder!.group), groupName(rowSquash!.group), 'the reorder belongs to the squash group');
+		assert.ok(orderOf(rowReorder!.group) > orderOf(rowSquash!.group), 'the reorder does not come after the squash');
+
+		const submenu = manifest.contributes.menus['geco.commitSubmenu'] ?? [];
+		const subSquash = submenu.find((entry) => entry.command === 'geco.squashWithPreviousCommits');
+		const subReorder = submenu.find((entry) => entry.command === 'geco.reorderCommit');
+		assert.ok(subSquash && subReorder, 'the submenu needs both');
+		assert.equal(groupName(subReorder!.group), groupName(subSquash!.group), 'the reorder belongs to the squash group');
+		assert.ok(orderOf(subReorder!.group) > orderOf(subSquash!.group), 'the reorder does not come after the squash');
+
+		const script = sourceOf('scripts/apply-graph-menu.mjs');
+		const graphMenus = script.slice(script.indexOf('const GRAPH_MENUS'), script.indexOf('const action ='));
+		const groupOf = (id: string) => new RegExp(`command: '${id}'.*?group: '([^']+)'`, 's').exec(graphMenus)?.[1];
+		const graphSquash = groupOf('geco.squashWithPreviousCommits');
+		const graphReorder = groupOf('geco.reorderCommit');
+		assert.ok(graphSquash && graphReorder, 'the graph build needs both');
+		assert.equal(groupName(graphReorder), groupName(graphSquash), 'the graph reorder belongs to the squash group');
+		assert.ok(orderOf(graphReorder) > orderOf(graphSquash), 'the graph reorder does not come after the squash');
+	});
+
 	it('keeps the proposed graph build flat and free of duplicates', () => {
 		const script = sourceOf('scripts/apply-graph-menu.mjs');
 		const graphMenus = script.slice(script.indexOf('const GRAPH_MENUS'), script.indexOf('const action ='));

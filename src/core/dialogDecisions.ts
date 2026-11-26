@@ -37,6 +37,8 @@ export type SavedAnswer = 'yes';
 
 /** Stable prompt ids. Never rename, never reuse — they are storage keys. */
 export type DialogDecisionId =
+	| 'reorder.move'
+	| 'reorder.shiftChoice'
 	| 'reword.rename'
 	| 'squash.confirm'
 	| 'fastForward.move'
@@ -128,6 +130,7 @@ const notApplicable = (
 export const DIALOG_DECISIONS: readonly DialogDecisionDef[] = [
 	eligible('reword.rename', 'Rename Commit Message', '“Rename the message of <commit> on <branch>?”', 'Rename'),
 	eligible('squash.confirm', 'Squash Commits', '“Squash <N> commits into one on <branch>?”', 'Squash'),
+	eligible('reorder.move', 'Reorder Commit', '“Move <commit> <N> position(s) up/down on <branch>?”', 'Move'),
 	{ ...eligible('fastForward.move', 'Fast-Forward / Move Branch', '“Move <branch> to <commit>?” (the plain two-button form)', 'Move'), policyVersion: 2 },
 	eligible('fastForward.moveAnyway', 'Move Branch Anyway (diverged)', '“Move <branch> to <target> anyway?” when the branch has diverged', 'Move anyway'),
 	eligible('forcePush.lease', 'Force Push (with lease)', '“Force push <branch> to <remote>/<branch>?” with --force-with-lease', 'Force Push (with lease)'),
@@ -151,6 +154,7 @@ export const DIALOG_DECISIONS: readonly DialogDecisionDef[] = [
 	ineligible('cleanHistory.installFilterRepo', 'Install git-filter-repo', '“git-filter-repo is not installed — install it now?”', 'Installing software runs a machine-specific command chosen at that moment; the choice and the consent stay fresh each time.'),
 	ineligible('cleanHistory.removeLinkedWorktrees', 'Remove Linked Worktrees (Clean History blocker)', '“Remove the linked worktrees that block the rewrite?”', 'Which worktrees exist and what they hold is fresh repository state; removing them is never pre-approved.'),
 	ineligible('fastForward.cleanupChoice', 'Fast-Forward Cleanup Choice', '“Move <branch>…?” with “Move and clean up…” / “Move and remove <backup>” options', 'This dialog does not ask yes/no — it selects side-effects (removing the backup, cleaning up other branches). A saved “yes” cannot say which, so it always asks.'),
+	ineligible('reorder.shiftChoice', 'Reorder Commit (safe-shift offer)', '“Move +N / Cancel” when files changed in between', 'The farthest safe shift is computed from which files changed between the two positions — fresh repository state every time, so only the offer in front of you can be accepted.'),
 	ineligible('graphMenu.updateEditorConfig', 'Enable the Source Control Graph Menu', '“Allow proposed APIs … in product.json/argv.json?”', 'This writes the editor’s own configuration files, picked at that moment and outside any repository. It always asks.'),
 
 	notApplicable('result.followUps', 'Result Reports (Undo / Force Push / Open Worktree…)', 'The buttons on an end-of-operation report', 'A report is not a confirmation. Its follow-up buttons only run when clicked, never automatically.'),

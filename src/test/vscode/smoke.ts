@@ -23,6 +23,7 @@ const EXPECTED_COMMANDS = [
 	'geco.rewordCommitRename',
 	'geco.squashSelectedCommits',
 	'geco.squashWithPreviousCommits',
+	'geco.reorderCommit',
 	'geco.fastForwardDefaultBranch',
 	'geco.fastForwardBranch',
 	'geco.forcePush',

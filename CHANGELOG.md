@@ -4,6 +4,28 @@ All notable changes to **Git Easy Ops** are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the project uses [semantic versioning](https://semver.org/).
 
+## 0.4.38
+
+### Added
+
+- **Reorder Commit in List...** - move one commit up or down the line of
+  history, right after *Squash with Previous Commits...* on commit rows, in
+  the commit submenu and in the `+graph` build's commit menu. The prompt
+  defaults to `-1` (swap with the previous commit): positive numbers move up
+  toward the newer commits, negative ones down toward the older ones, and a
+  number past the end of the list moves as far as the list allows (99 puts
+  the commit at the top). The move runs only when **no file changed in
+  between**: if the commit would cross a commit that touched the same files,
+  the item says which files changed in between and offers the farthest safe
+  shift as a button (`+1 | Cancel`) instead of guessing - with no safe
+  position in that direction it reports the conflict and moves nothing. The
+  commits from the new position to the tip are replayed with new SHAs
+  through a throw-away-index tree merge (content of the branch tip is
+  verified unchanged before the branch moves), a recovery point is created,
+  and one **Undo** restores everything - with the usual Force Push button
+  afterwards, and `geco.autoForcePushWithLease` applies as it does after a
+  squash.
+
 ## 0.4.37
 
 ### Fixed

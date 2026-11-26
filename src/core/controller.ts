@@ -32,6 +32,18 @@ import {
 	type SquashResult,
 } from './squash';
 import {
+	changedPaths,
+	clampShift,
+	collectCrossed,
+	findCrossedBlocker,
+	formatShift,
+	parseShift,
+	planMove,
+	planRebuild,
+	reorderCommits,
+	type ReorderResult,
+} from './reorder';
+import {
 	createBranch as createBranchCore,
 	checkoutBranch as checkoutBranchCore,
 	deleteBranch as deleteBranchCore,
@@ -740,6 +752,194 @@ export class Controller {
 		// Report, not question - and the Force Push button the user just
 		// pressed is the answer to "push anyway?", so the flow does not ask it
 		// again in a modal dialog.
+		this.reportResult(message, { actions, detail: result.needsForcePush && !autoPushed ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
+			if (chosen === ACTIONS.forcePush) {
+				await this.forcePush(cwd, [], 'lease', result.branch, { confirmed: true, context: ctx });
+			} else if (chosen === ACTIONS.forcePushHard) {
+				await this.forcePush(cwd, [], 'force', result.branch, { confirmed: true, context: ctx });
+			} else if (chosen === ACTIONS.undo) {
+				await this.undoLast(ctx, true);
+			}
+		});
+	}
+
+	// ------------------------------------------------------------ reorder
+
+	/**
+	 * "Reorder Commit in List..." - moves one commit up or down the list
+	 * (the first-parent line of history, newest first). The prompt defaults
+	 * to `-1`: swap with the previous commit. Positive numbers move up
+	 * toward the newer commits, negative ones down, and a number past the
+	 * end of the list moves as far as the list allows.
+	 *
+	 * The move runs only when no file changed in between. If the commit
+	 * would cross a commit that touched the same files, the flow shows
+	 * which files changed and offers the farthest safe shift (`+1 |
+	 * Cancel`) instead of guessing - a reorder is a rewrite, so the
+	 * confirmation, the recovery point and the report are the same ones a
+	 * squash gets.
+	 */
+	async reorderCommit(cwd: string, args: readonly unknown[]): Promise<void> {
+		await this.guard('Reorder', async () => {
+			const ctx = this.contextFor(cwd);
+			await assertStartable(ctx);
+			const target = await this.resolveCommit(ctx, args, 'Reorder which commit?');
+			if (!target) {
+				return;
+			}
+			const info = await ctx.git.commitInfo(target);
+			const branch = await this.pickRewriteBranch(ctx, target, info, 'Reorder');
+			if (!branch) {
+				return;
+			}
+			const plan = await planMove(ctx.git, branch, target);
+			if (plan.maxUp === 0 && plan.maxDown === 0) {
+				await this.ui.message('info', `${info.shortSha} is the only commit of this repository - there is nothing to reorder.`);
+				return;
+			}
+
+			const typed = await this.ui.input({
+				title: `Move ${info.shortSha}`,
+				prompt: `How many positions to move "${previewSubject(info.message)}"? Positive moves up (toward newer commits), negative moves down - the default -1 swaps with the previous commit. Numbers past the end of the list stop at the end.`,
+				value: '-1',
+				placeholder: `${-plan.maxDown} to ${plan.maxUp}, except 0`,
+				validate: (value) => (parseShift(value) === undefined ? 'Enter a whole number: positive moves up, negative moves down - 0 is not a move.' : undefined),
+			});
+			if (typed === undefined) {
+				return;
+			}
+			const requested = parseShift(typed);
+			if (requested === undefined) {
+				await this.ui.message('warn', 'Enter a whole number: positive moves up, negative moves down - 0 is not a move.');
+				return;
+			}
+			let shift = clampShift(requested, plan.maxUp, plan.maxDown);
+			if (shift === 0) {
+				await this.ui.message(
+					'info',
+					`${info.shortSha} is already at the ${requested > 0 ? 'top' : 'bottom'} of the list - there is nothing to move ${requested > 0 ? 'up' : 'down'}.`,
+				);
+				return;
+			}
+			if (shift !== requested) {
+				this.ui.log(`${info.shortSha}: ${formatShift(requested)} clamped to ${formatShift(shift)} - the list ends there.`);
+			}
+
+			// The conflict rule, checked before anything is written: the move
+			// runs only while no file changed in between.
+			const targetPaths = await changedPaths(ctx.git, plan.target);
+			const blocker = await findCrossedBlocker(ctx.git, targetPaths, collectCrossed(plan.chain, plan.index, shift));
+			if (blocker) {
+				const direction = shift > 0 ? 'up' : 'down';
+				const maxSafe = Math.sign(shift) * (blocker.distance - 1);
+				const blockerInfo = await ctx.git.commitInfo(blocker.sha);
+				const detail = [
+					`${info.shortSha} "${previewSubject(info.message)}" and ${blockerInfo.shortSha} "${previewSubject(blockerInfo.message)}" changed the same files:`,
+					...blocker.files.map((file) => `  ${file}`),
+					'',
+					maxSafe === 0
+						? `There is no safe position ${direction} of ${blockerInfo.shortSha} - ${info.shortSha} would have to cross it.`
+						: `The farthest ${info.shortSha} can move ${direction} automatically is ${formatShift(maxSafe)}.`,
+				].join('\n');
+				if (maxSafe === 0) {
+					this.ui.log(`Reorder of ${info.shortSha} stopped: files changed in between (${blocker.files.join(', ')}).`);
+					await this.ui.message('warn', `Can't move ${info.shortSha} ${direction} - files changed in between.`, detail);
+					return;
+				}
+				const offer = `Can't move ${info.shortSha} ${direction} ${Math.abs(shift)} position${Math.abs(shift) === 1 ? '' : 's'} automatically - files changed in between.`;
+				const chosen = this.ui.choose
+					? await this.ui.choose(offer, {
+							detail,
+							choices: [
+								{ label: formatShift(maxSafe), value: String(maxSafe), primary: true },
+								{ label: 'Cancel', value: 'cancel' },
+							],
+						})
+					// A UI without buttons falls back to a plain confirm of the offer.
+					: await this.ui.confirm(`${offer} Move ${formatShift(maxSafe)} instead?`, { detail, confirmLabel: formatShift(maxSafe) })
+						? String(maxSafe)
+						: 'cancel';
+				if (chosen === undefined || chosen === 'cancel') {
+					this.ui.log(`Reorder of ${info.shortSha} cancelled at the safe-shift offer (${formatShift(maxSafe)} was the farthest safe move).`);
+					return;
+				}
+				const accepted = Number.parseInt(chosen, 10);
+				if (!Number.isInteger(accepted) || accepted === 0 || Math.sign(accepted) !== Math.sign(shift)) {
+					this.ui.log(`Reorder of ${info.shortSha} cancelled: "${chosen}" is not a safe shift.`);
+					return;
+				}
+				this.ui.log(`Reorder of ${info.shortSha}: files changed in between, moving ${formatShift(accepted)} instead of ${formatShift(shift)}.`);
+				shift = accepted;
+			}
+
+			const fromPosition = plan.index + 1;
+			const toPosition = plan.index - shift + 1;
+			const direction = shift > 0 ? 'up' : 'down';
+			const { rebuilt } = planRebuild(plan.chain, plan.index, shift);
+			const upstream = await ctx.git.upstream(branch);
+
+			if (this.settings.confirmDestructiveOperations) {
+				const confirmed = await this.confirmDecision(
+					ctx.git.cwd,
+					'reorder.move',
+					`Move ${info.shortSha} ${Math.abs(shift)} position${Math.abs(shift) === 1 ? '' : 's'} ${direction} on ${branch}?`,
+					{
+						confirmLabel: 'Move',
+						destructive: true,
+						detail: [
+							`${info.shortSha} "${previewSubject(info.message)}"`,
+							`position ${fromPosition} -> ${toPosition} in the list, counted from the top${shift !== requested ? ` (${formatShift(requested)} is too far - the list ends at ${formatShift(shift)})` : ''}`,
+							'',
+							`${rebuilt.length} commit${rebuilt.length === 1 ? '' : 's'} get${rebuilt.length === 1 ? 's' : ''} a new SHA - the order changes, the content of the branch tip does not.`,
+							`Recovery point: ${this.settings.backupRefPrefix}... , restore it with "Git Easy Ops: Undo Last Operation".`,
+							upstream?.sha ? `${branch} tracks ${upstream.remote}/${upstream.branch}: a force push is needed afterwards.` : '',
+						].filter(Boolean).join('\n'),
+					},
+				);
+				if (!confirmed) {
+					this.ui.log(`Reorder of ${info.shortSha} cancelled by the user.`);
+					return;
+				}
+			}
+
+			const result = await this.ui.withProgress(`Moving ${info.shortSha}`, async (report) => {
+				report(`${direction} ${Math.abs(shift)} position${Math.abs(shift) === 1 ? '' : 's'} on ${branch}`);
+				return reorderCommits(ctx, { plan, shift });
+			});
+
+			await this.reportReorder(ctx, result, cwd);
+		});
+	}
+
+	private async reportReorder(ctx: RepoContext, result: ReorderResult, cwd: string): Promise<void> {
+		this.ui.log(
+			[
+				`Moved ${shorten(result.commit.from)} -> ${shorten(result.commit.to)} on ${result.branch} (position ${result.fromPosition} -> ${result.toPosition}, ${formatShift(result.shift)})`,
+				`  rewritten commits: ${result.rewritten.length}`,
+				`  tip: ${shorten(result.oldTip)} -> ${shorten(result.newTip)}`,
+				result.backupRef ? `  recovery point: ${result.backupRef}` : '',
+				result.needsForcePush ? `  a force push to ${result.upstreamRef ?? 'the remote'} is needed` : '',
+				result.otherRefsOnOldHistory.length > 0 ? `  still on the old history: ${result.otherRefsOnOldHistory.join(', ')}` : '',
+				result.signatureDropped ? '  a rewritten commit was signed; the signature does not survive a rewrite' : '',
+			].filter(Boolean).join('\n'),
+		);
+
+		const autoPushed = await this.autoPushAfterRewrite(ctx, result.branch, result.oldTip, result.newTip, result.upstreamBefore, result.needsForcePush);
+		const actions: string[] = [];
+		if (result.needsForcePush && !autoPushed) {
+			actions.push(ACTIONS.forcePush);
+			if (this.settings.forcePushMode !== 'force') {
+				actions.push(ACTIONS.forcePushHard);
+			}
+		}
+		actions.push(ACTIONS.undo);
+
+		const message = `Moved ${shorten(result.commit.from)} -> ${shorten(result.commit.to)} on ${result.branch}: "${previewSubject(result.commit.subject)}" is now position ${result.toPosition} (was ${result.fromPosition})`
+			+ (autoPushed ? ` - automatically force-pushed to ${result.upstreamRef} with lease.` : result.needsForcePush ? ` - ${result.upstreamRef ?? 'the remote'} now needs a force push.` : '.');
+
+		// Report, not question - and the Force Push button the user just
+		// pressed is the answer to "push anyway?", so the flow does not ask
+		// it again in a modal dialog.
 		this.reportResult(message, { actions, detail: result.needsForcePush && !autoPushed ? SYNC_BUTTON_WARNING : undefined }, async (chosen) => {
 			if (chosen === ACTIONS.forcePush) {
 				await this.forcePush(cwd, [], 'lease', result.branch, { confirmed: true, context: ctx });

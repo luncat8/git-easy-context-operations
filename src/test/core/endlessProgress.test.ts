@@ -102,6 +102,16 @@ describe('no flow waits for its result report', () => {
 		assert.equal(ui.askCalls.length, 1, 'the result report was handed over');
 	});
 
+	it('Reorder Commit', async () => {
+		const { repo, shas } = await linear();
+		const ui = new NeverDismissedUI({ confirms: [true] });
+
+		await within('a reorder', controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: shas.v03 }]));
+
+		assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.2', 'v0.3', 'v0.1'], 'the commit moved down');
+		assert.equal(ui.askCalls.length, 1, 'the result report was handed over');
+	});
+
 	it('Fast-Forward', async () => {
 		const { repo, shas } = await linear();
 		const ui = new NeverDismissedUI({ confirms: [true] });

@@ -525,6 +525,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		['geco.rewordCommitRename', reword('findReplace')],
 		['geco.squashSelectedCommits', async (cwd, args) => runtime.controller.squashSelectedCommits(cwd, args)],
 		['geco.squashWithPreviousCommits', async (cwd, args) => runtime.controller.squashWithPreviousCommits(cwd, args)],
+		['geco.reorderCommit', async (cwd, args) => runtime.controller.reorderCommit(cwd, args)],
 		['geco.fastForwardDefaultBranch', async (cwd, args) => runtime.controller.fastForward(cwd, args, { askBranch: false })],
 		['geco.fastForwardBranch', async (cwd, args) => runtime.controller.fastForward(cwd, args, { askBranch: true })],
 		['geco.forcePush', async (cwd, args) => runtime.controller.forcePush(cwd, args)],

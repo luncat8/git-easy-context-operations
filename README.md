@@ -22,6 +22,10 @@ and VSCodium, no proposed API needed for the default install.
 ## What it does
 
 - **Squash N commits** - combine any contiguous run into one.
+- **Reorder a commit in the list** - move one commit up or down the first-parent
+  line (the default `-1` swaps it with the previous one); when files changed in
+  between, the flow offers only the farthest safe shift next to *Cancel* -
+  never an automatic move across a conflict.
 - **Change commit message** - rename, append, or search and replace in *any* commit's
   message, not just the last one.
 - **Open a changed file for edit** - the changed-file rows of the built-in Source
@@ -133,7 +137,7 @@ The built-in **Source Control Graph** needs a proposed VS Code API
 (`contribSourceControlHistoryItemMenu`), which a published extension cannot
 declare - so the repository ships a second build for it. *Install* from -graph.vsix to enable it.
 That build reports itself as `<version>+graph` in the Extensions view (e.g.
-`0.4.37+graph`); the distinct version is what makes VS Code offer the
+`0.4.38+graph`); the distinct version is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build - accept it, otherwise the previous build keeps running.
 

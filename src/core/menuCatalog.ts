@@ -134,6 +134,10 @@ export const MENU_ROWS: readonly MenuRow[] = [
 	{ id: 'geco.rewordCommitRename', label: 'Search and Replace in Commit Message...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'], defaultHidden: true },
 	{ id: 'geco.squashSelectedCommits', label: 'Squash Selected Commits...', surfaces: ['view.commit'] },
 	{ id: 'geco.squashWithPreviousCommits', label: 'Squash with Previous Commits...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit', 'view.title'] },
+	// Right after the squash on every list that shows it: both rewrite the
+	// line of history from one commit row, one combines a run, the other
+	// moves a single commit past its neighbours.
+	{ id: 'geco.reorderCommit', label: 'Reorder Commit in List...', surfaces: ['view.commit', 'submenu.commit', 'graph.commit'] },
 	{ id: 'geco.createBranch', label: 'Create Branch...', surfaces: ['view.commit', 'view.branch', 'submenu.commit', 'submenu.branch'] },
 	// The header's one fast-forward button is the default-branch variant
 	// ("move main onto..."); the ask-a-branch variant stays on the rows.

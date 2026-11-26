@@ -5,14 +5,14 @@ The built artifacts are committed to this repository, so a clone is enough:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code --install-extension dist/git-easy-context-operations-0.4.37.vsix
+code --install-extension dist/git-easy-context-operations-0.4.38.vsix
 
 # plus the context menus in the built-in Source Control Graph
-code --install-extension dist/git-easy-context-operations-0.4.37+graph.vsix
+code --install-extension dist/git-easy-context-operations-0.4.38+graph.vsix
 ```
 
 (`codium --install-extension ...` works the same way.) The `+graph` build also
-declares `0.4.37+graph` as its version - that is what the Extensions view
+declares `0.4.38+graph` as its version - that is what the Extensions view
 shows, and the different version string is what makes VS Code offer the
 *Restart Extensions* / *Reload Window* prompt after installing it over the
 publishable build. Accept that prompt: without it the previously loaded build
@@ -88,6 +88,8 @@ Repository: https://github.com/luncat8/git-easy-context-operations
 | 5 | **Create Backup Branch...**, **Show Backups and Recovery Points**, **Undo Last Operation** | The safety net: hidden recovery refs under `refs/geco/`, backup branches, and a journal of everything the extension did. **Undo Last Operation** is also a header button, opens the same newest-first list as the Command Palette, and can roll back an older entry together with every newer operation. |
 
 | 6 | **Squash Selected Commits...** / **Squash with Previous Commits...** | Turns a run of commits into one: `wip` + `fix tests` + `review feedback` → a single commit that keeps the tree of the newest one (and the message you type, pre-filled with that newest message). In the sidebar **Graph** group Ctrl/Shift-click the rows and pick *Squash Selected Commits*; from the built-in graph's commit context menu, our view's header or the palette, *Squash with Previous Commits* asks how many commits before the one you clicked should be combined. Commits after the run are replayed with new SHAs, a recovery point is created, and one **Undo** restores everything. |
+
+| 6b | **Reorder Commit in List...** | Moves one commit up or down the first-parent line of history - the list is newest-first, so positive numbers move it *up* (toward the newer commits; `99` climbs toward the top) and negative ones *down*. The default `-1` swaps it with the previous commit, and a number past the end of the list stops at the end. The move only happens when no file the commit changed was also changed by a commit it would cross: otherwise you are shown the files that changed in between and the farthest safe shift (e.g. `+1`) as the only action next to *Cancel* - an automatic move across a conflict is never attempted. The crossed commits and the moved one get new SHAs (the content of the branch tip never changes), a recovery point is created, and one **Undo** restores everything; like every rewrite the report offers the force push when the branch has an upstream. |
 
 | 7 | **Create Branch...** / **Rename Branch...** / **Delete Branch...** / **Check Out Branch...** | Branch work from a commit row ("create a branch *here*") or from a branch row. Renaming asks what should happen to the remote branch it tracks (leave it, rename it there too, or just push the new name); deleting refuses the checked-out branch and refuses unmerged commits until you insist. One journal entry per action, so **Undo** restores names, tips, tracking configuration and deleted remote branches in one click. |
 
@@ -204,7 +206,7 @@ Marketplace-published extension cannot declare it, so the repo ships a second
 build, and VS Code additionally requires the proposal to be **allowed** for the
 extension id. Both halves are needed:
 
-1. install the graph build (`dist/git-easy-context-operations-0.4.37+graph.vsix`), and
+1. install the graph build (`dist/git-easy-context-operations-0.4.38+graph.vsix`), and
 2. allow the proposal - easiest via `product.json` (no command line at all):
 
 ```jsonc
@@ -239,7 +241,7 @@ already use** instead of hiding in a "Git Easy Ops" submenu:
 
 | Group (next to the built-in items) | What this build adds |
 |------------------------------------|----------------------|
-| *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Rename Commit Message...**, **Append to...**, **Search and Replace in...** |
+| *Cherry Pick* (`4_modify`) | **Squash with Previous Commits...**, **Reorder Commit in List...**, **Rename Commit Message...**, **Append to...**, **Search and Replace in...** |
 | *Create Branch...* (`2_branch`) | **Remove Redundant Branches...** - last in that group, directly behind the built-in *Create Branch...* (`2_branch@2`). Deliberately **not** on the branch badges - see below. |
 | new section (`7_move`) | **Fast-Forward Default Branch to Commit...**, **Fast-Forward Branch to Commit...**, **Create Backup Branch...** |
 | new section (`8_remote`) | **Force Push (with lease)...**, **Force Push (--force)...** |
@@ -354,12 +356,12 @@ no toolchain needed:
 
 ```bash
 # sidebar graph, Timeline, SCM menus, palette
-code   --install-extension dist/git-easy-context-operations-0.4.37.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.37.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.38.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.38.vsix
 
 # recommended graph: the same plus context menus in the built-in Source Control Graph
-code   --install-extension dist/git-easy-context-operations-0.4.37+graph.vsix
-codium --install-extension dist/git-easy-context-operations-0.4.37+graph.vsix
+code   --install-extension dist/git-easy-context-operations-0.4.38+graph.vsix
+codium --install-extension dist/git-easy-context-operations-0.4.38+graph.vsix
 ```
 
 For the recommended graph, allow the proposed API once - inside the editor run **Git
@@ -371,7 +373,7 @@ command line) or `argv.json`, or edit the file yourself:
 { "enable-proposed-api": ["luncat8.git-easy-context-operations"] }
 ```
 
-`dist/git-easy-context-operations-0.4.37.vsix` (no `+graph`) is the Marketplace-safe
+`dist/git-easy-context-operations-0.4.38.vsix` (no `+graph`) is the Marketplace-safe
 build: same commands, but they appear in the sidebar graph, Timeline, the Source
 Control title/repository menus and the palette instead of the graph rows.
 **Git Easy Ops: Why Don't I See the Menus?** tells you which half is missing (and

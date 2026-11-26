@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import { DEFAULT_SETTINGS, type Settings } from '../../core/config';
 import { Controller } from '../../core/controller';
 import { ACTIONS, decodeMultilineInput, encodeMultilineInput, type AskOptions } from '../../core/ui';
-import { createLinearRepo, TempRepo } from '../helpers/tempRepo';
+import { createLinearRepo, createTempRepo, TempRepo } from '../helpers/tempRepo';
 import { FakeUI } from '../helpers/fakeUi';
 
 function controllerFor(ui: FakeUI, repo: TempRepo, settings: Settings = { ...DEFAULT_SETTINGS, patchApplyMode: 'apply' }): Controller {
@@ -1896,6 +1896,160 @@ describe('controller - squash flows', () => {
 			assert.match(ui.confirmCalls[0]!.options!.detail!, /main tracks origin\/main: a force push is needed afterwards/);
 			assert.match(ui.askCalls[0]!.message, /origin\/main now needs a force push/);
 			assert.ok(ui.askCalls[0]!.options.actions.includes(ACTIONS.forcePush));
+		} finally {
+			repo.cleanup();
+		}
+	});
+});
+
+describe('controller - reorder flows', () => {
+	it('moves a commit down one position by default (swap with the previous)', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			// No scripted input: the prompt falls back to its default value.
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: shas.v03 }]);
+
+			assert.equal(ui.inputCalls[0]!.value, '-1', 'the default moves it down one');
+			assert.equal(ui.inputCalls[0]!.title, `Move ${shas.v03!.slice(0, 7)}`);
+			assert.match(ui.inputCalls[0]!.prompt, /swaps with the previous commit/);
+			assert.equal(ui.pickCalls.length, 0, `no picker needed: ${ui.transcript}`);
+			assert.match(ui.confirmCalls[0]!.message, /Move [0-9a-f]{7} 1 position down on main\?/);
+			assert.equal(ui.confirmCalls[0]!.options!.confirmLabel, 'Move');
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /position 2 -> 3 in the list/);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /Recovery point: refs\/geco\//);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.2', 'v0.3', 'v0.1']);
+			assert.match(ui.askCalls[0]!.message, /is now position 3 \(was 2\)/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('clamps a shift that runs past the end of the list', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['99'] });
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: shas.v02 }]);
+
+			assert.match(ui.allLogs(), /\+99 clamped to \+2/);
+			assert.match(ui.confirmCalls[0]!.options!.detail!, /\(\+99 is too far - the list ends at \+2\)/);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.2', 'v0.4', 'v0.3', 'v0.1'], 'the commit sits at the top');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('offers the farthest safe shift when files changed in between', async () => {
+		const repo = await createTempRepo();
+		try {
+			await repo.commit('base', { 'a.txt': '1\n' });
+			const moved = await repo.commit('move me', { 'a.txt': '2\n' });
+			await repo.commit('other', { 'c.txt': 'x\n' });
+			await repo.commit('later a', { 'a.txt': '4\n' });
+
+			const ui = new FakeUI({ inputs: ['99'] });
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: moved }]);
+
+			assert.equal(ui.chooseCalls.length, 1, ui.transcript);
+			assert.match(ui.chooseCalls[0]!.message, /Can't move [0-9a-f]{7} up 2 positions automatically/);
+			assert.match(ui.chooseCalls[0]!.options.detail!, /changed the same files:/);
+			assert.match(ui.chooseCalls[0]!.options.detail!, / {2}a\.txt/);
+			assert.match(ui.chooseCalls[0]!.options.detail!, /can move up automatically is \+1/);
+			assert.deepEqual(ui.chooseCalls[0]!.options.choices.map((choice) => choice.label), ['+1', 'Cancel']);
+			assert.equal(ui.chooseCalls[0]!.options.choices[0]!.primary, true, 'the safe shift is the default action');
+			assert.match(ui.allLogs(), /files changed in between, moving \+1 instead of \+2/);
+			assert.match(ui.confirmCalls[0]!.message, /1 position up on main\?/);
+
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['later a', 'move me', 'other', 'base'], 'it moved as far as was safe');
+			assert.equal(await repo.read('a.txt'), '4\n', 'the content of the tip did not change');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('reports the conflict and moves nothing when the very next commit conflicts', async () => {
+		const repo = await createTempRepo();
+		try {
+			await repo.commit('base', { 'a.txt': '1\n' });
+			const moved = await repo.commit('move me', { 'a.txt': '2\n' });
+			await repo.commit('touch a', { 'a.txt': '3\n' });
+
+			const ui = new FakeUI({ inputs: ['1'] });
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: moved }]);
+
+			assert.equal(ui.chooseCalls.length, 0, 'there is no safe position to offer');
+			assert.equal(ui.confirmCalls.length, 0, 'and nothing was approved');
+			assert.equal(ui.messages[0]!.kind, 'warn');
+			assert.match(ui.messages[0]!.message, /Can't move [0-9a-f]{7} up - files changed in between/);
+			assert.match(ui.messages[0]!.detail!, /no safe position up/);
+			assert.match(ui.messages[0]!.detail!, / {2}a\.txt/);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['touch a', 'move me', 'base'], 'nothing moved');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('moves nothing when the safe-shift offer is declined', async () => {
+		const repo = await createTempRepo();
+		try {
+			await repo.commit('base', { 'a.txt': '1\n' });
+			const moved = await repo.commit('move me', { 'a.txt': '2\n' });
+			await repo.commit('other', { 'c.txt': 'x\n' });
+			await repo.commit('later a', { 'a.txt': '4\n' });
+			const tipBefore = await repo.branchSha('main');
+
+			const ui = new FakeUI({ inputs: ['99'], choices: ['cancel'] });
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: moved }]);
+
+			assert.equal(ui.chooseCalls.length, 1);
+			assert.equal(ui.confirmCalls.length, 0, 'the flow stops at the offer');
+			assert.equal(await repo.branchSha('main'), tipBefore, 'the branch is untouched');
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('says the commit is already at the top when there is nothing above', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI({ inputs: ['3'] });
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: shas.v04 }]);
+
+			assert.equal(ui.messages[0]!.kind, 'info');
+			assert.match(ui.messages[0]!.message, /already at the top of the list/);
+			assert.equal(ui.confirmCalls.length, 0);
+			assert.equal(await repo.branchSha('main'), shas.v04);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('has nothing to reorder in a one-commit repository', async () => {
+		const repo = await createTempRepo();
+		try {
+			await repo.commit('root', { 'a.txt': 'a\n' });
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: await repo.sha('HEAD') }]);
+
+			assert.equal(ui.inputCalls.length, 0, 'no question when there is nowhere to move');
+			assert.match(ui.allMessages(), /only commit of this repository/);
+		} finally {
+			repo.cleanup();
+		}
+	});
+
+	it('journals the move and Undo puts the old order back', async () => {
+		const { repo, shas } = await createLinearRepo();
+		try {
+			const ui = new FakeUI();
+			await controllerFor(ui, repo).reorderCommit(repo.dir, [{ gecoKind: 'commit', sha: shas.v03 }]);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.2', 'v0.3', 'v0.1']);
+
+			const undoUi = new FakeUI({ picks: [0] });
+			await controllerFor(undoUi, repo).undoLastOperation(repo.dir);
+			assert.match(undoUi.confirmCalls[0]!.message, /^Undo "Moved [0-9a-f]{7,10} down 1/);
+			assert.equal(await repo.branchSha('main'), shas.v04);
+			assert.deepEqual((await repo.log('main')).map((line) => line.subject), ['v0.4', 'v0.3', 'v0.2', 'v0.1']);
 		} finally {
 			repo.cleanup();
 		}
